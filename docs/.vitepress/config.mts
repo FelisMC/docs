@@ -115,13 +115,14 @@ export default withMermaid({
       description: 'Documentation for Felis, a Kubernetes-driven Minecraft server hosting platform.',
       themeConfig: {
         nav: [
+          { text: 'Website', link: 'https://felismc.com/', target: '_self' },
           {
             text: 'Getting started',
             link: '/en/',
             activeMatch: '^/en/(?:$|guide/(?:deployment|servers)$|reference/(?:license|readme-en)$)',
           },
           {
-            text: 'Deployment and operations',
+            text: 'Operations',
             link: '/en/operations/',
             activeMatch: '^/en/(?:operations/|guide/distributed$|reference/architecture$)',
           },
@@ -176,7 +177,7 @@ export default withMermaid({
   },
   head: [
     ['meta', { name: 'theme-color', content: '#ffffff', media: '(prefers-color-scheme: light)' }],
-    ['meta', { name: 'theme-color', content: '#131610', media: '(prefers-color-scheme: dark)' }],
+    ['meta', { name: 'theme-color', content: '#000000', media: '(prefers-color-scheme: dark)' }],
   ],
   vite: {
     optimizeDeps: {
@@ -193,6 +194,7 @@ export default withMermaid({
   themeConfig: {
     logo: { src: '/felis-logo.png', alt: 'Felis' },
     nav: [
+      { text: '官网', link: 'https://felismc.com/', target: '_self' },
       {
         text: '开始使用',
         link: '/',
