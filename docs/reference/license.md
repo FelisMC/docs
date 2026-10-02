@@ -1,0 +1,17 @@
+---
+title: 开源协议
+---
+
+# 开源协议 {#开源协议}
+
+本项目采用 [AGPL-3.0-only](/LICENSE.txt) 许可证。
+
+### 协议注意事项 {#协议注意事项}
+
+1. **衍生作品须采用 AGPL**：分发本项目副本或基于本项目的衍生软件时，须以 AGPL-3.0 开源，并保留原作者的版权声明与许可声明。
+2. **网络服务同样须提供源码**（AGPL 第 13 条）：通过网络向他人提供经修改的 Felis 服务时，即使未分发任何二进制文件，也须向这些用户提供修改后的完整源码。这是 AGPL 与 GPL 唯一的实质区别；Felis 作为通过网络访问的托管平台，几乎所有部署场景都适用此条款。
+3. **免责声明**：本项目按"原样"提供，作者不承担因使用本项目而产生的任何法律责任。
+
+---
+
+原文：[README.md](https://github.com/FelisMC/Felis/blob/main/README.md)、[LICENSE](https://github.com/FelisMC/Felis/blob/main/LICENSE)。
