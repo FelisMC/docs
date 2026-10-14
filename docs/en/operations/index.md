@@ -4,18 +4,19 @@ title: Operations guide
 
 # Felis Operations Guide {#felis-operations-guide}
 
-What a Felis host needs, how big it should be, how to take Felis off it again, and where
-the disaster-recovery procedures live. Fault-finding is in
-[troubleshooting.md](/en/operations/troubleshooting); this document refers to its sections as §N.
+What a Felis host needs, how big it should be, how to take Felis off it again, where the
+disaster-recovery procedures live, and which host operations the panel runs
+([section 9](#_9-running-the-host-from-the-panel-go-tested-sh-tested)). Fault-finding is in
+[Troubleshooting](/en/operations/troubleshooting); this document refers to its sections as §N.
 
-Evidence tags follow troubleshooting.md: **[VM-VERIFIED]** was run on a real host,
+Evidence tags follow the [Troubleshooting](/en/operations/troubleshooting) page: **[VM-VERIFIED]** was run on a real host,
 **[CI]** runs end to end on every push to main (`.github/workflows/e2e.yml`),
 **[GO-TESTED]** / **[SH-TESTED]** is covered by `go test` or the shell tests under
 `deploy/`, **[CODE-ONLY]** is what the code does and has not been run end to end.
 
 ## 1. Supported hosts {#_1-supported-hosts}
 
-`deploy/bootstrap.sh` defaults to a single node. For the opt-in A controller / worker deployment, see [distributed.md](/en/guide/distributed). It needs systemd, root, and one of the
+`deploy/bootstrap.sh` defaults to a single node. For the opt-in A controller / worker deployment, see [Multi-node deployment](/en/guide/distributed). It needs systemd, root, and one of the
 package managers below; everything else (k3s, the JRE, cloudflared, and Docker when an image
 has to be built on the host; see "Where the binary and the images come from" below) it
 installs.
@@ -39,7 +40,7 @@ cloudflared is left as it is, see §4):
 | k3s | v1.36.4+k3s1 | `FELIS_K3S_VERSION` in `bootstrap.sh` |
 | cloudflared | 2026.9.1 | `FELIS_CLOUDFLARED_VERSION`, sha256 per architecture |
 | Temurin JRE (Velocity) | 25, patch build pinned | `FELIS_JRE_VERSION`, sha256 per architecture |
-| Go (nano builds) | 1.26.8 | `GO_PINNED_VERSION`, sha256 per architecture |
+| Go (nano builds) | 1.27.2 | `GO_PINNED_VERSION`, sha256 per architecture |
 | Minecraft / Limbo / Paper / Velocity / LuckPerms | `deploy/game-stack.lock` | §15b |
 | PostgreSQL | 18.6, the official `postgres` image by digest | `POSTGRES_IMAGE` in `bootstrap.sh`, `defaultPostgresImage` in `internal/platform` |
 
@@ -319,8 +320,9 @@ sudo resize2fs /dev/vda3                        # ext4
 df -h /
 ```
 
-`felis backup-now` (troubleshooting.md §10) archives every stopped world; add `-stop` to
-include the running ones.
+`felis backup-now` ([Troubleshooting §10](/en/operations/troubleshooting#_10-world-reaper-false-deletes-and-skipped-backups-spec-§18)) archives every world, the running ones live:
+their players stay on, and saving pauses only while the world is copied. `-stop` stops the
+running servers first instead and leaves them stopped.
 
 ### Moving the data to its own disk [VM-VERIFIED] {#moving-the-data-to-its-own-disk-vm-verified}
 
@@ -414,7 +416,7 @@ and the MinecraftServer CRD are deleted.
 |---|---|---|
 | Final database bundle | taken first (`felis db backup -label manual`); a failure stops the uninstall before anything is removed. `--no-backup` skips it | none |
 | The database (`/var/lib/felis/postgres`) | kept; felis-postgres is stopped cleanly before k3s goes | deleted with `/var/lib/felis` |
-| A host PostgreSQL an earlier release ran the database on | kept as it is: stopped after the move into k3s (below, §4), with its old copy of `felis` | its `felis` database and role are dropped (the server is started for that and stopped again), and `listen_addresses` and `pg_hba.conf` go back to how they were. Checked before anything is removed: a role that still owns another database (the `felis_pgint` the PG contract tests use, CONTRIBUTING.md) or holds grants elsewhere stops the purge up front with the list and the `ALTER DATABASE … OWNER TO postgres` to run |
+| A host PostgreSQL an earlier release ran the database on | kept as it is: stopped after the move into k3s (below, §4), with its old copy of `felis` | its `felis` database and role are dropped (the server is started for that and stopped again), and `listen_addresses` and `pg_hba.conf` go back to how they were. Checked before anything is removed: a role that still owns another database (the `felis_pgint` the PG contract tests use, see [Contributing](/en/reference/contributing)) or holds grants elsewhere stops the purge up front with the list and the `ALTER DATABASE … OWNER TO postgres` to run |
 | `/etc/felis` (secrets, `felis.toml`, `offsite.env`, the mail relay password and uploads bucket keys `felis setup` took, tunnel config) | kept; `bootstrap.done` and the per-run records go | deleted, with the tunnel's credentials file |
 | `/var/lib/felis` (the database, its bundles) | kept | deleted |
 | Worlds, archives, registry, uploads | moved to `/var/lib/felis/retained/k3s-storage-<stamp>/` (with `--keep-k3s`: their volumes switch to `Retain` and stay in place) | deleted |
@@ -505,8 +507,8 @@ store=/var/lib/rancher/k3s/storage
 
 ## 4. Upgrading the pieces around Felis {#_4-upgrading-the-pieces-around-felis}
 
-A rerun of the installer upgrades Felis itself (§15). The components it installs keep
-the version they were installed with unless noted:
+The host updater reuses the installer to reconcile Felis itself and its core components
+(§15). The components it installs keep the version they were installed with unless noted:
 
 | Component | How a rerun treats it | Upgrade |
 |---|---|---|
@@ -517,23 +519,54 @@ the version they were installed with unless noted:
 | PostgreSQL | follows the image the release pins | a minor release comes with a Felis release, and the rerun restarts felis-postgres on it (a few seconds without the API); a major version is a dump and restore (below) |
 | Docker, git, nftables | distribution packages | the package manager |
 
+`felis update` is a read-only check. It reports upstream availability, resolves the
+Felis target, downloads and syntax-checks its matching installer, and prints an explicit
+apply command. The upstream table is advisory: applying uses the target's compatible
+pins, rather than installing each component's newest upstream version independently.
+`--k3s`, `--cloudflared`, `--jre` and `--postgres` narrow the report; applying any core
+selector reconciles the whole platform bundle. `--all` also enables the release-pinned
+k3s and cloudflared upgrades. Minecraft user server images stay pinned.
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh \
-  | sudo FELIS_UPGRADE_DEPS=1 bash
+sudo felis update                       # newest stable release; no installation
+sudo felis update --all                 # also plan pinned host dependency upgrades
+sudo felis update --version v0.2.0       # inspect a named published release
+sudo felis update --dev                 # inspect the latest main commit
+sudo felis update --ref <commit-or-tag> # inspect a specific source tree
 ```
 
-`sudo felis update` reports Felis, Velocity, k3s, cloudflared, the JRE and PostgreSQL
-against their newest releases; `--k3s`, `--cloudflared`, `--jre` and `--postgres` narrow
-it to one. PostgreSQL is read from the felis-postgres container and compared within its
-major, since a minor release arrives with a Felis release, and a major past its end of life
-gets a note naming the current one.
+Review the target, full commit, scope and restart impact, then run the exact `--apply`
+command printed by the check. A source apply uses the full SHA, while a release apply
+also includes `--expect-commit` so a moved tag is refused. `--apply --dev` is supported
+for deliberately resolving main at execution time; the printed command pins the commit
+you inspected instead.
+
+Set the maintenance window in **Maintenance & Backups → Updates** first. Application reads that window
+before backup and again before installation: unset, future or expired windows refuse
+application. `--apply --now` explicitly starts one-off manual maintenance instead;
+an unreadable window is always refused. The daily `--record` timer never applies.
+`--force` reinstalls the same version or permits an intentional Felis downgrade; it
+never bypasses the window, backup or component compatibility guards.
+
+Before installation the running binary takes a database + `/etc/felis` + MinecraftServer
+specification backup; failure stops the update. Worlds are covered separately by server
+backups (§16), not this control-plane snapshot. Application then streams the existing
+installer's progress, reconciles the CLI, API/operator/panel, manifests/RBAC, plugins,
+proxy and system images, and verifies the installed binary's version. Installer rollout
+checks still gate success. A failed installer can leave some components changed: retain
+the pre-update backup and follow troubleshooting §15/§16; schema rollback is not automatic.
+PostgreSQL major changes require dump/restore, and k3s upgrades cannot skip a minor version.
+
+Older host binaries whose `update -h` has no `--apply` need one installer run to acquire
+this updater. Published assets are checksum-verified; older releases without the required
+installer options must be selected through `--ref` for a source build instead.
 
 The installer also sets up `felis-update-check.timer`, which runs `felis update --record`
 once a day around 05:30 (and at boot after a missed run). `--record` stores the result
-in `platform_settings`, and the panel's **Admin → Updates → Component versions** card
+in `platform_settings`, and the panel's **Maintenance & Backups → Updates → Component versions** card
 shows it: each component's installed and newest version, and for the ones with a newer
 release the `sudo felis update --<component>` line that prints how to apply it. Felis
-applies nothing on its own; the installer re-run above is the apply path. The card turns
+applies nothing on its own; the explicit `--apply` command above is the apply path. The card turns
 red when the newest record is older than 26 hours, meaning the timer stopped:
 
 ```sh
@@ -576,7 +609,9 @@ kubectl -n minecraft get minecraftserver \
 ```
 
 The env var only carries the password; mail still needs the relay itself, set in
-`felis setup` → email. A user server picks up its new RCON block at its next start.
+`felis setup` → email or on the panel's **Platform settings → Mail delivery** card, which
+takes precedence ([Troubleshooting §17](/en/operations/troubleshooting#_17-sign-in-refused-429-limits-no-mail-relay-account-code-locks-failed-sign-ins)). A user server picks up its new RCON block at
+its next start.
 
 ### PostgreSQL major versions [CODE-ONLY] {#postgresql-major-versions-code-only}
 
@@ -717,8 +752,15 @@ itself; anything else running on the node can reach it too.
 ## 5. Disaster recovery {#_5-disaster-recovery}
 
 The procedures are in §16: what a database bundle holds, restoring one on the same host,
-rolling back an upgrade, and rebuilding on a new host from the off-site copy. For a
-production install:
+rolling back an upgrade, and rebuilding on a new host from the off-site copy. The rebuild
+runs in one command, `felis restore-host`: it brings back the database, the user images,
+the uploads, the servers and each server's newest world, and resumes where it stopped
+when interrupted. The installer runs it on its own when given `FELIS_RESTORE_FROM_OFFSITE=1`
+with the old install's `FELIS_OFFSITE_*` settings and `FELIS_OFFSITE_KEY`. Moving the
+domain's DNS and the Cloudflare tunnel stay with the operator. The off-site copy, the
+database bundles and the rebuild are also available in the panel, under Maintenance &
+Backups ([section 9](#_9-running-the-host-from-the-panel-go-tested-sh-tested)).
+For a production install:
 
 - **Configure the off-site copy** (`FELIS_OFFSITE_*`, §16 "Keep a copy somewhere
   else"). Without it the world archives sit on the same disk as the worlds, and the
@@ -728,15 +770,23 @@ production install:
   holds only sealed objects.
 - **Keep one database bundle off the host** as well when there is no bucket. It contains
   `secrets.env`, which a rebuild needs to read the rest.
-- **Rehearse the rebuild** once on a spare VM: troubleshooting.md §16 "Rebuild on a new
-  host", every step but 8 (take-over) and 11 (the tunnel), then its checks: sign in with
-  an email code, restore one world and join it. `felis offsite status` and `felis db check` exit
+- **Rehearse the rebuild** once on a spare VM: [Troubleshooting §16](/en/operations/troubleshooting#_16-control-plane-database-backups-and-disaster-recovery) "Rebuild on a new
+  host", with `felis restore-host` without `-take-over` (the installer's
+  `FELIS_RESTORE_FROM_OFFSITE=1` without `FELIS_RESTORE_TAKE_OVER`), or by hand with every
+  step but 8 (take-over) and 11 (the tunnel), then its checks: sign in with an email code,
+  restore one world and join it. `felis offsite status` and `felis db check` exit
   non-zero when the copy or the newest daily bundle is stale; wire them into your monitoring,
   or rely on the watchdog's mail.
 
+In distributed mode, a lost worker takes its servers down with it. The panel can fail the
+lost worker's worlds over to another node, each restored from its newest backup, by hand
+or, once the Owner turns it on, automatically; live copies of the worlds on workers keep
+those backups recent. The controller itself can run with high availability. Both are
+covered in [Multi-node deployment](/en/guide/distributed). [CODE-ONLY]
+
 ### Moving to another host (planned) {#moving-to-another-host-planned}
 
-A planned move is the rebuild of troubleshooting.md §16, with the old host still there to
+A planned move is the rebuild of [Troubleshooting §16](/en/operations/troubleshooting#_16-control-plane-database-backups-and-disaster-recovery), with the old host still there to
 hand over a copy that misses nothing. It needs the off-site bucket: that is how the world
 archives reach the new host (§16 step 7). The platform is down from step 1 until the new
 host serves.
@@ -755,13 +805,21 @@ host serves.
    ```
 
    The order matters. The new host fetches the archives its restored database lists, so
-   the bundle comes after the last archive. The operator goes after `backup-now`, which
-   needs it to stop the servers. The quiet marker keeps the watchdog from mailing the
-   owners about the stopped proxy and operator for the next 4 hours.
-2. **On the new host**, follow troubleshooting.md §16 "Rebuild on a new host" from step 1;
-   `fetch-db latest` picks the bundle the old host just sent. Step 8 (`felis offsite
-   take-over`) makes the new host the one that writes the bucket, and from then on the
-   old host copies nothing more. Steps 10 and 11 move the names and the tunnel.
+   the bundle comes after the last archive. `backup-now` runs with `-stop` so that no
+   world changes after its archive; a live backup would leave the game running and
+   saving. The operator goes after `backup-now`, which needs it to stop the servers. The
+   quiet marker keeps the watchdog from mailing the owners about the stopped proxy and
+   operator for the next 4 hours.
+2. **On the new host**, rebuild from the bucket: run the installer with
+   `FELIS_RESTORE_FROM_OFFSITE=1` and `FELIS_RESTORE_TAKE_OVER=1` together with the old
+   install's `FELIS_OFFSITE_*` settings and `FELIS_OFFSITE_KEY` ([Troubleshooting §16](/en/operations/troubleshooting#_16-control-plane-database-backups-and-disaster-recovery),
+   "In one command"), or follow §16 "Rebuild on a new host" by hand from step 1. Either
+   way the newest bundle is the one the old host just sent. The take-over (`-take-over`,
+   or step 8 by hand) makes the new host the one that writes the bucket, and from then on
+   the old host copies nothing more. The one-command path leaves the old host's
+   `/etc/felis` behind unless it is put in place first (§16 step 2), so the new host keeps
+   its own root domain until `felis domain set` moves it. Steps 10 and 11 move the names
+   and the tunnel.
 3. **Check the new host** before announcing it: sign in with an email code, restore one
    world and join it, and see `sudo felis offsite status` show a recent `last success` and
    no stand-by notice.
@@ -777,7 +835,7 @@ host serves.
 
    Then uninstall it (§3) or wipe it.
 
-Each step is covered where it is documented (backup-now in troubleshooting.md §10, the
+Each step is covered where it is documented (backup-now in [Troubleshooting §10](/en/operations/troubleshooting#_10-world-reaper-false-deletes-and-skipped-backups-spec-§18), the
 rebuild in §16); the sequence as a whole has not been rehearsed as one move.
 
 ## 6. Changing the root domain [VM-VERIFIED] [GO-TESTED] [SH-TESTED] {#_6-changing-the-root-domain-vm-verified-go-tested-sh-tested}
@@ -789,7 +847,9 @@ the `felis-api-tls` Secret, the proxy's `felis-link.properties`, the login gate'
 and DNS. `felis domain set` moves every one of them that lives on the host, in that
 order, then restarts what reads them; `felis domain check` reports each surface on its
 own line. The installer keeps the installed domain: a rerun with a different
-`FELIS_ROOT_DOMAIN` stops and names this command.
+`FELIS_ROOT_DOMAIN` stops and names this command. The panel runs the same check and move
+under Platform settings → Access and security
+([section 9](#_9-running-the-host-from-the-panel-go-tested-sh-tested)).
 
 ```sh
 sudo felis domain set new.example.net        # the plan: every surface, what it moves to, what it costs
@@ -822,8 +882,8 @@ What it costs, which the plan prints before `-yes`:
 - **Sign-in.** Session cookies belong to the old hostnames, so everyone signs in again.
   Passkeys are bound to the panel hostname: when it changes, the plan counts the passkeys
   that stop working, and their users sign in with an email code and register a new one.
-  Without an `[smtp]` relay no code is delivered; an Owner locked out that way recovers
-  with `sudo felis breakGlass`.
+  Without a mail relay (`[smtp]`, or one saved in the panel) no code is delivered; an
+  Owner locked out that way recovers with `sudo felis breakGlass`.
 - **Cloudflare.** The tunnel's ingress and the Access application still carry the old
   names. Re-run the Cloudflare step of `sudo felis setup` after the move; `check` lists
   the tunnel's hostnames against the new ones.
@@ -848,6 +908,163 @@ on every run, so a host upgraded from one can show that line once with the file 
 on the names; `sudo systemctl restart felis-velocity` clears it. The installer now leaves
 the file alone when its content is the same.
 
----
+## 7. Authentication sources {#_7-authentication-sources}
 
-Source: [docs/operations.md](https://github.com/FelisMC/Felis/blob/main/docs/operations.md).
+On the operator console, the Owner's **Platform → Authentication sources** page
+(`/admin/auth-sources`) manages third-party Yggdrasil providers. It imports the
+installation's `[[auth_source]]` list on first use. Save stores the ordered list
+in `platform_settings.auth_sources`; that override then takes precedence over TOML
+and is read by every full-API replica for the next game login and role lookup.
+No restart is required, and existing players stay connected. Nano continues to
+use its TOML list. A database read failure refuses new authentication rather than
+falling back to an obsolete or disabled provider.
+
+Mojang remains enabled and first, retaining official UUIDs. Every third-party
+provider uses a permanent tag as its UUID namespace; saved or imported tags cannot
+be renamed or removed. Disable a provider to stop accepting its logins, or enable
+it again to restore the same identities. Changing a provider's endpoint changes
+who verifies identities in that namespace; keep it pointed at the same trusted
+service. Prefixes are 1–4 letters/digits and must be unique regardless of case.
+
+Set the full `hasJoined` URL. Standard paths infer the profile-query API root;
+nonstandard paths need an explicit API root for role-name/UUID lookup. HTTPS is
+required, except for localhost or literal private IPs; query strings and fragments
+are rejected. Launchers must authenticate with the same provider. **Test connection**
+probes an unused session and expects HTTP 204; it does not save, verify launcher
+configuration, or test the profile-query API.
+
+Saving requires Owner access on the operator host and recent reauthentication for
+a local session. A revision conflict preserves the draft; discard it and reload
+before editing the newer configuration.
+
+## 8. Player entry policy {#_8-player-entry-policy}
+
+Owner → Platform settings → Player entry policy configures the proxy's destination
+independently from game identity authentication and panel account association.
+
+| Mode | Destination after authentication |
+| --- | --- |
+| Lobby | Formal lobby, where the player selects a server |
+| Direct to main server | Selected main server, regardless of connection hostname |
+| Route by hostname | Server matched by hostname; optional default for unmatched hostnames |
+
+For a single-server deployment, select **Direct to main server**, choose the main
+server, and disable **Require panel account linking**. A running main server then
+accepts authenticated players without entering the login space or lobby. Game
+identity authentication and the global blacklist remain enforced; this setting does
+not enable offline-mode or change authentication sources. Players can associate a
+panel account separately through `/link`.
+
+Choose how to handle an offline destination:
+
+- **Start automatically and wait** uses the existing wake permission, maintenance,
+  admission limit and cooldown checks. Select a running Limbo login space or formal
+  lobby for the wait. An unlinked player requires an autostart policy that permits
+  their verified identity; selecting a main server does not grant startup rights.
+- **Enter a fallback server** requires a separate running server. The proxy does not
+  start the fallback implicitly; it rejects the connection if both destinations
+  are unavailable.
+- **Reject with an explanation** requires no waiting space.
+
+When panel account linking is required, Limbo retains its web sign-in, blacklist
+check, timeout and release controls. The existing web sign-in flow requires the
+login space and formal lobby, and uses the lobby for startup waiting. Automatic
+Limbo waiting does not issue a link code or start a web sign-in timer; the proxy's
+queue controls startup progress and disconnects Limbo waits after failure or timeout.
+A failed transfer includes the backend refusal when available.
+
+Saving requires fresh Owner reauthentication and the current revision. The proxy
+reads changes within 15 seconds and snapshots the policy for each new connection;
+current players keep their connection policy. Existing deployments retain hostname
+routing, required web sign-in and lobby waiting until a policy is saved. Update the
+API and game plugins together before using this setting.
+
+Unused login/lobby spaces can be stopped from **Login & lobby**. Saving a policy
+does not stop them automatically or disconnect existing players. Re-running setup
+preserves the desired state of existing system servers.
+
+## 9. Running the host from the panel [GO-TESTED] [SH-TESTED] {#_9-running-the-host-from-the-panel-go-tested-sh-tested}
+
+The host operations of day-to-day running are available to the Owner in the panel, on
+**Maintenance & Backups** (`/admin/updates`) and **Platform settings** (`/admin/platform`).
+The panel hands each operation to `felis-node-control.service`, the root service the
+installer sets up for node management (see [Multi-node deployment](/en/guide/distributed)), and that
+service runs the same `felis` command or installer function as the command line. The
+API itself stays unprivileged.
+
+A host task runs under these rules:
+
+- One task runs at a time. A second request is refused with `a host task is already
+  running` until the first finishes.
+- The service accepts a fixed list of operations, each with validated parameters. It
+  offers no general command execution.
+- An operation that interrupts players or the panel asks for confirmation. Restoring a
+  database bundle asks for the bundle's name; rebuilding from the off-site copy asks for
+  a typed word.
+- Every task and every download requires a fresh sign-in proof (passkey or email code)
+  and is recorded in the audit log under `platform.host.*`. Node operations keep
+  `platform.node.*`.
+- Keys and tokens entered in the panel (bucket keys, the off-site encryption key, the
+  Cloudflare API token) are passed to the executor only. The task record, the task log
+  and the API's responses never contain them.
+- The stage, log and result of each task remain readable in the panel. Records are kept
+  in `/var/lib/felis/node-control`, as for node operations. Each operation has its own
+  time limit, from one minute (starting the off-site copy) to twelve hours (the rebuild).
+- While a task that takes the control plane away is running (a database restore, the
+  rebuild, a credential rotation, a domain move), the API refuses to start, maintain or
+  migrate servers, as it does during node operations.
+
+| Operation | Panel | Command line |
+| --- | --- | --- |
+| Host status: disks, memory, services and timers, the proxy | Maintenance & Backups → Status | `felis status` |
+| Open watchdog alerts; holding their mail during planned work for 1, 4 or 24 hours | Maintenance & Backups → Status | `/run/felis/watchdog-quiet-until` |
+| Database backup now | Maintenance & Backups → Backups | `felis db backup` |
+| Verifying and restoring a database bundle | Maintenance & Backups → Backups | `felis db verify`, `felis db restore`, `felis migrate up` |
+| Daily database backup time and retention | Maintenance & Backups → Backups | `FELIS_DB_BACKUP_TIME`, `FELIS_DB_BACKUP_KEEP`, installer re-run |
+| World backup now, live or with the servers stopped | Maintenance & Backups → Backups | `felis backup-now` |
+| Configuring, changing or turning off the off-site copy | Maintenance & Backups → Off-site copy | `FELIS_OFFSITE_*`, installer re-run |
+| Copying now; listing the bucket; checking the key; taking over the bucket | Maintenance & Backups → Off-site copy | `systemctl start felis-offsite.service`, `felis offsite list`, `felis offsite check-key`, `felis offsite take-over` |
+| Showing the off-site encryption key | Maintenance & Backups → Off-site copy | `/etc/felis/offsite.env` |
+| Rebuilding this host from the off-site copy | Maintenance & Backups → Off-site copy | `felis restore-host` |
+| Health check | Maintenance & Backups → Diagnostics | `felis doctor` |
+| Support bundle, downloaded through the browser | Maintenance & Backups → Diagnostics | `felis support-bundle` |
+| Audit log export | Maintenance & Backups → Backups | `felis db audit-export` |
+| Access method: direct, own reverse proxy, Cloudflare Tunnel | Platform settings → Access and security | the access step of `felis setup` |
+| Checking and moving the root domain | Platform settings → Access and security | `felis domain check`, `felis domain set` |
+| Upload storage: local disk or an S3-compatible bucket | Platform settings → Access and security | the storage step of `felis setup` |
+| Credential rotation | Platform settings → Access and security | `felis rotate-token` |
+| Game proxy heap ceiling | Platform settings → Access and security | `FELIS_VELOCITY_XMX`, installer re-run |
+| System server completion | Platform settings → Access and security | `felis converge` |
+| Forwarding mode of a server | the server's console page → Forwarding mode | `felis.lolicon.best/forwarding` label |
+| Node operations, including the floating address for controller high availability | Platform settings → Distributed | `felis node …`, `FELIS_HA_VIP*`, installer re-run |
+
+Settings changed in the panel that the installer owns (the backup schedule and
+retention, the proxy heap) are kept in `/etc/felis/host-settings.env`. A later installer
+run or `felis update` reads them as its defaults, so the Owner's choice survives
+upgrades; a variable set for that run still takes precedence. The panel applies such a
+change by running the installer in reconfigure mode (`FELIS_INSTALL_MODE=reconfigure`
+with `FELIS_RECONFIGURE` naming the parts), which rewrites only those units.
+
+The dashboard shows the Owner a status line for the host (open alerts, the newest
+database backup, the off-site copy, the fullest disk), linking to the matching tab.
+
+The following remain on the command line:
+
+- **The installation and its re-runs**, including the first install on a new host and
+  the rebuild of a lost host with `FELIS_RESTORE_FROM_OFFSITE=1`. The panel exists only
+  after the installation.
+- **`felis setup`**, which creates the first Owner. Until then nobody can sign in.
+- **`felis breakGlass`**, which restores access when no Owner can sign in, and therefore
+  cannot depend on the panel.
+- **Version changes**: `felis update --apply` and installer runs for a new release. The
+  **Updates** tab reports available versions and shows the command; applying a version
+  replaces the binaries the panel and the host service run from.
+- **Commands run by units and by the installer**, such as `felis api`, `felis operator`,
+  `felis watchdog`, `felis ha leader` and `felis ha migrate-storage`.
+- **The host service itself.** When `felis-node-control` is down, the panel cannot reach
+  the host: use `systemctl status felis-node-control`, `journalctl -u felis-node-control`
+  and `systemctl restart felis-node-control` on the host.
+
+The executor's commands, the task rules and the API routes are covered by `go test`, the
+reconfigure mode by the shell tests, and the panel by its component and browser tests
+against a simulated host. Running each task against a real host is [CODE-ONLY].

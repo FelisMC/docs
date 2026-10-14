@@ -4,7 +4,7 @@ title: 运维手册
 
 # 运维手册 {#felis-operations-guide}
 
-本文说明主机要求、资源规划、卸载及灾难恢复入口。故障诊断见[故障排查](/operations/troubleshooting)，下文以 §N 引用其中章节。
+本文说明主机要求、资源规划、卸载、灾难恢复入口，以及可在面板中执行的主机操作（[第 9 节](#_9-running-the-host-from-the-panel-go-tested-sh-tested)）。故障诊断见[故障排查](/operations/troubleshooting)，下文以 §N 引用其中章节。
 
 验证标记与故障排查一致：**[VM-VERIFIED]** 表示在真实主机执行过；**[CI]** 表示每次推送 main 都运行端到端验证（`.github/workflows/e2e.yml`）；**[GO-TESTED]** / **[SH-TESTED]** 表示由 `go test` 或 `deploy/` 下的 shell 测试覆盖；**[CODE-ONLY]** 表示仅描述代码行为，尚未完成端到端验证。
 
@@ -28,7 +28,7 @@ title: 运维手册
 | k3s | v1.36.4+k3s1 | `bootstrap.sh` 的 `FELIS_K3S_VERSION` |
 | cloudflared | 2026.9.1 | `FELIS_CLOUDFLARED_VERSION`，各架构独立 sha256 |
 | Temurin JRE（Velocity） | 25，固定补丁构建 | `FELIS_JRE_VERSION`，各架构独立 sha256 |
-| Go（nano 构建） | 1.26.8 | `GO_PINNED_VERSION`，各架构独立 sha256 |
+| Go（nano 构建） | 1.27.2 | `GO_PINNED_VERSION`，各架构独立 sha256 |
 | Minecraft / Limbo / Paper / Velocity / LuckPerms | `deploy/game-stack.lock` | §15b |
 | PostgreSQL | 18.6，官方 `postgres` 镜像按摘要固定 | `bootstrap.sh` 的 `POSTGRES_IMAGE`、`internal/platform` 的 `defaultPostgresImage` |
 
@@ -184,7 +184,7 @@ sudo resize2fs /dev/vda3                        # ext4
 df -h /
 ```
 
-`felis backup-now`（故障排查 §10）归档所有已停止世界；加 `-stop` 可包含运行中的世界。
+`felis backup-now`（故障排查 §10）归档所有世界，运行中的世界在线归档：玩家保持在线，仅在复制世界期间暂停保存。`-stop` 则先停止运行中的服务器再归档，完成后服务器保持停止。
 
 ### 将数据迁移到独立磁盘 [VM-VERIFIED] {#moving-the-data-to-its-own-disk-vm-verified}
 
@@ -326,7 +326,7 @@ store=/var/lib/rancher/k3s/storage
 
 ## 4. 升级 Felis 的配套组件 {#_4-upgrading-the-pieces-around-felis}
 
-重跑安装器升级 Felis 本身（§15）。其他组件默认保留首次安装版本，例外如下：
+主机更新器复用安装器，收敛 Felis 本身及其核心组件（§15）。其他组件默认保留首次安装版本，例外如下：
 
 | 组件 | 重跑行为 | 升级方式 |
 | --- | --- | --- |
@@ -337,14 +337,25 @@ store=/var/lib/rancher/k3s/storage
 | PostgreSQL | 跟随发布版固定镜像 | minor 随 Felis 发布版更新，重跑会重启 felis-postgres，API 暂停数秒；major 需导出恢复，见下文 |
 | Docker、git、nftables | 发行版软件包 | 包管理器 |
 
+`felis update` 是只读检查：报告上游可用版本，解析 Felis 目标版本，下载与之匹配的安装器并检查语法，最后打印明确的应用命令。上游版本表仅供参考；应用时统一采用目标版本中相互兼容的固定版本，不会逐个安装各组件的上游最新版。`--k3s`、`--cloudflared`、`--jre`、`--postgres` 可缩小报告范围；应用任一核心选择项都会收敛整个平台组件包。`--all` 还会启用发布版固定的 k3s 与 cloudflared 升级。Minecraft 用户服务器镜像保持固定版本。
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh \
-  | sudo FELIS_UPGRADE_DEPS=1 bash
+sudo felis update                       # newest stable release; no installation
+sudo felis update --all                 # also plan pinned host dependency upgrades
+sudo felis update --version v0.2.0       # inspect a named published release
+sudo felis update --dev                 # inspect the latest main commit
+sudo felis update --ref <commit-or-tag> # inspect a specific source tree
 ```
 
-`sudo felis update` 比较 Felis、Velocity、k3s、cloudflared、JRE、PostgreSQL 的已安装与最新版本；`--k3s`、`--cloudflared`、`--jre`、`--postgres` 可只查看一项。PostgreSQL 从 felis-postgres 容器读取，仅比较同 major 的 minor；minor 更新随 Felis 发布，major 过期时提示当前支持版本。
+确认目标版本、完整提交、影响范围和重启影响后，原样执行检查打印的 `--apply` 命令。源码应用使用完整 SHA；发布版应用还附带 `--expect-commit`，标签被移动时拒绝执行。`--apply --dev` 用于有意在执行时解析 main 的最新提交；检查打印的命令则固定为检查时的提交。
 
-安装器创建 `felis-update-check.timer`，每天约 05:30 执行 `felis update --record`，错过时在开机补执行。结果写入 `platform_settings`，面板「管理 → 更新 → 组件版本」显示已安装和最新版本；可更新时给出 `sudo felis update --<component>`，该命令打印应用方法。Felis 不自动应用，实际更新通过重跑安装器完成。记录超过 26 小时未更新时卡片变红，说明定时器已停止：
+应先在「维护与备份 → 版本更新」设置维护窗口。应用过程在备份前和安装前各读取一次窗口；窗口未设置、尚未开始或已过期时拒绝应用。`--apply --now` 改为显式启动一次性手动维护；窗口无法读取时始终拒绝。每日 `--record` 定时器从不应用更新。`--force` 可重装同一版本或允许有意降级 Felis，但不会绕过维护窗口、备份和组件兼容性检查。
+
+安装前，当前运行的二进制会备份数据库、`/etc/felis` 和 MinecraftServer spec，备份失败则停止更新。世界由服务器备份单独保护（§16），不在此控制平面快照内。随后应用过程实时输出现有安装器的进度，收敛 CLI、API/operator/面板、清单/RBAC、插件、代理和系统镜像，并校验已安装二进制的版本。安装器的部署就绪检查仍决定更新是否成功。安装器失败时，部分组件可能已被修改：应保留更新前的备份，按故障排查 §15/§16 处理；数据库结构不会自动回滚。PostgreSQL 大版本变更需导出恢复，k3s 升级不能跳过 minor 版本。
+
+旧版主机二进制的 `update -h` 若没有 `--apply`，需先运行一次安装器以获得此更新器。已发布的附件均经过校验和验证；缺少所需安装器选项的旧发布版，须改用 `--ref` 选择并从源码构建。
+
+安装器创建 `felis-update-check.timer`，每天约 05:30 执行 `felis update --record`，错过时在开机补执行。结果写入 `platform_settings`，面板「维护与备份 → 版本更新 → 组件版本」显示已安装和最新版本；可更新时给出 `sudo felis update --<component>`，该命令打印应用方法。Felis 不自动应用，实际更新通过上述显式 `--apply` 命令完成。记录超过 26 小时未更新时卡片变红，说明定时器已停止：
 
 ```sh
 systemctl list-timers felis-update-check.timer
@@ -379,7 +390,7 @@ kubectl -n minecraft get minecraftserver \
   -o custom-columns=NAME:.metadata.name,RCON:.spec.rcon.enabled,IDLE:.spec.idle.autoStopEnabled
 ```
 
-环境变量仅携带密码，仍需在 `felis setup` 的邮件设置中配置中继。用户服务器的新 RCON 配置在下次启动生效。
+环境变量仅携带密码，仍需配置中继：可在 `felis setup` 的邮件设置中配置，也可在面板「平台设置」的「邮件服务」卡片中配置，后者优先（故障排查 §17）。用户服务器的新 RCON 配置在下次启动生效。
 
 ### PostgreSQL 大版本升级 [CODE-ONLY] {#postgresql-major-versions-code-only}
 
@@ -472,12 +483,14 @@ journalctl -u felis-velocity | grep 'legacy forwarding list'
 
 ## 5. 灾难恢复 {#_5-disaster-recovery}
 
-数据库备份包内容、原主机恢复、升级回退、从异地副本重建新主机均见 §16。部署时应：
+数据库备份包内容、原主机恢复、升级回退、从异地副本重建新主机均见 §16。重建可用一条命令 `felis restore-host` 完成：恢复数据库、用户镜像、上传文件、服务器及各服务器的最新世界，中断后从停止处继续。向安装器提供 `FELIS_RESTORE_FROM_OFFSITE=1`、原安装的 `FELIS_OFFSITE_*` 设置及 `FELIS_OFFSITE_KEY` 时，安装器会自动执行该命令。域名 DNS 与 Cloudflare 隧道的迁移仍由管理员完成。异地副本、数据库备份包和重建也可在面板「维护与备份」中操作（[第 9 节](#_9-running-the-host-from-the-panel-go-tested-sh-tested)）。部署时应：
 
 - **配置异地副本**：`FELIS_OFFSITE_*`，见 §16「保存异地副本」。否则世界与归档、数据库与备份包都在同一磁盘，磁盘丢失即全部丢失。未配置时安装结束会提示 `NO OFF-SITE COPY`。
 - **将异地加密密钥保存在主机之外**，例如密码管理器；存储桶仅持有加密对象。
 - 没有存储桶时，也应在主机之外保存一份数据库备份包，内含重建所需的 `secrets.env`。
-- 在备用虚拟机**演练重建**：执行 §16 新主机重建步骤，跳过第 8 步接管和第 11 步隧道；随后用邮件验证码登录、恢复一个世界并加入。`felis offsite status`、`felis db check` 在副本或最新每日备份过期时非零退出，可接入监控，也可依赖看门狗邮件。
+- 在备用虚拟机**演练重建**：按故障排查 §16「在新主机重建」，运行不带 `-take-over` 的 `felis restore-host`（对应安装器的 `FELIS_RESTORE_FROM_OFFSITE=1`，且不设 `FELIS_RESTORE_TAKE_OVER`），或手动执行各步骤并跳过第 8 步接管和第 11 步隧道；随后用邮件验证码登录、恢复一个世界并加入。`felis offsite status`、`felis db check` 在副本或最新每日备份过期时非零退出，可接入监控，也可依赖看门狗邮件。
+
+分布式模式下，工作节点丢失时，其上的服务器随之停止。面板可将丢失节点上的世界故障切换到其他节点，每个世界从各自的最新备份恢复；切换可手动执行，所有者启用后也可自动执行。工作节点上世界的不停服副本使这些备份保持较新。主控本身也可运行高可用。两者均见[多机部署](/guide/distributed)。[CODE-ONLY]
 
 ### 计划迁移到另一台主机 {#moving-to-another-host-planned}
 
@@ -496,9 +509,9 @@ journalctl -u felis-velocity | grep 'legacy forwarding list'
    sudo felis offsite status                                            # again until nothing waits
    ```
 
-   顺序不能颠倒：新主机按恢复数据库的索引获取归档，因此数据库备份必须晚于最终世界归档。`backup-now` 需要 operator 停服，所以之后才能停止 operator。静默标记使看门狗在四小时内不因代理/operator 停止发邮件。
+   顺序不能颠倒：新主机按恢复数据库的索引获取归档，因此数据库备份必须晚于最终世界归档。`backup-now` 使用 `-stop`，确保归档后世界不再变化；在线备份会让游戏继续运行并保存。`backup-now` 需要 operator 停服，所以之后才能停止 operator。静默标记使看门狗在四小时内不因代理/operator 停止发邮件。
 
-2. **新主机**从 §16「在新主机重建」第 1 步开始。`fetch-db latest` 取得旧主机刚发送的备份包；第 8 步 `felis offsite take-over` 将新主机设为桶写入者，旧主机此后不再复制。第 10、11 步迁移域名和隧道。
+2. **新主机**从存储桶重建：运行安装器，同时提供 `FELIS_RESTORE_FROM_OFFSITE=1`、`FELIS_RESTORE_TAKE_OVER=1`、原安装的 `FELIS_OFFSITE_*` 设置及 `FELIS_OFFSITE_KEY`（故障排查 §16「一条命令完成」），或从 §16「在新主机重建」第 1 步开始手动执行。两种方式取得的最新备份包都是旧主机刚发送的那份。接管（`-take-over`，或手动执行第 8 步）将新主机设为桶写入者，旧主机此后不再复制。一条命令的方式不会带入旧主机的 `/etc/felis`，除非事先放置到位（§16 第 2 步），因此新主机保留自身的根域名，直到用 `felis domain set` 迁移。第 10、11 步迁移域名和隧道。
 3. **检查新主机**：用邮件验证码登录、恢复世界并进服，确认 `sudo felis offsite status` 的 `last success` 较新且没有待机提示，再宣布迁移完成。
 4. **退役旧主机**：它保存桶之外各世界的最终副本，先连同磁盘关机保留数日，并禁用服务，避免开机自动启动：
 
@@ -514,7 +527,7 @@ journalctl -u felis-velocity | grep 'legacy forwarding list'
 
 ## 6. 更换根域名 [VM-VERIFIED] [GO-TESTED] [SH-TESTED] {#_6-changing-the-root-domain-vm-verified-go-tested-sh-tested}
 
-根域名不仅写入安装器配置，还涉及面板证书 `/etc/felis/panel-tls.crt`、两个命名空间的 `felis-config` Secret、`felis-api-tls` Secret、代理 `felis-link.properties`、登录 MinecraftServer 的 `FELIS_ROOT_DOMAIN` / `FELIS_PANEL_HOSTNAME`、Cloudflare 隧道和 DNS。`felis domain set` 按此顺序更新主机内可处理的各处，再重启读取它们的服务；`felis domain check` 逐项报告。安装器保留已安装域名，带不同 `FELIS_ROOT_DOMAIN` 重跑时会停止并提示此命令。
+根域名不仅写入安装器配置，还涉及面板证书 `/etc/felis/panel-tls.crt`、两个命名空间的 `felis-config` Secret、`felis-api-tls` Secret、代理 `felis-link.properties`、登录 MinecraftServer 的 `FELIS_ROOT_DOMAIN` / `FELIS_PANEL_HOSTNAME`、Cloudflare 隧道和 DNS。`felis domain set` 按此顺序更新主机内可处理的各处，再重启读取它们的服务；`felis domain check` 逐项报告。安装器保留已安装域名，带不同 `FELIS_ROOT_DOMAIN` 重跑时会停止并提示此命令。面板「平台设置 → 访问与安全」提供相同的检查与迁移（[第 9 节](#_9-running-the-host-from-the-panel-go-tested-sh-tested)）。
 
 ```sh
 sudo felis domain set new.example.net        # the plan: every surface, what it moves to, what it costs
@@ -532,7 +545,7 @@ sudo felis domain check                      # one line per surface; exits 1 whi
 
 - **DNS**：`<root>`、`console.<root>`、`op.console.<root>`、`*.<root>` 必须指向主机。通配符不覆盖三级域名 `op.console.<root>`，须单独建记录。`check` 会解析各域名并警告未生效项。
 - **玩家**：服务器地址改为 `<name>.<新根域名>`，旧地址不再路由；代理重启断开全部在线玩家。迁移后的首次安装器重跑还会重启一次代理，因为其文件指纹早于迁移。
-- **登录**：Cookie 属于旧主机名，所有人须重新登录。Passkey 绑定面板域名；计划显示失效数量，用户需用邮件验证码登录并注册新 Passkey。无 `[smtp]` 中继时无法收码，被锁在外的所有者可用 `sudo felis breakGlass` 恢复。
+- **登录**：Cookie 属于旧主机名，所有人须重新登录。Passkey 绑定面板域名；计划显示失效数量，用户需用邮件验证码登录并注册新 Passkey。没有邮件中继（`[smtp]` 或面板中保存的中继）时无法收码，被锁在外的所有者可用 `sudo felis breakGlass` 恢复。
 - **Cloudflare**：隧道 ingress 和 Access 应用仍使用旧域名，迁移后重跑 `sudo felis setup` 的 Cloudflare 步骤。`check` 会对比隧道与新域名。
 - **远程代理**：另一主机上的 `felis-link.properties` 不在本机处理范围，`set` 会打印需更新的三个键。
 
@@ -542,6 +555,89 @@ sudo felis domain check                      # one line per surface; exits 1 whi
 
 若代理启动时间早于 `felis-link.properties` 最近修改时间，`check` 会报告落后。旧安装器每次重写该文件，因此从旧版升级后，文件域名已正确时也可能报告一次；`sudo systemctl restart felis-velocity` 可清除。现在内容相同时安装器不再重写文件。
 
----
+## 7. 认证源 {#_7-authentication-sources}
 
-来源：[docs/operations.md](https://github.com/FelisMC/Felis/blob/main/docs/operations.md)。
+所有者在管理控制台的「平台 → 认证源」页面（`/admin/auth-sources`）管理第三方 Yggdrasil 认证服务。首次使用时，该页面导入安装配置中的 `[[auth_source]]` 列表。保存后，有序列表写入 `platform_settings.auth_sources`；此覆盖配置随即优先于 TOML，所有完整 API 副本在下一次游戏登录和角色查询时读取它。无须重启，在线玩家保持连接。Nano 继续使用其 TOML 列表。读取数据库失败时拒绝新的认证，不会回退到过时或已停用的认证源。
+
+Mojang 始终启用并排在首位，保留正版 UUID。每个第三方认证源以永久标识作为其 UUID 命名空间；已保存或导入的标识不能改名或移除。停用认证源即停止接受其登录，重新启用可恢复相同的身份。修改认证源的接口地址会改变该命名空间由谁验证身份，因此应始终指向同一可信服务。前缀为 1–4 位字母或数字，忽略大小写后须唯一。
+
+须填写完整的 `hasJoined` 地址。标准路径可自动推断角色查询 API 根地址；非标准路径须显式填写 API 根地址，才能按角色名或 UUID 查询。必须使用 HTTPS，本机地址或字面私有 IP 除外；带查询参数或片段的地址会被拒绝。启动器须使用同一认证服务进行认证。「测试连接」用一个未使用的会话探测接口，期望返回 HTTP 204；该操作不保存配置，也不验证启动器配置或测试角色查询 API。
+
+保存须通过管理控制台域名以所有者身份访问；本地会话还须近期重新验证身份。发生修订冲突时保留草稿；须放弃草稿并重新读取，再编辑较新的配置。
+
+## 8. 玩家进入策略 {#_8-player-entry-policy}
+
+所有者在「平台设置 → 玩家进入」配置玩家进入策略，即代理将玩家送往何处。该策略独立于游戏身份认证和面板账号关联。
+
+| 模式 | 认证后的目标 |
+| --- | --- |
+| 正式大厅 | 正式大厅，由玩家选择服务器 |
+| 直达主服 | 所选主服务器，与连接域名无关 |
+| 按域名进入 | 按域名匹配的服务器；可为未匹配的域名设置默认目标 |
+
+单服务器部署可选择「直达主服」，指定主服务器，并关闭「要求关联面板账号」。此后运行中的主服务器直接接收已认证的玩家，玩家无须经过登录空间或大厅。游戏身份认证和全局黑名单仍然生效；此设置不会启用离线模式，也不会改变认证源。玩家可另行通过 `/link` 关联面板账号。
+
+目标未运行时，可选择以下处理方式：
+
+- **自动启动并等待**：沿用现有的唤醒权限、维护状态、准入上限和冷却检查。须选择一个运行中的 Limbo 登录空间或正式大厅作为等待空间。未关联的玩家需要自动启动策略允许其已验证的身份；选定主服务器本身不授予启动权限。
+- **进入备用服务器**：需要另一台运行中的服务器。代理不会自动启动备用服务器；两个目标都不可用时拒绝连接。
+- **拒绝连接并说明原因**：无需等待空间。
+
+要求关联面板账号时，Limbo 保留网页登录、黑名单检查、超时和放行控制。现有网页登录流程需要登录空间和正式大厅，并以大厅作为启动等待空间。Limbo 中的自动启动等待不发放关联码，也不启动网页登录计时；启动进度由代理队列控制，启动失败或超时后断开 Limbo 中的等待连接。传送失败时，若后端给出拒绝原因，会一并显示。
+
+保存须由所有者重新验证身份，并基于当前修订。代理在 15 秒内读取更改，并为每个新连接固定当时的策略；在线玩家沿用其连接时的策略。已有部署在首次保存策略前，保持按域名路由、要求网页登录和大厅等待。使用此设置前，应同时更新 API 和游戏插件。
+
+未使用的登录空间或大厅可在「登录与大厅」中停止。保存策略不会自动停止它们，也不会断开在线玩家。重新运行 setup 会保留现有系统服务器的期望状态。
+
+## 9. 在面板中运维主机 [GO-TESTED] [SH-TESTED] {#_9-running-the-host-from-the-panel-go-tested-sh-tested}
+
+日常运行所需的主机操作，所有者可在面板的「维护与备份」（`/admin/updates`）和「平台设置」（`/admin/platform`）中执行。面板将每项操作交给 `felis-node-control.service`，即安装器为节点管理设置的 root 服务（见[多机部署](/guide/distributed)），由该服务执行与命令行相同的 `felis` 命令或安装器函数。API 本身保持无特权运行。
+
+主机任务遵循以下规则：
+
+- 同一时刻只运行一项任务。前一项完成前，再次请求会以 `a host task is already running` 被拒绝。
+- 服务只接受固定的操作清单，每项操作的参数都经过校验，不提供通用命令执行。
+- 会中断玩家或面板的操作须先确认。恢复数据库备份包须输入备份包名称；从异地副本重建须输入指定的确认词。
+- 每项任务和每次下载都需要新的登录验证（Passkey 或邮件验证码），并以 `platform.host.*` 记入审计日志。节点操作仍记为 `platform.node.*`。
+- 在面板中输入的密钥和令牌（存储桶密钥、异地加密密钥、Cloudflare API 令牌）只传给执行器，任务记录、任务日志和 API 响应均不包含它们。
+- 每项任务的阶段、日志和结果可在面板中持续查看。记录与节点操作一样保存在 `/var/lib/felis/node-control`。每项操作有各自的时限，从一分钟（启动异地复制）到十二小时（重建）不等。
+- 会使控制平面暂时不可用的任务（数据库恢复、重建、凭据轮换、域名迁移）运行期间，API 拒绝启动、维护或迁移服务器，与节点操作期间相同。
+
+| 操作 | 面板 | 命令行 |
+| --- | --- | --- |
+| 主机状态：磁盘、内存、服务与定时器、代理 | 维护与备份 → 状态 | `felis status` |
+| 未处理的看门狗告警；计划维护期间暂停告警邮件 1、4 或 24 小时 | 维护与备份 → 状态 | `/run/felis/watchdog-quiet-until` |
+| 立即备份数据库 | 维护与备份 → 备份 | `felis db backup` |
+| 校验和恢复数据库备份包 | 维护与备份 → 备份 | `felis db verify`、`felis db restore`、`felis migrate up` |
+| 每日数据库备份时间与保留数量 | 维护与备份 → 备份 | `FELIS_DB_BACKUP_TIME`、`FELIS_DB_BACKUP_KEEP`，重跑安装器 |
+| 立即备份世界，在线备份或停服备份 | 维护与备份 → 备份 | `felis backup-now` |
+| 配置、修改或关闭异地副本 | 维护与备份 → 异地副本 | `FELIS_OFFSITE_*`，重跑安装器 |
+| 立即复制；列出存储桶内容；检查密钥；接管存储桶 | 维护与备份 → 异地副本 | `systemctl start felis-offsite.service`、`felis offsite list`、`felis offsite check-key`、`felis offsite take-over` |
+| 显示异地加密密钥 | 维护与备份 → 异地副本 | `/etc/felis/offsite.env` |
+| 从异地副本重建本主机 | 维护与备份 → 异地副本 | `felis restore-host` |
+| 健康检查 | 维护与备份 → 诊断 | `felis doctor` |
+| 支持包，经浏览器下载 | 维护与备份 → 诊断 | `felis support-bundle` |
+| 导出审计日志 | 维护与备份 → 备份 | `felis db audit-export` |
+| 访问方式：直接访问、自有反向代理、Cloudflare Tunnel | 平台设置 → 访问与安全 | `felis setup` 的访问方式步骤 |
+| 检查和迁移根域名 | 平台设置 → 访问与安全 | `felis domain check`、`felis domain set` |
+| 上传存储：本地磁盘或 S3 兼容存储桶 | 平台设置 → 访问与安全 | `felis setup` 的存储步骤 |
+| 凭据轮换 | 平台设置 → 访问与安全 | `felis rotate-token` |
+| 游戏代理的堆内存上限 | 平台设置 → 访问与安全 | `FELIS_VELOCITY_XMX`，重跑安装器 |
+| 系统服务器补全 | 平台设置 → 访问与安全 | `felis converge` |
+| 服务器的转发方式 | 服务器控制台页 → 转发方式 | `felis.lolicon.best/forwarding` 标签 |
+| 节点操作，包括主控高可用的浮动地址 | 平台设置 → 分布式 | `felis node …`、`FELIS_HA_VIP*`，重跑安装器 |
+
+在面板中修改、由安装器管理的设置（备份计划与保留数量、代理堆内存）保存在 `/etc/felis/host-settings.env`。之后运行安装器或 `felis update` 时以其为默认值，因此所有者的选择在升级后保留；该次运行显式设置的变量仍然优先。面板以重新配置模式运行安装器来应用此类修改（`FELIS_INSTALL_MODE=reconfigure`，由 `FELIS_RECONFIGURE` 指定涉及的部分），只重写相应的 unit。
+
+仪表盘向所有者显示一行主机状态（未处理告警、最新数据库备份、异地副本、占用最高的磁盘），并链接到对应标签页。
+
+以下操作仍在命令行执行：
+
+- **安装及重跑安装器**，包括新主机的首次安装，以及用 `FELIS_RESTORE_FROM_OFFSITE=1` 重建丢失的主机。面板在安装完成后才存在。
+- **`felis setup`**：创建首位所有者，在此之前无人能够登录。
+- **`felis breakGlass`**：在没有所有者能够登录时恢复访问，因此不能依赖面板。
+- **版本变更**：`felis update --apply` 以及为新发布版运行安装器。「版本更新」标签页报告可用版本并显示命令；应用新版本会替换面板和主机服务所运行的二进制。
+- **由 unit 和安装器运行的命令**，如 `felis api`、`felis operator`、`felis watchdog`、`felis ha leader`、`felis ha migrate-storage`。
+- **主机服务本身**。`felis-node-control` 停止时，面板无法访问主机，须在主机上使用 `systemctl status felis-node-control`、`journalctl -u felis-node-control`、`systemctl restart felis-node-control`。
+
+执行器命令、任务规则和 API 路由由 `go test` 覆盖，重新配置模式由 shell 测试覆盖，面板由针对模拟主机的组件测试和浏览器测试覆盖。在真实主机上执行各项任务为 [CODE-ONLY]。

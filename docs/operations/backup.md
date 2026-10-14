@@ -6,10 +6,12 @@ title: 备份与恢复
 
 * **备份与恢复**：默认启用，归档 PVC 及其路径由安装器生成。
   * 手动备份：将服务器的完整数据卷（`/data`，含世界、配置、插件与模组）归档至集群内的归档存储，可回滚至任一备份点
-  * 每日恢复点：当天有玩家进入过的服务器在停止后自动生成恢复点，默认保留 7 个，保存期限 90 天；恢复点单独轮换，不影响手动备份
+  * 不停服备份：运行中的服务器无需停机即可备份，仅在同一节点复制世界的数秒内暂停保存，归档、校验与回读均基于副本完成，玩家可继续游戏
+  * 每日恢复点：当天有玩家进入过的服务器每日自动生成恢复点，运行中的服务器以不停服方式生成；默认保留 7 个，保存期限 90 天；恢复点单独轮换，不影响手动备份
   * 下载与导出：支持下载单个备份（附 sha256 校验）、删除单个备份及导出完整世界
-  * 异地副本（可选）：备份在主机上加密后同步至 S3 兼容存储（AWS S3、Cloudflare R2、Backblaze B2、MinIO 等）
-  * 控制面数据库：存放账号、服务器归属、配额与存档索引的数据库每日自动备份，每次升级迁移前额外创建快照，故障时可通过 `felis db restore` 整库原子回滚；面板「维护与备份」页显示最近一次备份的时效（参见 [故障排查 §16](/operations/troubleshooting#_16-control-plane-database-backups-and-disaster-recovery)）
+  * 异地副本（可选）：备份在主机上加密后同步至 S3 兼容存储（AWS S3、Cloudflare R2、Backblaze B2、MinIO 等）；Owner 可在面板「维护与备份 → 异地副本」中配置、修改或停用
+  * 控制面数据库：存放账号、服务器归属、配额与存档索引的数据库每日自动备份，每次升级迁移前额外创建快照；Owner 可在面板「维护与备份 → 备份」中立即备份、校验备份并整库原子回滚，命令行入口为 `felis db restore`（参见 [故障排查 §16](/operations/troubleshooting#_16-control-plane-database-backups-and-disaster-recovery)）
+  * 整机重建：在新主机安装时设置 `FELIS_RESTORE_FROM_OFFSITE=1`，或安装后在面板「维护与备份 → 异地副本」中执行重建（命令行为 `sudo felis restore-host -yes`），即可从异地副本恢复数据库、镜像、上传文件、服务器及各服务器最新的世界；中断后重新执行将从中断处继续（参见 [故障排查 §16](/operations/troubleshooting#rebuild-on-a-new-host-the-old-one-is-gone)）
 
 ## 备份包含哪些数据 {#what-a-backup-contains}
 
@@ -20,9 +22,7 @@ title: 备份与恢复
 ## 详细操作 {#详细操作}
 
 - [世界备份、下载、导出与每日恢复点](/operations/troubleshooting#_10-world-reaper-false-deletes-and-skipped-backups-spec-§18)
+- [不停服备份](/operations/troubleshooting#live-backups-backing-up-a-running-server)
 - [控制面数据库备份与灾难恢复](/operations/troubleshooting#_16-control-plane-database-backups-and-disaster-recovery)
 - [灾难恢复与计划迁移](/operations/#_5-disaster-recovery)
-
----
-
-原文：[README.md](https://github.com/FelisMC/Felis/blob/main/README.md)、[docs/troubleshooting.md](https://github.com/FelisMC/Felis/blob/main/docs/troubleshooting.md)、[docs/operations.md](https://github.com/FelisMC/Felis/blob/main/docs/operations.md)。
+- [在面板中执行数据库备份与恢复、异地副本及整机重建](/operations/#_9-running-the-host-from-the-panel-go-tested-sh-tested)
