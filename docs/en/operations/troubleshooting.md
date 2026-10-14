@@ -1,84 +1,62 @@
 ---
 title: Troubleshooting
+description: Find the cause of a Felis problem from what you observe, confirm it and fix it.
 ---
 
-# Felis Troubleshooting Checklist {#felis-troubleshooting-checklist}
+# Troubleshooting {#troubleshooting}
 
-This file is the spec §28 #23 deliverable: a troubleshooting checklist for the failure modes the platform actually produces. Every symptom
-below is traced to a concrete signal — a `status.conditions` reason, an HTTP
-error code, a log string, or a manifest name — so an operator can map what they
-see to the code path that emitted it.
+This page helps operators diagnose and fix problems on a Felis host. Start with the first
+steps, which show the state of the whole host, then go to the entry that matches what you
+observe. Each entry describes the symptom, its causes, how to confirm the cause and how to
+resolve it. Entries are grouped by area: servers, players and routing, the panel and
+sign-in, the internal API, account linking, builds and images, the host, backups and the
+database, mail, and files and schedules. The [quick reference](#quick-reference) at the end
+maps common symptoms to entries.
 
-## How to read this document {#how-to-read-this-document}
+::: info
+Commands on this page run as root on the Felis host. `kubectl` commands use the copy that
+ships with k3s (`sudo k3s kubectl …`), because the cluster's administrator credentials in
+`/etc/rancher/k3s/k3s.yaml` are readable by root only. Game servers run in the `minecraft`
+namespace and the control plane in the `felis` namespace.
+:::
 
-Each entry is **symptom → likely cause → where to look → fix**. The `kubectl`
-commands run as root on the node (`sudo -i`, or `sudo k3s kubectl …`): the admin
-kubeconfig `/etc/rancher/k3s/k3s.yaml` is readable by root only (§13c). Signals are
-graded for how far the in-repo Go test suite proves the behaviour:
+## First steps {#first-steps}
 
-- **[GO-TESTED]** — a hermetic `*_test.go` exercises this exact path; the
-  string/code is asserted in CI.
-- **[PG-TESTED]** — a `-tags pgint` test in `internal/pgint` drives it against a
-  real Postgres with the shipped migrations ([Contributing](/en/reference/contributing) has the command).
-- **[CODE-ONLY]** — the code path and string exist and are real, but no unit
-  test drives them (notably the Velocity Java plugin, which is not compiled or
-  tested in this repo).
-- **[INTEGRATION-ONLY]** — the symptom is produced by the kubelet, kaniko,
-  containerd, Postgres, or the network, not by Felis Go code; you will see it in
-  `kubectl describe` / pod logs, never in `MinecraftServer.status`.
-- **[INERT]** — the configuration field exists in the CRD but no controller
-  reads it. Tuning it does nothing. **No CRD field carries this status today**;
-  the last one, `spec.storage.retainOnDelete`, was removed rather than
-  implemented (§13 records why). A field whose change seems ignored is almost
-  always a condition instead — §12 lists the fields that *are* read and the
-  condition each depends on.
+Before you look at a specific symptom, check the state of the whole host. The commands in
+this section only read: they change nothing and send no mail, so they are safe to run at
+any time. The Owner can run the same checks from the panel.
 
-The operator never invents the parent domain; routing identity is
-`spec.subdomain` under the deployment zone. Examples below use
-`<root-domain>` / `registry.<ns>.svc:<port>` placeholders rather than any
-concrete host.
+### Check the platform status {#check-status}
 
-Most `felis` commands in this document also run from the panel for the Owner: host status,
-the watchdog's alerts and their hold, database bundles, world backups, the off-site copy,
-the rebuild, `felis doctor`, the support bundle, the audit export, the access method, the
-root domain, upload storage, credential rotation and system server completion.
-[section 9 of the Operations guide](/en/operations/#_9-running-the-host-from-the-panel-go-tested-sh-tested)
-lists where each one is. The commands below remain the reference, and the only route when
-the panel or `felis-node-control` is down.
+```bash
+sudo felis status
+```
 
----
+`felis status` prints the platform at a glance: the release, the node and its kubelet, each
+control-plane Deployment (ready replicas, image, restarts), the game proxy (the
+`felis-velocity` unit and whether the game port accepts connections), every server with its
+desired state, phase, players and newest world backup, the newest database bundle, the
+off-site copy, disks and memory, and the alerts the watchdog has open.
 
-## 0. First look: `felis status`, `felis doctor`, `felis support-bundle` {#_0-first-look-felis-status-felis-doctor-felis-support-bundle}
+A component that is down is reported as such and the rest still prints. With k3s stopped,
+the cluster line reads `unreachable (...)` and the servers read
+`unknown while the cluster is unreachable`. With PostgreSQL down, the backup column reads
+`?` and a line below the table gives the reason.
 
-Three read-only commands, all run as root on the node, give the state of the
-whole host before any of the sections below. They change nothing and mail
-nothing, so they are safe to run at any time.
+### Run the health check {#run-doctor}
 
-**`sudo felis status`** prints the platform at a glance: the release, the node
-and its kubelet, each control-plane Deployment (ready replicas, image, pod
-restarts), the game proxy (the `felis-velocity` unit and whether the game port
-accepts connections), every server with its desired state, phase, players and
-newest world backup, the newest database bundle and the off-site copy, the
-watched disks and memory, and the alerts the watchdog has open. A part that is
-down reads as such and the rest still prints: with k3s stopped the cluster
-line says `unreachable (...)` and the servers `unknown while the cluster is
-unreachable`; with PostgreSQL down the backup column reads `?` and a line under
-the table says why. [GO-TESTED: `TestStatusReport`, `TestStatusWithPartsDown`,
-`TestStatusClusterEdges`, `TestStatusBackups`, `TestStatusWatchdog`]
+```bash
+sudo felis doctor
+```
 
-**`sudo felis doctor`** runs every check `felis watchdog` runs, with the
-settings `felis-watchdog.service` gives it, plus what only the host shows: a
-Felis unit that failed or a long-running one (`k3s`, `felis-velocity`) that
-stopped, a timer that no longer fires, alerts that reach no one (no `[smtp]`
-relay, no owner with a verified address), an unusable heartbeat URL. It prints
-one line per area, `✓` fine, `!` warnings, `✗` something critical, `-` not
-checked and why (the off-site copy on an install without one), each finding
-with where to look next:
+`felis doctor` runs every check the watchdog runs, with the watchdog's own settings, and adds
+what only the host shows: a Felis unit that failed, `k3s` or `felis-velocity` stopped, a
+timer that no longer fires, alerts that reach no one (no mail relay, or no Owner with a
+verified address) and an unusable heartbeat URL. It prints one line per area: `✓` fine, `!`
+warning, `✗` critical, `-` not checked, with the reason. Each finding says where to look
+next:
 
 ```text
-felis doctor on felis-1 at 2026-09-27 12:00 UTC
-checks run as /etc/systemd/system/felis-watchdog.service runs them (config /etc/felis/felis.host.toml)
-
 ✓  configuration
 ✓  Kubernetes cluster
 ✗  PostgreSQL
@@ -89,3343 +67,732 @@ checks run as /etc/systemd/system/felis-watchdog.service runs them (config /etc/
 1 problem(s): 1 critical, 0 warning(s)
 ```
 
-It exits 1 when it found anything and 0 otherwise, so a script can run it. It
-never mails, pings the heartbeat or touches the watchdog's state: an alert it
-shows is mailed by the watchdog's own next run, on the watchdog's delays (§14).
-A missing or unreadable `felis-watchdog.service` is itself a critical finding,
-and the checks then run with the watchdog's defaults. [GO-TESTED:
-`TestDoctorReportsByArea`, `TestDoctorMailsPingsAndSavesNothing`,
-`TestDoctorWithoutUnitOrConfig`, `TestUnitFindings`, `TestPrintDoctorReport`]
+The command exits with status 1 when it finds a problem and 0 otherwise, so scripts can use
+it. It sends no mail and leaves the watchdog's state alone; the watchdog mails open alerts on
+its own schedule. [Monitoring and alerts](/en/operations/monitoring#diagnostics) describes
+every check.
 
-**`sudo felis support-bundle`** collects what someone helping needs into one
-file, `/var/lib/felis/support/felis-support-<host>-<time>.tar.gz` (mode 0600;
-`-o DIR` writes elsewhere): `status.txt` and `doctor.txt`, the release, a
-summary of the configuration (names and settings, no credentials), the Felis
-units and timers, `df`, addresses and memory, the names of the files under
-`/etc/felis` (no contents), each Felis unit's and k3s's journal (`-since 48h`,
-`-log-lines 2000`), the nodes, volumes and servers, and the pods, Deployments,
-StatefulSets, Jobs, CronJobs, Services, claims, network policies and events of
-the control-plane, build and server namespaces, and the tail of every
-control-plane and build container's log (and of its previous run after a
-restart). Game servers contribute their init containers' logs only; their own
-logs carry player names, IP addresses and chat, and `-server-logs` adds them.
+### Create a support bundle {#create-support-bundle}
 
-What it leaves out: every Secret and ConfigMap, the contents of every
-configuration file, the database and every world. What it takes out of what it
-keeps: every value in the host's secret files (`secrets.env`, `offsite.env`,
-the relay and upload keys, the heartbeat URL, the forwarding secret, the
-proxy's token, the k3s tokens), the database password, every environment value
-in a pod spec or a server, passwords in URLs, private keys, `Bearer`/`Basic`
-credentials, and anything a log or report writes as `password=`, `token=`,
-`secret=` and the like. `MANIFEST.txt` inside lists what the bundle holds, what
-was taken out and what could not be collected (k3s down, a log that is gone).
-**Read it through before sending the bundle anywhere**: a secret logged in a
-form none of these rules knows stays in. [GO-TESTED: `TestSupportBundle`
-plants 25 secrets across every source and finds none in the bundle,
-`TestSupportBundleWithTheClusterDown`, `TestSupportBundleServerLogs`,
-`TestScrubber`]
-
----
-
-## 1. Server is stuck in `Starting` and never becomes `Running` {#_1-server-is-stuck-in-starting-and-never-becomes-running}
-
-`MinecraftServer.status.phase` stays `Starting`. A start that never succeeds is
-requeued every 2s until one of the two startup budgets expires, then escalated
-to `Failed` — `StartupTimeout` if the pod never passed TCP readiness,
-`ReadinessTimeout` if the RCON probe never succeeded. Both default to **300s**
-when `spec.startup.timeoutSeconds` / `spec.startup.readinessTimeoutSeconds` are
-unset or `0`, and both are measured from `status.startRequestedAt`.
-[GO-TESTED: `TestReconcileRunning_StartupTimeoutConvertsToFailed`,
-`TestReconcileRunning_ReadinessTimeoutConvertsToFailed`.]
-
-So `Starting` seen *once* is normal and
-`TestReconcileRunning_RconProbeFailureStaysStarting` asserts exactly that — a
-single failed probe must not flap the phase. `Starting` seen for longer than the
-budget means the reconcile loop is not running at all; check the operator's own
-logs before tuning anything. Either way the underlying cause is diagnosed from
-pod state, not from `MinecraftServer.status`.
-
-First, read the condition reason:
-
-```
-kubectl get minecraftserver <name> -o jsonpath='{.status.conditions}'
-```
-
-`markStarting` writes the same reason to both `Ready=False` and
-`RconReached=False`. The reason is one of:
-
-| `status.conditions[].reason` | Meaning | Requeue |
-|---|---|---|
-| `PodNotReady` | Pod not TCP-ready yet (`status.readyReplicas < 1`) | 2s |
-| `SpecChanged` | The spec changed while the pod was not ready; the operator recreated the pod from the new template (§1a) | 2s |
-| `AutoRestart` / `StartRetried` | A timed-out start was retried, automatically or from the panel, by recreating the pod | 2s |
-| `ServiceAddressPending` | The client Service has no ClusterIP yet | 2s |
-| `RconSecretUnavailable` | RCON secret missing or malformed | 10s |
-| `RconNotReachable` | RCON dial/auth failed | 2s |
-
-[GO-TESTED for the reason set.]
-
-### 1a. `PodNotReady` — pod never goes ready {#_1a-podnotready-—-pod-never-goes-ready}
-
-The operator cannot tell *why* the pod is not ready; **a broken image, an
-unbound PVC, and a backend that simply has not finished booting all surface as
-the identical `PodNotReady` signal.** [GO-TESTED that the reason is emitted;
-[INTEGRATION-ONLY] for the underlying pod cause.] You must drop to the pod:
-
-```
-kubectl get pod -l app.kubernetes.io/name=<name>
-kubectl describe pod <pod>     # look at Events + container State
-```
-
-- **`ImagePullBackOff` / `ErrImagePull`** → `spec.image` is wrong, the tag does
-  not exist, or the registry is unreachable. `spec.image` is copied verbatim into
-  the container with **zero validation** by the operator. Fix the image
-  reference, or see §7 (registry reachability) and §6 (build push target).
-  Editing the spec is enough, even once the server is `Failed` with its retries
-  spent: the StatefulSet (OrderedReady) never rolls a pod that is not ready, so
-  the operator deletes a not-ready `<name>-0` made from an older template itself
-  and the StatefulSet recreates it from the new one. The server goes back to
-  `Starting` with reason `SpecChanged`, a fresh start timeout and its restart
-  budget at zero, and the MinecraftServer gets a `PodReplaced` Event.
-  [GO-TESTED: `TestSpecChangeReplacesAPodThatGaveUp`, `TestStalePodReplacement`.]
-- **PVC `Pending`** → `kubectl get pvc -l app.kubernetes.io/name=<name>`. A
-  nonexistent `spec.storage.storageClassName`, or a request larger than any class
-  can satisfy, leaves the PVC unbound. The operator does **not** error on this
-  (only a malformed *quantity* errors — §2); it waits in `Starting` indefinitely.
-  Fix the StorageClass name or capacity. [INTEGRATION-ONLY.]
-- **Container crash-looping before the readiness port opens** → check container
-  logs; this is a backend/entrypoint problem, not a Felis problem.
-- **Stuck in `Init:` or `AccessDeniedException` / `Permission denied` in the
-  log** → the pod runs as uid/gid **1000** (`naming.GameUID`) with every
-  capability dropped, whatever `USER` the image declares. Before the server
-  starts, the `prepare-data` initContainer (`felis init-volume`, root with only
-  `CHOWN` + `DAC_OVERRIDE`) hands every world entry not yet owned by 1000:1000
-  to that uid, so a world written by an older root-run release or extracted by a
-  restore Job is fixed on its next start:
-  `kubectl logs <pod> -c prepare-data` prints how many entries it changed and
-  lists up to 20 it could not. An image that writes outside `/data` and `/tmp`
-  (a directory baked into the image as root) cannot run as uid 1000; rebuild it
-  to keep its state under `/data`. [GO-TESTED: `TestBuildStatefulSetRunsGameAsNonRoot`,
-  `TestChownTreeHandsOverMismatchedEntries`; INTEGRATION-ONLY for the walk on a
-  live volume.]
-- **Every start sits about 30 s in its last `Init:` step** → the `egress-gate`
-  initContainer (`felis egress-gate`) holds the server image until the pod's
-  egress fence (`felis-server-egress`) is in effect: kube-router programs a new
-  pod's policy a moment after it starts, and a server-labelled pod reached
-  felis-api's internal face on its first request. It dials the Kubernetes API
-  Service, which no server is admitted to, and normally passes within a second.
-  `kubectl logs <pod> -c egress-gate` says which way it went:
-
-  ```
-  felis egress-gate: 10.43.0.1:443 is unreachable after 201ms (...); the egress lock is in effect
-  felis egress-gate: 10.43.0.1:443 still answers after 30s; starting anyway. ...
-  ```
-
-  The second line means the probe answered for the whole wait. Either the cluster
-  runs without NetworkPolicy enforcement (a CNI without it, or k3s started with
-  `--disable-network-policy`), which leaves every server off the fence, or a
-  `--server-egress-allow-cidr` covers the node the API Service leads to, which
-  admits servers to the node's PostgreSQL and kube API port as well. Narrow the
-  CIDR to the host the servers need. The gate lets the server start after the
-  wait either way, where the build's gate refuses. [GO-TESTED:
-  `TestBuildStatefulSetGatesEgress`, `TestEgressGateFailOpenWaitsThenWarns`.
-  VM-TESTED on k3s: without the gate a server-labelled pod's first request reached
-  `felis-api-internal:8081`; behind it, three pods' first requests were refused
-  after gates of about 200 ms, and a pod no policy selects started after the 5 s
-  wait it was given, with the warning.]
-- **`FailedCreate … violates PodSecurity "baseline"`** on the StatefulSet or a
-  Job → the minecraft namespace enforces the PodSecurity `baseline` profile
-  (`pod-security.kubernetes.io/enforce=baseline`, set by the install bundle).
-  Everything Felis renders there fits it; a pod that is refused was edited or
-  created outside Felis (hostPath, hostPort, privileged, extra capabilities).
-  `kubectl get events -n minecraft --field-selector reason=FailedCreate` names
-  the field. [GO-TESTED: `TestObjects_MinecraftNamespaceEnforcesBaseline`.]
-
-### 1b. `RconSecretUnavailable` — RCON secret missing or malformed {#_1b-rconsecretunavailable-—-rcon-secret-missing-or-malformed}
-
-The probe needs the RCON password from `spec.rcon.secretRef`. The message is the
-verbatim error: [CODE-ONLY for these branches]
-
-- `rcon.secretRef.name and .key are required when rcon is enabled` — you enabled
-  `spec.rcon.enabled` but left `secretRef.name` or `secretRef.key` empty.
-- `secret "<name>" has no key "<key>"` — the Secret exists but lacks the named
-  key.
-
-Fix: create the Secret with the referenced key, or correct `secretRef`. Verify:
-
-```
-kubectl get secret <secretRef.name> -o jsonpath='{.data.<key>}' | base64 -d | wc -c
-```
-
-### 1c. `RconNotReachable` — RCON dial or auth failed {#_1c-rconnotreachable-—-rcon-dial-or-auth-failed}
-
-The probe is a TCP connect **plus** RCON auth handshake, then immediate close —
-**no command is ever run; a successful auth IS the entire readiness gate.** The
-message is the verbatim dial error:
-
-- `rcon: authentication failed` → the password in the Secret does not match the
-  backend's `rcon.password`. Reconcile the two. [GO-TESTED that this maps to
-  `RconNotReachable`.]
-- `connection refused` / `i/o timeout` → the backend has not opened the RCON
-  port yet, RCON is disabled in `server.properties`, or the image listens on a
-  port other than 25575 (the CRD accepts only that one for `spec.rcon.port`,
-  [Operations guide §4](/en/operations/#_4-upgrading-the-pieces-around-felis)). [INTEGRATION-ONLY for the live handshake.]
-
-The per-probe timeout is a fixed 5s in code (`prober.go:45`, shortened further if
-the reconcile context has a nearer deadline). It is **not** derived from
-`spec.startup.readinessTimeoutSeconds`, which is the deadline for the whole
-start, not for one probe — see §12.
-
----
-
-## 2. Server is in `Failed` {#_2-server-is-in-failed}
-
-Read the condition reason first. `InvalidSpec` means the StatefulSet could not be built,
-usually because **`spec.storage.size` is not a valid resource quantity**:
-
-```
-invalid storage size "<value>": <parse error>
-```
-
-Both `Ready=False` and `Provisioned=False` carry `InvalidSpec`. Use a valid quantity
-such as `10Gi`, not `10 GB`; the next reconcile leaves this failure state.
-[CODE-ONLY for this specific branch; the reconciler fixture normally uses a valid size.]
-
-Startup and readiness deadlines also produce `StartupTimeout` and `ReadinessTimeout`
-(§1), so `Failed` does not always mean a spec error. `markFailed` does not clear
-`status.endpoint`: a previously running server may retain `endpoint.mode=direct`.
-The proxy must confirm `phase=Running` before routing direct (§4).
-
----
-
-## 3. Players can't join / get sent to the wrong place {#_3-players-can-t-join-get-sent-to-the-wrong-place}
-
-Routing is driven by `status.endpoint`:
-
-- `markRunningReady` is the **only** writer of `endpoint.mode=direct`
-  (`address=<game address>`), and only while `phase=Running` and RCON-ready.
-- `markStarting`, `markStopping`, `markStopped` all write
-  `endpoint.mode=fallback`, `address=spec.fallbackServer`.
-
-So the proxy should route `direct` **only** when `phase=Running`; otherwise it
-gets a `fallback` endpoint. [GO-TESTED for the direct/fallback toggle via
-`markRunningReady`/`markStopped`.]
-
-Two pitfalls:
-
-1. **`spec.fallbackServer` is empty** → the fallback endpoint `address` is `""`,
-   so during `Starting`/`Stopping`/`Stopped` the proxy has no lobby to park the
-   player in. Set `spec.fallbackServer` to a registered Velocity server name.
-2. **Stale `direct` after `Failed`** → see §2; the proxy must not honour a
-   `direct` endpoint unless `phase=Running`.
-
-### 3a. Wake-on-join is refused, slow, or rate-limited {#_3a-wake-on-join-is-refused-slow-or-rate-limited}
-
-When a player joins a stopped server, the proxy parks them in the fallback and
-calls the internal wake API. The authorization gate order is **autostartPolicy →
-per-server cooldown → global running cap**. Map the API result:
-
-| HTTP | Code | Cause | Fix |
-|---|---|---|---|
-| `403` | `forbidden` | `autostartPolicy=allowlist` and UUID not allowlisted, or `ownerOnly` and caller is not owner | Add the UUID / claim the server / set `autostartPolicy=public` |
-| `409` | `maintenance_in_progress` | A restore, backup or file change holds the server's world volume (§3b) | Wait for the Job to finish |
-| `409` | `world_reclaiming` | The idle reaper is archiving the world (§3b item 3); afterwards the server is released with an empty world | Nothing to wait for; the old world stays in the archive |
-| `429` | (cooldown) | Wake retried within the configured per-server cooldown | Wait out the cooldown |
-| `503` | `at_capacity` | Global `MaxRunningServers` cap reached | Stop another server or raise the cap |
-
-Owners can change the running-server limit and wake cooldown in **Platform
-settings**. Saved values apply on all API replicas without a restart; the running
-limit also applies to scheduled starts. Zero disables the corresponding control.
-The running limit is an admission check, not an atomic reservation: concurrent
-requests can briefly exceed it, and lowering it never stops existing servers.
-
-A server marked Starting need not have launched Java. Its console now reads Pod
-scheduling and container state: `Unschedulable` / insufficient memory means it is
-waiting for resources, while image-pull failures and container exits show their
-reasons. Logs attach once the container can produce them. A status request that
-cannot complete within 12 seconds marks the last view as stale, shows its last
-successful read time, and retries without overlapping polls. Do not infer game
-readiness from an old Starting label or a disconnected log stream.
-
-[GO-TESTED: `handlers_internal_wake_test.go`, cooldown, running-cap shape.] The
-operator's RCON probe — **not** the wake call — is the authoritative readiness
-gate; the proxy polls `GET /api/v1/internal/servers/{name}/status` every ~2s and
-teleports when `ready=true`.
-
-The Velocity-side consumption of these codes (`403` → "You're not allowed to
-start «server»"; `409 maintenance_in_progress` → "«server» is under
-maintenance", not queued; `409 world_reclaiming` → "«server» sat idle too
-long and its world is being archived", not queued; `429` → re-queue; other → "Couldn't start … Try again
-shortly.") lives in the Java plugin and is **[CODE-ONLY]** — the codes it reacts
-to are produced by the Go-tested `authorizeWakeByUUID` / cooldown limiter, so
-grade the two halves separately.
-
-### 3b. Wake, restore, backup or file change refused with `maintenance_in_progress` {#_3b-wake-restore-backup-or-file-change-refused-with-maintenance-in-progress}
-
-A server's world volume is ReadWriteOnce, and on a single node RWO lets a game
-pod and a restore Job mount it side by side. So felis-api serialises them per
-server: a restore, a backup, a world download or a file change takes the world,
-and until its Job finishes every wake (panel or join) and every other world
-operation on that server gets `409 maintenance_in_progress`. File reads and listings never hold
-it. The operator applies the same rule when `desiredState` is flipped to
-`Running` by anything other than felis-api: the StatefulSet is not scaled up,
-and the `Ready` condition reads `MaintenanceInProgress` until the Job ends.
-
-What holds the world, in order:
-
-1. An unfinished Job labelled `felis.lolicon.best/server=<name>` with
-   `app.kubernetes.io/managed-by` `felis-restore`, `felis-backup`,
-   `felis-files` with any `felis.lolicon.best/files-mode` but `list` or `read`
-   (a save, new file, new folder, rename, delete or upload; §18), or
-   `felis-export` with any `felis.lolicon.best/export-mode` but `backup` (a
-   world download, held until the download ends; §10):
-
-   ```sh
-   kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>
-   ```
-
-   A Job that is genuinely wedged is ended by its own `activeDeadlineSeconds`;
-   deleting it by hand releases the world at once (`kubectl -n minecraft delete
-   job <job>`), at the cost of whatever it was writing.
-
-2. The admission lock `felis.lolicon.best/maintenance=<kind>@<RFC3339>` on the
-   MinecraftServer. felis-api sets it for the milliseconds between admitting an
-   operation and creating its Job; it holds for at most two minutes if felis-api
-   died in between, and the next wake clears a stale one. To drop it by hand:
-
-   ```sh
-   kubectl -n minecraft annotate minecraftserver <name> felis.lolicon.best/maintenance-
-   ```
-
-3. The idle-world reaper (§10), which has no Job of its own: it writes the same
-   annotation as `reap@<RFC3339>` while it archives and deletes an idle world,
-   and rewrites it every 30 seconds, so the lock stays fresh however long the
-   archive takes. The refusal names `the idle-world reaper`. A reaper pod that
-   dies mid-archive stops rewriting it, and the lock lapses two minutes after
-   the last write. Dropping it by hand also ends the reap: the reaper checks
-   the lock before it deletes the world volume, keeps the world and retries the
-   next day.
-
-A restore, backup or file change refused with `409 not_stopped` although the
-panel shows `Stopped` means the game pod is still terminating (its shutdown save
-can take a while); retry once `kubectl -n minecraft get pods -l
-felis.lolicon.best/server=<name>` shows nothing.
-
-A stop that leaves the server `Running` for about 30 s is the players' warning.
-When desiredState turns `Stopped` and the RCON tally does not say the server is
-empty, the operator sends everyone online a yellow chat line (`tellraw @a`),
-stamps `status.stopNoticeAt`, records a `StopNotice` Event, and scales down
-once `StopNoticeWindow` (30 s) has passed, with a last "stopping now" line
-before the save. Starting the server again inside the window calls the stop
-off, and the players are told so. An empty server, RCON off, or a probe or
-broadcast that fails stops at once. Idle auto-stop only fires on an empty
-server, so it never waits.
-
-[GO-TESTED: `internal/maintenance`, `k8scluster_maintenance_test.go`,
-`handlers_maintenance_test.go`, operator `maintenance_test.go`,
-`stopnotice_test.go`.]
-
----
-
-## 4. Routing is disabled even though servers are up (online-mode coupling) {#_4-routing-is-disabled-even-though-servers-are-up-online-mode-coupling}
-
-Wake/claim/allowlist semantics trust **Mojang-verified online-mode UUIDs**. If
-the proxy runs `online-mode=false`, those identities are spoofable, so the
-Velocity plugin **refuses to activate routing**:
-
-```
-Felis routing DISABLED: the proxy is in offline mode (online-mode=false).
-Domain autostart and the allowlist trust Mojang-verified UUIDs; refusing to
-route on spoofable identities. /link remains available. Set online-mode=true to
-enable routing.
-```
-
-[CODE-ONLY — `FelisVelocityPlugin.onProxyInitialize`.] `/link` still works
-(account binding does not depend on routing), but no domain autostart happens.
-The summary line prints `routing: disabled (offline mode)` or
-`(no root-domain set)`. Fix: set `online-mode=true` on the proxy, or configure
-the root domain if the log says `no root-domain set`.
-
-On the server side, `spec.autostartPolicy` and `spec.onlineMode` are documented
-as only meaningful when the proxy enforces `online-mode=true`. Setting them does
-not by itself make an offline proxy safe — the proxy guard is the enforcement
-point.
-
----
-
-## 5. Web panel returns 401 / 403 (Zero-Trust / Cloudflare Access) {#_5-web-panel-returns-401-403-zero-trust-cloudflare-access}
-
-The external face has one credential: the `felis_session` cookie the sign-in
-doors mint. Cloudflare Access, when the install sits behind it, is enforced at
-the Cloudflare edge only — felis-api does not read the `Cf-Access-Jwt-Assertion`
-header, so a request that reaches the origin some other way still has to sign in,
-and the account and its role always come from the `users` table. The edge setup
-fences the panel NodePort to loopback (the `felis_edge` nftables table), so every
-request reaches the API through cloudflared and Access stays in front of the
-operator console; check `nft list table inet felis_edge` if you doubt it. The error envelope is always
-`{"error":{"code","message","request_id"}}`. [GO-TESTED.]
-
-- **`401 unauthorized`** — no valid session cookie. [GO-TESTED.]
-- **`403 forbidden`** — authenticated but not permitted (e.g. a non-admin
-  principal hitting an admin route; `IsAdmin()` requires a staff role **and** a
-  request on the operator console host). [GO-TESTED.]
-
-### 5a. Staff routes 403 on a local IP URL {#_5a-staff-routes-403-on-a-local-ip-url}
-
-The operator console is recognised by the request's host: `admin_hostname`
-(default `op.console.<root_domain>`). A bare IP counts only when the install
-names it — the address a `<ip>.nip.io` / `<ip>.sslip.io` root domain embeds
-(the local panel URL `felis setup` prints), or an `admin_hostname` set to that
-IP. Any other address, loopback included, is served as the player console, so a
-staff account signed in at `https://127.0.0.1:30443` through an SSH tunnel gets
-403 on admin routes. Open the console by its hostname instead (an `/etc/hosts`
-entry or `curl --resolve` pointing it at the tunnel), or set
-`[auth] admin_hostname` to the IP you use. [GO-TESTED]
-
-### 5c. Local-password login fails or is silently rejected {#_5c-local-password-login-fails-or-is-silently-rejected}
-
-Local sessions use the `felis_session` cookie (HttpOnly, Secure, SameSite=Lax,
-12h TTL, host-only). They are gated by the `local_auth_enabled` row in
-`platform_settings`, read live per request and **fail-closed** (missing or
-unparseable → treated as disabled). Symptoms:
-
-- Cookie present but login rejected with `local auth disabled` → the
-  `local_auth_enabled` setting is false/absent. A present cookie under disabled
-  local-auth is **rejected outright**.
-- `invalid session: …` → bad/forged session hash.
-
-Fix: set `local_auth_enabled=true` in `platform_settings` if local password auth
-is intended. [GO-TESTED for the session/QR-login logic.]
-
----
-
-## 6. Internal API rejects Velocity / proxy callers (service-token) {#_6-internal-api-rejects-velocity-proxy-callers-service-token}
-
-The internal face (`--internal-addr :8081`, routes under
-`/api/v1/internal/...`) is **never** Zero-Trust; it authenticates a bearer token
-(`Authorization: Bearer <token>`, compared in constant time). Each internal caller
-has its own token, and each route serves only the callers listed for it
-(`x-felis-callers` in `docs/openapi.yaml`):
-
-| Caller | Secret (key `token`) | API env | Where the caller reads it | Routes |
-|---|---|---|---|---|
-| `velocity` (proxy felis-link) | `felis/felis-service-token` | `FELIS_SERVICE_TOKEN` | `service-token` in the host's `felis-link.properties` | server list, wake/claim/ready/status, join events, menu, op-login, migrate, reclaim, link codes, blacklist |
-| `limbo` (login gate) | `felis/felis-limbo-token`, replica in `minecraft` | `FELIS_LIMBO_TOKEN` | login pod env `FELIS_SERVICE_TOKEN` | link codes, link status, blacklist |
-| `build` (build Job fetch) | `felis/felis-build-token`, replica in `felis-build` | `FELIS_BUILD_TOKEN` | fetch initContainer env | submission build context |
-| `ops` (`felis backup-now`) | `felis/felis-ops-token` | `FELIS_OPS_TOKEN` | read from the Secret on each run | break-glass backup |
-
-The installer generates all four into `/etc/felis/secrets.env` (`SERVICE_TOKEN`,
-`LIMBO_TOKEN`, `BUILD_TOKEN`, `OPS_TOKEN`) and applies them on every run. The audit
-log records internal actions with the source `internal:<caller>`. [GO-TESTED]
-
-In-cluster it is reached through the ClusterIP Service `felis-api-internal` (port
-8081), which is separate from the external NodePort `felis-api` (443) precisely so
-the no-Zero-Trust face is never exposed on a node. On the control-plane node the
-break-glass console reaches it by resolving that Service's ClusterIP and dialing
-`:8081`.
-
-The face speaks plain HTTP, and the tokens cross it in the clear. That holds up because
-no hop leaves the node: the proxy runs on the node and dials the ClusterIP, and the
-login pod and the build Job are pods on the same node, so reading the traffic takes root
-there, which also reads the tokens from disk. Pods reach the face only where a policy
-opens it: `felis-login-to-internal-api` for the login pod and `felis-build-egress` for
-the build Job; `felis-server-egress` keeps every other game server (lobby included) off
-all private ranges, 8081 among them. A Velocity on another host would put the `velocity`
-token on the wire, which is one more reason the proxy belongs on the node (§1 of
-[Operations guide](/en/operations/)); a multi-node shape would need TLS on this face first.
-
-- **Internal calls fail to *connect* (not 401)** → the `felis-api-internal` Service
-  is missing or its selector no longer matches the api pods. `kubectl -n felis get
-  svc felis-api-internal` must show a ClusterIP with 8081; a bare `felis-api` name
-  serves only 443 and every internal call would hang/refuse.
-
-- **One caller's calls all 401** → its token is unset or differs from the api's
-  copy. The api logs one line per unset token at startup:
-
-  ```
-  felis api: warning: FELIS_LIMBO_TOKEN unset — the internal face turns the limbo caller away
-  ```
-
-  An unset token never matches anything (no bypass). Compare the caller's value
-  with its Secret, e.g. for the proxy:
-
-  ```
-  kubectl -n felis get secret felis-service-token -o jsonpath='{.data.token}' | base64 -d
-  ```
-
-- **`403 wrong_caller`** → the token is valid but belongs to a caller that route
-  does not serve, e.g. the build token calling a proxy route. Configure the caller
-  with its own token from the table above.
-
-- **api pods stuck in `CreateContainerConfigError`** → one of the four Secrets is
-  missing in `felis`. Re-run the installer; it applies them before the bundle.
-
-- **Two tokens with the same value** → `felis api` refuses to start with
-  `the X and Y tokens are the same value; each caller needs its own`, since a shared
-  value would make the caller ambiguous. Rotate one of them.
-
-### Rotating a token {#rotating-a-token}
-
-`sudo felis rotate-token <kind>` replaces one credential the installer generated.
-Without `-yes` it only prints what it would write and what that interrupts;
-`sudo felis rotate-token -yes <kind>` rotates. Every rotation writes the new value
-into `/etc/felis/secrets.env` first, so whatever fails after that, a re-run of the
-installer (`sudo bash deploy/bootstrap.sh`) puts the value everywhere. [GO-TESTED]
-
-| kind | replaces | interrupts |
-|---|---|---|
-| `velocity` | the proxy's token: Secret `felis-service-token`, `service-token` in the host proxy's `felis-link.properties` | felis-api restarts (one replica: the panel, sign-in and the proxy's calls stop for a few seconds). The proxy re-reads its file and keeps its players |
-| `limbo` | the login gate's token, `felis-limbo-token` and its minecraft replica | felis-api restarts, then the login pod |
-| `build` | the build Jobs' token, `felis-build-token` and its build-namespace replica | felis-api restarts; a build fetching its context at that moment fails and can be submitted again |
-| `ops` | `felis backup-now`'s token, `felis-ops-token` | felis-api restarts |
-| `registry` | the registry's `platform`, `build` and `prune` write tokens: Secret `felis-registry-auth`, the build Jobs' `felis-registry-push` | the registry restarts (a push at that moment fails, a pull retries), then felis-api |
-| `forwarding` | the Velocity forwarding secret: `/opt/felis/velocity/forwarding.secret`, Secret `felis-forwarding-secret` in both namespaces | every running server restarts (saving its world) and the proxy restarts: everyone online is disconnected |
-| `db` | the database role's password: the role in felis-postgres, `[database] url` in `felis.host.toml` and `felis.pod.toml`, Secret `felis-config` in both namespaces | felis-api restarts; a backup, restore or file Job that connects in those seconds fails and can be run again |
-
-- **velocity** — the rotation waits for the proxy's log line
-  `Felis: service-token reloaded from … (fingerprint <12 hex digits>)`. A proxy
-  that has not logged it within 60 s of felis-api's restart (a plugin from before
-  this release) is restarted, which disconnects everyone online. The file keeps
-  its modification time, so `felis domain check` does not read the proxy as
-  stale. A proxy on another host is left alone: set `service-token` in its
-  `felis-link.properties` to the value in Secret `felis/felis-service-token`, and
-  it takes it within a few seconds.
-- **forwarding** — a server whose world a backup, restore or file change holds is
-  left running and named in the plan and the output; players cannot join it until
-  it restarts, so stop and start it from the panel once that finishes. The next
-  installer run restarts the proxy once more (its record of what the proxy was
-  started from predates the rotation); an upgrade restarts it for the new plugin
-  jar anyway. A proxy on another host needs the value in Secret
-  `felis/felis-forwarding-secret` in its forwarding secret file, and a restart.
-- **db** — the password reaches PostgreSQL as a SCRAM-SHA-256 verifier, never as
-  text a failed statement could log. The config copies change only after a
-  connection with the new password succeeds; when it does not, the command stops
-  and says so, and the installer re-run sets the password from `secrets.env` in
-  the role and every copy. A database the installer does not run (`[database]
-  deployment` unset) is refused: change its password where it runs, then in each
-  copy's `[database] url`. `felis.pod.toml` must be a file of its own, since the
-  pods reach the database at another address.
-- The old value stops working as felis-api (or the registry) restarts; a caller
-  still presenting it is turned away until it has the new one.
-
----
-
-## 7. Account-link and claim API errors {#_7-account-link-and-claim-api-errors}
-
-Codes from `handlers_account.go` / `handlers_internal.go`. [GO-TESTED.]
-
-| HTTP | Code | When |
-|---|---|---|
-| `400` | `bad_request` | Missing `mc_uuid`, empty code, or invalid `auth_source` (must be `mojang`/`thirdparty`) |
-| `400` | `invalid_code` | Link code unknown or expired (10-min TTL, 8-symbol code) |
-| `409` | `already_linked` | That MC UUID is already linked to **another** user |
-| `412` | `not_linked` | Claim/owner op by a caller with no verified account link |
-| `403` | `quota_exceeded` | Claim would exceed the user's server quota |
-| `409` | `already_claimed` | Atomic `UPDATE … WHERE owner_id IS NULL` affected 0 rows |
-| `404` | `not_found` | Unknown server/resource |
-
-Flow reminder: the **code is minted in-game** on the internal face
-(`POST /api/v1/internal/account/link/code`, proves the UUID) and **verified on
-the web** external face (`POST /api/v1/account/link/verify`, proves the user).
-A `409 already_linked` rolls the transaction back and **preserves** the code so a
-different user can still use it. The claim's race-safety is the single
-conditional `UPDATE` under READ COMMITTED — `1` row → `200`, `0` rows → `409`.
-The handler logic is [GO-TESTED] through an in-memory fake repository. See
-[Integration boundaries](/en/reference/deferred-seams) for the real-database verification scope.
-
----
-
-## 8. Image build fails (Kaniko, spec §14/§16) {#_8-image-build-fails-kaniko-spec-§14-§16}
-
-### 8a. Build push rejected at submission with `400` {#_8a-build-push-rejected-at-submission-with-400}
-
-Pre-build validation rejects any push target that is not the internal registry:
-
-```
-must target the internal registry "<registry.<ns>.svc:<port>>", not "<your-target>"
-```
-
-[GO-TESTED via the `validate` gate.] Fix the image reference to push to
-`cfg.Registry.URL` (the internal registry — §9).
-
-### 8b. Build Job's ServiceAccount can do nothing (RBAC "denial" by design) {#_8b-build-job-s-serviceaccount-can-do-nothing-rbac-denial-by-design}
-
-The build/restore Job SAs (`felis-build`, `felis-restore`, namespace
-`felis-build`) have **no Role and no RoleBinding anywhere** — isolation is the
-*absence* of permissions (spec §16/§21). If you see the build SA denied a
-namespaced API operation, **that is correct, not a misconfiguration.** [GO-TESTED
-that the rendered manifests give these SAs no Role.] Do not "fix" it by granting
-the build SA permissions.
-
-### 8c. Build hangs then fails fetching base image / packages {#_8c-build-hangs-then-fails-fetching-base-image-packages}
-
-The build namespace runs a default-deny egress NetworkPolicy
-(`felis-build-egress`); the **only** allowed egress is the package-mirror CIDRs
-from `--package-cidr`, which **defaults to none** (fail-closed, no internet).
-[GO-TESTED for the netpol shape.] A kaniko run that hangs pulling a base image or
-OS package from a non-allowlisted host is the egress policy doing its job — the
-hang/failure text comes from kaniko/containerd and is [INTEGRATION-ONLY]. Fix:
-add the mirror CIDR via `--package-cidr`, or pre-stage the base image in the
-internal registry.
-
-### 8d. Build reaches `Failed` phase {#_8d-build-reaches-failed-phase}
-
-`reconcileBuilds` polls the Job; a Job reaching `Failed` is surfaced via
-`writeBuildError` (JobPhase→Failed). [GO-TESTED for the mapping.] The
-build's error names the cause: the step that failed with the last lines of its
-output, the deadline, or the scan verdict (spec §16). The pod runs `egress-gate`
-(§8f), `context-fetch`, `kaniko` (builds a tarball, never pushes), `trivy`
-(writes the full JSON report of that tarball), `sbom` (converts the report to a
-CycloneDX SBOM) and `scan-gate` (applies the scan policy) as init containers,
-then `push` — so an image the scan blocks never reaches the registry. Inspect
-every step:
-
-```
-kubectl logs -n felis-build job/<build-job> --all-containers --prefix
-```
-
-A `push` that fails with `403` means the target repository is under `felis/` or
-`mirror/` — the registry gate reserves those for the platform (§9); `401` means
-the `felis-registry-push` Secret in `felis-build` is missing or stale (re-run the
-installer).
-
-**The scan gate.** `scan-gate` blocks the image when a vulnerability or a
-leaked secret has a severity listed in `[registry] scan_fail_on` (§8e; default
-`CRITICAL`). A vulnerability with no fixed release is listed without
-blocking unless `scan_fail_unfixed = true`, since nothing can be upgraded to
-clear it. A blocked build ends with an error such as:
-
-```
-the scan blocked the image: 1 CRITICAL, 1 HIGH (CVE-2026-12345, CVE-2025-24813)
-```
-
-`HIGH` is opt-in because the platform's own `felis/paper` image carries five
-fixable HIGH findings inside upstream `paper.jar` (its bundled commons-compress
-1.5 and plexus-utils 3.5.1). Adding `HIGH` to `scan_fail_on` blocks every build
-`FROM` it until those ids are accepted as known risks in `scan_accept`:
-
-```toml
-scan_fail_on = ["CRITICAL", "HIGH"]
-scan_accept = ["CVE-2021-35515", "CVE-2021-35516", "CVE-2021-35517", "CVE-2021-36090", "CVE-2025-67030"]
-```
-
-An accepted id (a CVE, GHSA or similar advisory id, or a secret rule id such as
-`aws-access-key-id`) never blocks; its findings are still counted, listed and
-marked **Accepted** on the panel, and scan-gate's log names the accepted ids.
-Review the list whenever the base image is upgraded.
-
-felis-api keeps each finished build's scan: the verdict, up to 100 findings with
-the blocking ones first, the full Trivy report and the SBOM. On the panel,
-**Build Pipeline → Scan & logs** on a finished build shows them, with both files to download. The
-API serves the same data (admin only):
-
-| Endpoint | Returns |
-|---|---|
-| `GET /api/v1/images/build/{id}/scan` | the verdict and findings; `404 scan_not_found` for a build that stopped before the scan or ran before builds kept scans |
-| `GET /api/v1/images/build/{id}/scan/report` | the Trivy JSON report as `<id>-trivy.json` |
-| `GET /api/v1/images/build/{id}/sbom` | the CycloneDX SBOM as `<id>.cdx.json` |
-
-The report and SBOM travel to felis-api inside the scan-gate container's log, so
-one image gets at most 6 MiB of them compressed. Past that the gate drops the
-SBOM first, then the report, says so in its log, and the download answers
-`404 scan_document_not_kept`; the verdict and findings are always kept. A
-`scan-gate` exit 2 means the report was missing or unreadable; the build fails
-closed and the error says why.
-
-A scan reflects the vulnerability DB on the day of the build. An admitted image
-is not scanned again when the DB learns of a new CVE; to rescan it, start a new
-build of the same context (`POST /api/v1/images/build`), after
-`felis mirror-build-tools -only trivy-db` if the DB copy is old (§8e).
-
-### 8e. Build Pods never start: executor images and the scan DBs {#_8e-build-pods-never-start-executor-images-and-the-scan-dbs}
-
-A build Job runs Kaniko and Trivy, and Trivy reads two databases: the
-vulnerability DB and, for any image with Java artifacts (every real modpack),
-the Java DB. The build namespace has no internet egress, so all four come from
-the internal registry, under `mirror/`:
-
-| Tool | Upstream | Copy |
-|---|---|---|
-| kaniko | `gcr.io/kaniko-project/executor:v1.24.0@sha256:4e7a52dd…` | `mirror/kaniko-executor:v1.24.0` |
-| trivy | `ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e…` | `mirror/trivy:0.74.0` |
-| vulnerability DB | `mirror.gcr.io/aquasec/trivy-db:2` | `mirror/trivy-db:2` |
-| Java DB | `mirror.gcr.io/aquasec/trivy-java-db:1` | `mirror/trivy-java-db:1` |
-
-The executor images are pinned by digest (`internal/build/tools.go`), so a moved
-upstream tag never changes what a build runs; the DBs follow their tag. The
-installer copies all four with `felis mirror-build-tools`, and
-`felis-build-tools.timer` repeats the copy at 04:00 and 16:00, which is what
-keeps the DBs current. The watchdog mails a warning when three days pass without
-a clean run: scans still gate, but against old advisories.
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Build Pods in `ImagePullBackOff` on `mirror/kaniko-executor` or `mirror/trivy` | the first copy has not finished, or the node had no internet during install | `journalctl -u felis-build-tools -n 50`; `sudo felis mirror-build-tools` once the node can reach gcr.io, ghcr.io and mirror.gcr.io |
-| Scan fails with `failed to download vulnerability DB` | `mirror/trivy-db:2` is missing | same |
-| Watchdog: `the vulnerability DB was last refreshed … ago` | the timer's runs fail (network, registry down, disk) | read the error in the mail or in `/var/lib/felis/build-tools/status.json`; `sudo felis mirror-build-tools` to retry now |
-
-`sudo felis mirror-build-tools -only trivy-db` refreshes one tool. The copy is
-single-platform (the node's architecture), written as the `platform` principal
-through the loopback hostPort with the token from `/etc/felis/secrets.env`.
-
-**An air-gapped node** cannot fetch anything. Copy the four references above
-into the registry from a machine that can (`kubectl -n felis port-forward
-svc/registry 5000:5000`, then push to `localhost:5000/mirror/...` as `platform`,
-password `kubectl -n felis get secret felis-registry-auth -o
-jsonpath='{.data.platform}' | base64 -d`), and repeat that for the DBs as often
-as advisories matter to you. The watchdog warning stays until the timer can
-reach upstream; that is accurate.
-
-**The platform's own images on an air-gapped node.** The registry pod and the database
-pod run images from Docker Hub by digest (`REGISTRY_IMAGE` and `POSTGRES_IMAGE` in
-`bootstrap.sh`), which the installer imports into k3s's containerd from the release's
-`felis-image-base-linux-<arch>.tar` (or, without one, pulls) and pins there so the
-kubelet's image GC never collects them. On an air-gapped node the simplest way is to
-install from the release's assets copied to the node (`FELIS_ARTIFACT_DIR`, operations
-§1). When the pull fails (`could not pull …`) and no release assets are at hand, fetch
-the same digest on a machine that can, for the node's architecture, keeping the manifest
-as it is, and import it on the node:
-
-```sh
-# elsewhere: the reference as bootstrap.sh names it, e.g. docker.io/library/postgres:18.6-trixie@sha256:…
-sudo ctr images pull --platform linux/arm64 "$ref"
-sudo ctr images export --platform linux/arm64 image.tar "$ref"
-# on the node:
-sudo k3s ctr images import image.tar
-```
-
-A `docker save` of the image rewrites its manifest, so its copy never matches the digest
-the Deployment names. Rerun the installer afterwards; it finds the image and pins it.
-[CODE-ONLY]
-
-**Kaniko is archived upstream** (June 2025); v1.24.0 is its last release and
-gets no security fixes. To run a maintained fork, copy it under `mirror/` and
-point the override at it. The other `[registry]` keys in `felis.toml`:
-
-```toml
-[registry]
-url = "registry.felis.svc:5000"
-build_namespace = "felis-build"
-kaniko_image = ""                  # empty: the mirror/ copy above
-trivy_image = ""
-trivy_db_repository = ""
-trivy_java_db_repository = ""
-scan_fail_on = ["CRITICAL"]        # §8d: severities that block; any case; empty = CRITICAL
-scan_fail_unfixed = false          # §8d: true blocks on vulnerabilities with no fixed release too
-scan_accept = []                   # §8d: vulnerability or secret rule ids accepted as known risks; never block
-build_cpu_limit = "2"
-build_mem_limit = "4Gi"
-build_disk_limit = "12Gi"          # §8f
-build_user_namespaces = "auto"     # §8f: auto | on | off
-build_runtime_class = ""           # §8f: e.g. "gvisor"
-max_concurrent_builds = 2          # §8f: 1-6; later builds queue
-user_uploads_max_bytes = "4Gi"     # every user's uploaded contexts together; 507 uploads_full past it
-context_max_bytes = "1Gi"          # one uploaded context; empty = 1Gi (sent in 32 MiB parts, so the Cloudflare edge's 100 MB body cap does not bind)
-```
-
-Put them in **both** `/etc/felis/felis.host.toml` (host-side CLI) and
-`/etc/felis/felis.pod.toml` (the file rendered into the API's `felis-config`
-Secret — the two differ only in the database URL; the setup screens re-render
-the Secret from the pod file, so edits made only through `kubectl` on the live
-Secret are lost at the next reconfigure). A Deployment restart alone is NOT
-enough — the API Pod mounts the Secret, never the host file. Re-render the
-Secret from the pod file, then roll `felis-api`:
-
-```sh
-kubectl -n felis create secret generic felis-config \
-  --from-file=felis.toml=/etc/felis/felis.pod.toml --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n felis rollout restart deployment/felis-api
-```
-
-Unset fields keep the defaults. The Job's Trivy container runs with
-`--insecure`, so the internal registry's plain HTTP works for the DB pulls;
-reads need no credential. The registry pruner keeps every tool reference the
-api resolves (§9).
-
-### 8f. Build isolation model and residual risk {#_8f-build-isolation-model-and-residual-risk}
-
-A Dockerfile's `RUN` steps execute inside the kaniko container, as root. Kaniko
-is a daemonless image builder; it is **not** a sandbox. What stands between an
-approved-but-hostile Dockerfile and the node is the pod around it:
-
-| Layer | What it does | Where |
-|---|---|---|
-| Admin approval | Nothing builds until an administrator approves the submission | submit lane |
-| Reviewed bytes | the approval names the context's sha256; a re-upload after review fails the approval, and the build refuses any other bytes | submit lane, `felis fetch-context` |
-| Weak identity | `felis-build` SA, no Role anywhere, no token mounted | §8b |
-| Egress lock | `felis-build-egress`: cluster DNS, the registry, the api internal face, nothing else | §8c |
-| Egress gate | first init container; holds the pod until the lock is enforced for it | `felis egress-gate` |
-| Capabilities | every container drops ALL; kaniko gets back only CHOWN, DAC_OVERRIDE, FOWNER to unpack base images | jobspec |
-| seccomp | the whole pod runs under the runtime's default profile (no `unshare`, `mount`, `keyctl`, `bpf`, …) | jobspec |
-| User namespace | with `build_user_namespaces` on, root in the pod is an unprivileged uid on the node | below |
-| Sandbox runtime | optional `build_runtime_class` (gVisor, Kata) | below |
-| Credentials | the registry credential lives only in the `push` container; the service token only in `context-fetch` | jobspec |
-| Scan gate | the image's Trivy report is judged under `scan_fail_on` before `push` runs; a blocked or unreadable scan keeps the image out of the registry | `felis scan-gate`, §8d |
-| Resources | CPU, memory and ephemeral-storage limits per container; `activeDeadlineSeconds`; the context extraction stops at 4 GiB or 200 000 entries | jobspec, `felis fetch-context` |
-| Namespace backstop | `felis-build-limits` LimitRange gives any container without limits 1 CPU / 1 GiB / 1 GiB disk; `felis-build-quota` allows 8 running pods and no PVCs | bundle |
-| Concurrency | at most `[registry] max_concurrent_builds` (default 2, at most 6) builds run; later ones wait as `pending` (Queued) and start oldest first | `build.Builder` |
-
-**Reviewed bytes.** Every upload records the sha256 of the archive, and the
-review page shows it. The context download carries the same value in the
-`X-Felis-Context-Sha256` header; the API cuts the transfer off if the stored
-bytes no longer match it. Approving sends that digest back as
-`expected_digest`, and the approval fails with `409 context_changed` when the
-submitter has uploaded again since: download and review the new upload. The
-approved digest is pinned on the build, and `felis fetch-context --sha256`
-hashes every byte it receives; a mismatch fails the build before Kaniko starts:
-
-```
-felis fetch-context: the context's sha256 is 3f…, the approved digest is 9a…: it changed after approval; refusing to build
-```
-
-The panel approves with the digest of the file it downloaded in the same
-session. When the review happened elsewhere (a CLI download, another browser),
-it approves with the digest the list shows, so compare that value with
-`sha256sum` of the file you actually read. A submission uploaded before digests
-were recorded cannot be approved until the submitter uploads it again.
-
-**Egress gate.** The CNI programs a new pod's NetworkPolicy a moment after the
-pod starts. On k3s (kube-router), a pod in `felis-build` could reach the internet
-and the Kubernetes API for its first ~0.7 s. `egress-gate` dials the Kubernetes
-API Service, which the build policy never admits, and exits once it stops
-answering. The build pod log shows the wait:
-
-```
-felis egress-gate: 10.43.0.1:443 is unreachable after 612ms (...); the egress lock is in effect
-```
-
-If the probe still answers after two minutes the gate exits 1 and the build
-fails: `the build namespace's NetworkPolicy is not enforced`. The cluster is
-running without NetworkPolicy enforcement (a CNI without it, or k3s started with
-`--disable-network-policy`); fix the cluster, not the gate.
-
-**User namespaces (`build_user_namespaces`).** With `hostUsers: false`, uid 0
-in the build pod maps to an unprivileged uid range on the node, so a container
-escape lands as nobody. It needs Kubernetes ≥ 1.33, containerd 2.x, and a kernel
-with idmapped mounts on the node filesystem (5.19+ upstream; the RHEL/CentOS
-Stream 9 kernels carry the backport). `auto`, the default, lets felis-api decide
-at startup: it runs one `userns-probe-*` Job in `felis-build` and turns the
-feature on only when that pod ran. The api log says which way it went:
-
-```
-felis api: build pods run in a user namespace (hostUsers: false)
-felis api: build pods run without a user namespace: this node cannot start a pod with hostUsers: false
-```
-
-`on` forces it (builds then fail to start on a node that cannot do it), `off`
-never uses it.
-
-**Sandbox runtime (`build_runtime_class`).** Naming a RuntimeClass runs build
-pods under it, for example gVisor (`runsc`) or Kata. The class must exist
-(`kubectl get runtimeclass`), and kaniko must work under it: gVisor needs its
-default `overlay2` rootfs, and Kata needs nested virtualization on a VM node.
-Leave it empty unless you have installed and tested one.
-
-**Disk (`build_disk_limit`, default `12Gi`).** This caps kaniko's writable layer
-(the unpacked base image) and, as the largest limit in the pod, the pod's total
-disk: extracted context, unpacked base image and image tarball together. The
-kubelet enforces it by eviction on its housekeeping sweep, so a build that runs
-past it is killed within seconds. The build then fails with `Evicted` in
-`kubectl -n felis-build describe pod`. Raise it for very large modpacks, and
-keep the node's free disk above it.
-
-**Residual risk.** Without a user namespace or a sandbox runtime, the build runs
-as root in a container on the same kernel as the game servers and the control
-plane. Seccomp and the dropped capabilities remove the common escape primitives.
-A kernel vulnerability reachable through the remaining syscalls still reaches
-the node, and on a single-node install the node is the whole platform. Admin
-approval is the control that remains: read the Dockerfile and download the
-context before approving. On a node
-where the probe comes back negative, a kernel upgrade that brings idmapped
-mounts is the cheapest hardening available.
-
----
-
-## 9. Registry push/pull failures (spec §15) {#_9-registry-push-pull-failures-spec-§15}
-
-The in-cluster registry is Deployment/Service/PVC named `registry` in the
-control namespace (or `--registry-namespace`):
-
-- **Push/pull target (the exact string to match):**
-  `registry.<ns>.svc:<port>` (port from `--registry-port`, default `5000`;
-  e.g. `--felis-image registry.felis.svc:5000/felis:v1`). A *wrong* push URL is
-  caught at build time by the validate gate (§8a, `400`). An *unreachable*
-  registry at runtime (wrong DNS/port, PVC unbound, missing default StorageClass)
-  surfaces as kaniko push or kubelet pull errors — [INTEGRATION-ONLY], **not** a
-  Felis-emitted string.
-- **Storage:** PVC is RWO, `10Gi` by default (`FELIS_REGISTRY_STORAGE` on the
-  first install, `--registry-storage` for `felis manifests`), mounted at
-  `/var/lib/registry`, **no `storageClassName`** → binds the cluster default
-  class. If the cluster has no default StorageClass the PVC stays `Pending` and
-  the registry never starts. On k3s local-path the size is a label: the volume
-  is a directory on the node disk and can outgrow it. What bounds the registry
-  there is the pruner and the garbage collector below. The uploads PVC
-  (`FELIS_UPLOADS_STORAGE`, 5Gi) and the world-archive PVC
-  (`FELIS_BACKUP_STORAGE`, 10Gi) work the same way; re-running the installer
-  keeps an existing claim's size and warns when the variable asks for another.
-  One uploaded context is capped by `context_max_bytes` (1Gi; the panel checks
-  the file against it before uploading). The panel sends a context in parts of
-  at most 32 MiB, staged under `.parts/` on the uploads volume, so the
-  Cloudflare edge, which answers its own 413 page for request bodies over
-  100 MB, never sees a body that large; a dropped connection resumes from the
-  staged length, and a staged upload untouched for 24 hours is deleted. The
-  staged bytes count toward the budgets below. A script can still POST a whole
-  context in one body, which the edge caps at 100 MB. With an `s3://`
-  `user_uploads_context`, felis-api sends the finished context on to the bucket
-  in 8 MiB parts, so an upload of any size holds 8 MiB of its memory; S3's
-  10,000 parts put the ceiling at about 78 GiB.
-  Uploaded build contexts are bounded by `user_uploads_max_bytes` (4Gi for all
-  users together, §8e), 2 GiB per user, and 10% free space on the volume; past
-  any of them an upload answers `507 uploads_full` or `403 submission_quota_exceeded`. A
-  rejected submission's upload is deleted 7 days after the verdict; an approved
-  one stays as the source for a rebuild.
-- **Unused images are deleted, in two steps.** Every 6 hours felis-api deletes
-  the manifests nothing uses (the log says `registry prune finished … deleted=N`).
-  It keeps: every whitelist entry (tag, `:*` wildcard, digest), every server's
-  pinned image, running builds, the control-plane, Kaniko and Trivy images, the
-  Trivy DB copies, anything pushed in the last 24 hours, and the 5 newest tagged
-  builds of each `felis/` and `mirror/` repository. To keep an older game build,
-  whitelist its versioned tag (§15b). Once a day the `registry-gc` sidecar then
-  frees the layers no remaining manifest names: it asks the gate for a read-only
-  window after 2 minutes without writes, runs `registry garbage-collect`, and
-  hands the window back (`kubectl -n felis logs deploy/registry -c registry-gc`).
-  During the window pulls work and every write answers `503` with
-  `Retry-After`; the installer and build pushes wait it out. A gate restarted
-  mid-sweep comes back read-only until the lease ends. To sweep now:
-  `kubectl -n felis exec deploy/registry -c registry-gc -- rm -f /var/lib/registry/.felis-last-gc`
-  and restart the pod.
-- **The registry volume is lost:** re-run the installer; it pushes every
-  platform image again. With the off-site copy on (§16),
-  `sudo felis offsite fetch-images` pushes the user images back at their old
-  digests, so servers pinned to them pull again; it pushes only what the
-  registry lacks, so a second run after an interruption is cheap. Without an
-  off-site copy of the images, user images come back from their approved
-  submissions (whose uploads the off-site copy also carries):
-  the uploaded context of an approved submission stays on the uploads PVC
-  (`GET /api/v1/submissions/{id}/context`, its `context_ref` and `image_ref`
-  are in `GET /api/v1/submissions`), so an admin can build it again through
-  `POST /api/v1/images/build`. Servers pinned to a digest the new registry
-  lacks fail to pull until an admin picks a current image for them (§15b).
-- **Node-side pulls:** containerd cannot dial the Service VIP (the live stack
-  answered "Empty reply"), so the registry Deployment binds a loopback hostPort
-  (`127.0.0.1:<port>`) and the installer writes a `/etc/rancher/k3s/registries.yaml`
-  mirror relaying `registry.<ns>.svc:<port>` onto it. That pair is what lets
-  kubelet re-pull a garbage-collected image; both halves must survive together
-  (remove either and every pull after an image GC fails).
-- **Memory:** the registry's limit is 2Gi, deliberately larger than the other
-  control-plane pods' 256Mi — a live 475MB-layer push OOM-killed the 256Mi
-  template mid-upload (audit #46). Very large layers need headroom here, not
-  more CPU.
-- **Write authorization:** registry:2 listens on the pod's loopback only; the
-  `registry-gate` sidecar (`felis registry-gate`, the felis image) owns the port and
-  the hostPort. Reads are anonymous — containerd, Kaniko and Trivy pull without a
-  credential — but an anonymous `GET /v2/` answers `401 Basic` so docker knows to
-  send the credential on a push. Every write needs HTTP basic auth against a token
-  in the `felis-registry-auth` Secret: `platform` may write anything (the
-  installer's own images, the `mirror/` DB copies); `build` (a build Job's `push`
-  container, via `felis-registry-push` in `felis-build`) may write anything outside
-  `felis/` and `mirror/` and may never delete. A missing Secret leaves the registry
-  read-only rather than down. The tokens persist in `/etc/felis/secrets.env`;
-  `sudo felis rotate-token -yes registry` replaces all three and restarts the
-  registry (the gate reads its tokens at start) and felis-api, which presents the
-  `prune` token (§6 "Rotating a token").
-- **Who can connect:** `felis-registry-ingress` admits only the `felis-build`
-  namespace to the registry pod. Node-local traffic (containerd pulls, the
-  installer's pushes through the hostPort) is always allowed by Kubernetes; game
-  servers cannot reach it at all (`felis-server-egress`).
-- **GC pinning:** the registry pod's own images (registry:2 and the felis image
-  its gate runs) cannot be pulled from the registry they make up, so the installer
-  labels both `io.cri-containerd.pinned=pinned` in containerd and kubelet's image
-  GC never collects them. Check with `k3s ctr images ls | grep pinned`.
-- **The registry image is pinned by digest**
-  (`docker.io/library/registry:2.8.3@sha256:a3d8aaa6…`), and the installer
-  caches it with `k3s crictl pull`. On an air-gapped node, carry it over with
-  containerd's own export, which keeps the digest ref. On a connected machine
-  with k3s or containerd (`R` is the full `docker.io/library/registry@sha256:…`
-  ref from `internal/platform/identities.go`):
-  `ctr images pull --all-platforms $R && ctr images export --all-platforms
-  registry.tar $R`; on the node: `k3s ctr images import --all-platforms
-  registry.tar`, then re-run the installer to pin it. A `docker save` round trip
-  rewrites the manifest, and kubelet will not match it to the digest.
-- **Selector quirk worth knowing:** the registry Service selector is only
-  `name + component=registry` — it deliberately lacks the
-  `part-of=felis-control-plane` label, so the registry is *invisible* to the
-  RCON-peer NetworkPolicy selector. This is intended isolation, not a bug; do not
-  "fix" it by adding the label.
-
-Registry manifest rendering is [GO-TESTED]; actual serving is
-[CODE-ONLY/INTEGRATION-ONLY].
-
----
-
-## 10. World reaper: false-deletes and skipped backups (spec §18) {#_10-world-reaper-false-deletes-and-skipped-backups-spec-§18}
-
-The reaper is a **run-once daily CronJob batch**, not an operator controller.
-Every install with an archive store gets it. Without `FELIS_WORLDS_HOST_PATH`
-it runs `felis reaper --retention-only`: it deletes backups past their expiry,
-reads archives back and sweeps the store (the second half of "A failed reaper
-Job" below), never looks at a server, and its summary shows `evaluated=0`. The
-installer says so (`idle-world retention is off`). Setting the worlds root on a
-re-run turns world reaping on. [GO-TESTED: `TestRunRetentionTouchesNoWorld`,
-`TestReaperCronJob_Gating`, `TestReaperCronJob_RetentionOnlyShape`.]
-
-With a worlds root the reaper
-reaps a world only when `now - last_active_at > 15d` (`inactive_15d`); the 15-day
-deadline is **hard-fixed in code** (only `warn_before` / `retention` /
-`max_local_bytes`, the on-demand backup keys `manual_retention` /
-`manual_keep` / `manual_cooldown` and the scheduled backup keys
-`scheduled_every` / `scheduled_keep` / `scheduled_retention` are configurable
-from `felis.toml [archive]`). The Owner can override every one of these keys
-except `warn_before` in the panel ("Retention set in the panel" below).
-
-### What a backup contains {#what-a-backup-contains}
-
-A backup tars the server's ENTIRE data volume — the same volume the server mounts
-at `/data`: world folders, `server.properties`, plugins/mods, configs, jars,
-libraries, logs and cache, not just the `world/` directory. A restore replaces the
-volume's contents with the archive (files added since the backup are pruned), so a
-restore also rolls config/plugin changes back. Sizes are dominated by
-libraries/cache on stock Paper servers (~170MB for a fresh instance before any
-world growth) — do not size the archive PVC as if only world data were stored.
-
-### The backup-before-delete invariant {#the-backup-before-delete-invariant}
-
-The reap sequence (all [GO-TESTED] hermetically) preserves the world unless a
-**confirmed, DB-recorded backup exists**:
-
-0. The world must be at rest before it is archived. A server still meant to
-   run is told to stop (`desiredState: Stopped`) and left for the next run; one
-   still stopping, whose game pod still exists, or whose world a restore,
-   backup or file change holds is left too. Each of these counts in
-   `awaiting_stop=` and does not fail the run. Once the server is down, the
-   reaper takes the world's maintenance lock (§3b) and holds it through the
-   archive and the volume delete: nothing can start the server or touch its
-   world in between. A lock the reaper can no longer rewrite, or one someone
-   else removed, ends the reap before `DeletePVC`. [GO-TESTED:
-   `TestHoldWorldStopsARunningServer`, `TestHoldWorldWaitsUntilQuiet`,
-   `TestReapLostHoldKeepsWorld`; live-drilled: a running server was told to
-   stop on the first run and archived and deleted under `reap@…` on the next.]
-1. `ensureCapacity` (only if `max_local_bytes > 0`) frees room by evicting
-   owners' on-demand backups first, oldest first, then reaper archives whose
-   off-site copy is confirmed. The only copy of a reaped world is never
-   evicted: it stays until `retention` expires it. Still full ⇒ world
-   **preserved** (not deleted), counted in `store_full=`. [GO-TESTED:
-   `TestCapacityEvictionOrderSparesSoleCopies`; PG-TESTED:
-   `TestManualBackupRationing`]
-2. `Archiver.Archive` fails ⇒ world **preserved**, PVC untouched.
-3. `InsertBackup` (DB) fails ⇒ the orphan archive is deleted, PVC **untouched**.
-4. With an `[offsite]` bucket configured (§16), the archive must also be in the
-   bucket: until `felis offsite sync` has copied it and set `offsite_at` on its
-   `world_backups` row, the run logs `world archived, kept until the archive's
-   off-site copy is confirmed`, counts it in `awaiting_offsite=` and leaves the
-   PVC alone. The next daily run after the copy reuses the same archive and
-   deletes. [GO-TESTED: `TestReapWaitsForOffsiteCopy`]
-5. **Only then**, with the lock still held, `DeletePVC` → `ReleaseWorld` →
-   audit → `felis_reaper_worlds_deleted_total++`, and the lock is dropped.
-
-An archive the run reuses (step 4's second run, or a reap interrupted after
-its archive) is read back end to end and checked against the sha256 recorded
-when it was written before the world goes. One that does not match is marked
-corrupt, never offered for restore, and replaced by a fresh archive; one that
-cannot be read at all keeps the world until the next run. [GO-TESTED:
-`TestReapReadsBackReusedArchive`, `TestReapReplacesCorruptArchive`,
-`TestReapKeepsWorldWhenReadBackFails`.]
-
-So a missing backup never results in a deleted world, and with a bucket
-configured neither does a backup that exists on this disk only. [GO-TESTED:
-`TestReapArchiveFailurePreservesWorld`,
-`TestReapInsertBackupFailurePreservesWorld`, `TestReapIdleWorldFullSequence`.]
-
-`awaiting_offsite` that stays above zero for more than a day means the copy is
-failing: `sudo felis offsite status` (§16).
-
-### A failed reaper Job {#a-failed-reaper-job}
-
-Each run ends with one line:
-
-```
-felis reaper: evaluated=12 reaped=1 released=0 deleted=0 awaiting_offsite=0 awaiting_stop=0 warned=2 skipped=0 store_full=0 evicted=0 expired=3 expire_failed=0 verified=6 corrupt=0 verify_failed=0 swept=0 orphan_archives=0
-```
-
-`released` and `deleted` count retirements carried out: servers their owner gave
-up (or an admin released) and servers an admin deleted, each world archived
-first as a `released` backup. `skipped` counts servers the run failed on (steps
-1–3 above, or the cluster or the database answering with an error; exempt
-servers and rows whose CRD is gone are not counted, except a deletion whose
-MinecraftServer is gone while its world volume remains), `store_full` the subset kept because the backup store is full,
-and `expire_failed` expired backups it could not remove. `awaiting_stop` counts
-idle servers left for the next run because they were not yet down (step 0); it
-does not fail the run, but a server that stays there for days is being started
-again by something, or a Job keeps holding its world.
-
-After the servers, every run looks after the archive store itself:
-
-- `verified` archives were read back and matched their recorded sha256; each
-  run reads back up to ten archives not checked in the past week, oldest check
-  first. `corrupt` ones did
-  not match (or are gone from the volume) and are marked so: the backup page
-  shows them as damaged and refuses to restore them. `verify_failed` ones could
-  not be read at all and are retried the next run.
-- `swept` counts leftovers of an interrupted archive (`*.partial` files older
-  than six hours) the run removed. `orphan_archives` counts finished archives
-  no backup record points to; they are kept until they are older than
-  `retention`, then removed, and each run lists the first few by path.
-
-`skipped`, `expire_failed`, `corrupt`, `verify_failed` above zero, or a sweep
-that could not finish, make the process exit 1: the worlds are safe, but the
-Job fails so the watchdog mails `world reaper Job … failed` and
-`FelisWorldJobFailed` fires. The Job retries
-twice (`backoffLimit`), each retry re-running the whole batch, which is safe
-because every step is idempotent. Read the error above the summary:
-
-```sh
-kubectl -n minecraft logs job/<the failed felis-reaper-… Job>
-```
-
-A server that fails every day keeps its world and is retried every day, so the
-Job fails every day until the cause is fixed; after 26 hours the watchdog also
-reports `the world reaper has not succeeded for …`. [GO-TESTED:
-`TestReportReaperRunFailsTheJob`, `TestExpiryFailureFailsTheRun`,
-`TestCapacityStillFullSkipsReap`.]
-
-### On-demand backups (Back up now) {#on-demand-backups-back-up-now}
-
-An owner's "Back up now" writes a `manual` backup into the same store and onto
-the same disk as the worlds and the database. On a stopped server the Job
-archives the world volume as it is; on a running one it takes a live backup
-(next section). Either way it is rationed, by these `[archive]` keys or the
-values the Owner saved in the panel ("Retention set in the panel" below):
-
-| Key | Default | Effect |
-|---|---|---|
-| `manual_retention` | `30d` | when a manual backup expires (reaper archives use `retention`) |
-| `manual_keep` | `5` | manual backups kept per server; after each backup the Job removes older ones and prints `removed older backup …` |
-| `manual_cooldown` | `10m` | one owner-started backup per server per window; the next one gets `429 backup_cooldown` with `Retry-After` (`0s` disables) |
-
-While the present backups add up to `max_local_bytes` or more, owners get
-`507 backup_store_full`. Admins and the break-glass console are exempt from the
-cooldown and the cap. Whoever starts it, the backup Job refuses to write an
-archive that would leave less than 10% of the archive filesystem free: it fails
-with `not enough free disk for the archive`. A failed backup or restore shows
-the error its container exited on under Recent operations on the server's
-backup page. [GO-TESTED: `TestBackupNow`, `TestCheckRoom`,
-`TestReaperConfigManualKeys`, `TestLatestJobsExplainsFailures`]
-
-### Live backups: backing up a running server {#live-backups-backing-up-a-running-server}
-
-A backup of a running server leaves it running. "Back up now" on a running
-server, the scheduled restore point of a running world (below), a scheduled
-task's backup (§19) and `felis backup-now` all take a live backup, after the
-snapshot mode of Proxmox VE, with the game's own save system in place of a
-filesystem snapshot:
-
-1. felis-api admits the backup only for a server that is running and ready
-   and whose world nothing else holds (§3b). It records the freeze on the
-   MinecraftServer (annotation `felis.lolicon.best/live-backup`, naming the
-   backup Job and the game pod it froze) together with the world lock, so a
-   felis-api that restarts mid-backup still finishes it.
-2. Over RCON it turns saving off (`save-off`) and writes everything in memory
-   to disk (`save-all flush`, allowed up to 2 minutes on a large world). The
-   world on disk is then complete and stays still.
-3. The backup Job's init container (`felis stage-world`) copies the world,
-   mounted read-only, into a scratch volume on the same node. Where the
-   filesystem supports it (XFS, Btrfs) each file is cloned by reflink, which
-   makes the copy near-instant whatever the world's size. The copy refuses to
-   start when the scratch volume has less free space than the world occupies.
-4. felis-api checks every 2 seconds and turns saving back on (`save-on`) the
-   moment the copy step exits. The archive, its sha256 and the read-back then
-   run from the copy while the game keeps running.
-
-Players see saving paused only for the copy, a matter of seconds for a few GB.
-Saving stays off for at most 5 minutes: a copy still running then is dropped
-and saving comes back on. A server whose saving was already off before the
-backup keeps it off afterwards. The freeze has these costs:
-
-- A crash during the freeze loses what changed since the flush, as any crash
-  between two autosaves does, and chunks stay loaded meanwhile. The operator
-  does not idle-stop a frozen server, and before scaling one down it waits a
-  bounded time for the freeze to end, so the shutdown's own save does not land
-  in the middle of the copy.
-- A game that restarted mid-copy saved on its way down, so its copy is
-  dropped as possibly torn.
-- Plugin databases written outside the save system (SQLite, H2) are copied as
-  they stand at the moment of the copy, which can be later than the flush.
-
-The live backup is otherwise an ordinary backup: the same Job, the same
-cooldown, cap and keep-N as above, the same 10% free-disk check, and the audit
-action `backup.create` (or `backup.scheduled`) with `{"live":true}` in its
-payload. A refusal names its cause:
-
-| Answer | Cause | Fix |
-|---|---|---|
-| `409 not_stopped`, `the server is starting or stopping; back it up once it is running or stopped` | the server is between states: neither running and ready, nor stopped | retry once it has settled |
-| `503 live_backup_console` | the game did not answer `save-off` or `save-all flush` over its console: RCON is off (a user server created before RCON was the default, §12b) or unreachable (§1c) | retry, stop the server and back it up stopped, or turn its RCON on with `sudo felis converge -user-rcon` (§12b) |
-| `409 maintenance_in_progress` | another operation holds the world, a restart is under way, or another live backup is still copying | retry once it ends (§3b) |
-| `409 not_stopped`, `stop the server before backing up its world` | this felis-api cannot back up a running server (no console, or a backup executor without live support) | stop the server first |
-
-[GO-TESTED: `TestLiveBackupFreezesCopiesAndThaws`,
-`TestLiveBackupLeavesSavingOffWhenItWasOff`, `TestLiveBackupUndoesAFailedStart`,
-`TestSettleLiveBackupDropsATornCopy`, `TestSettleLiveBackupKeepsTryingSaveOn`,
-`TestSettleLiveBackupRecoversAnUnrecordedJob`, `TestLiveBackupRefusesAServerInTransit`,
-`TestAcquireLiveBackupAdmitsOnlyARunningFreeServer`, `TestLiveBackupRecordLifecycle`,
-`TestLiveBackupProgressReadsTheCopyStep`, `TestBackupJobLiveCopiesBeforeArchiving`,
-`TestBackupLiveReturnsTheJobItCreated`, `TestStageWorldCopiesTheFrozenWorld`,
-`TestStageWorldRefusesWhatItCannotHold`]
-
-### Deleting one backup {#deleting-one-backup}
-
-The delete button on a backup row (`DELETE /api/v1/backups/{id}`) takes that backup
-out of every list, every restore and the `max_local_bytes` count at once: its row
-turns `expired`, with `expires_at` pulled back to the moment of the delete. An admin
-may delete any backup, a user only one of a world they owned (the scope that lists
-it); any other id is `404 no_backup`. While a restore on that server may be reading
-the archive (a restore Job still running, or a safety snapshot whose restore of this
-backup has yet to start) the delete is `409 restore_in_progress`. The audit action
-is `backup.delete`, with the backup id, former owner and size in its payload.
-
-The archive stays on the backup volume until the reaper's next daily run, whose
-retention pass deletes every `expired` row's archive whatever its `expires_at`; the
-off-site copy goes at the sync after the delete. Until that run an admin can take
-the delete back, with the id from the audit entry; clearing `offsite_at` has the
-next sync copy it off site again in case its copy is already gone:
-
-```sh
-sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c \
-  "UPDATE world_backups SET status = 'present', expires_at = now() + interval '30 days', offsite_at = NULL
-   WHERE id = '<backup id>' AND status = 'expired'"
-```
-
-[GO-TESTED: `TestDeleteBackup`, `TestExpiredBackupsDeleted`,
-`TestSyncExpiresOnlyPastRetention`; PG-TESTED: `TestOwnerDeletedBackup`]
-
-### Downloading a backup or the world (export) {#downloading-a-backup-or-the-world-export}
-
-The download button on a backup row (`POST /api/v1/servers/{name}/backups/{id}/export`)
-and "Export world" in the page header (`POST /api/v1/servers/{name}/world/export`)
-hand the owner a `.tar.gz`. Who may download a backup follows delete and restore:
-an admin any, a user only one of a world they owned (`404 no_backup` otherwise), a
-backup of another server is `403`, and a corrupt one `409 backup_corrupt`. The
-world export needs the server stopped (`409 not_stopped`) and a world volume
-(`409 no_world_volume`), and it takes the world like a backup does (§3b), so
-nothing starts the server until the download ends. The audit actions are
-`backup.export` and `world.export`.
-
-Neither archive is staged anywhere. felis-api starts a `felis-export` Job in the
-server namespace (managed-by `felis-export`, label `felis.lolicon.best/export-mode`
-`world` or `backup`), which mounts the world or the backup volume read-only and
-PUTs the archive to felis-api's internal face with a one-time token; felis-api
-streams it straight to the browser. The panel polls `GET /api/v1/exports/{ticket}`
-until it reads `ready`, then opens `GET /api/v1/exports/{ticket}/download` as a
-plain link. The ticket belongs to the user who asked, opens the download once,
-and has these clocks:
-
-| Limit | Value | When it runs out |
-|---|---|---|
-| Job reaching felis-api | 10 min | the ticket answers `410 export_expired` |
-| Browser opening the download once `ready` | 90 s | the Job's upload gets `410`, the ticket is spent |
-| Either end sending nothing mid-transfer | 2 min | the download is cut off |
-| The Job as a whole | 2 h (`activeDeadlineSeconds`) | Kubernetes ends it |
-
-At most one export per user runs at a time, two across the platform, and six per
-user per hour; past any of them the start is `429 export_busy` with `Retry-After`.
-A deployment without `FELIS_IMAGE` and `FELIS_BACKUP_PVC` answers
-`503 export_unavailable` (felis-api logs `world export disabled` at start).
-
-A backup download carries the archive's length and is checked against the sha256
-recorded when it was written. The last chunk is held back until the digest
-matches, so a mismatch cuts the download off short, the browser shows it failed,
-and the Job exits with `409 backup_corrupt`. A digest mismatch does not mark the
-backup corrupt; the reaper's next read-back does. A world download has no length
-and no digest: a read error in the Job cuts it off the same way.
-
-Why an export failed shows under Recent operations as the Job's last line. A Job
-that fails before it reaches felis-api (an archive missing from the backup
-volume, say) also ends the panel's wait with that line. The rest happen after
-the panel has handed the download to the browser:
-
-- `felis-api answered 410 Gone: this export has expired …`: nobody opened the
-  download within 90 s (the tab was closed, or the browser blocked the download).
-- `felis-api answered 410 Gone: the download ended before the archive did …`:
-  the browser cancelled or lost the connection mid-way.
-- `felis-api answered 404 Not Found: no such export`: felis-api restarted since
-  the export began, or the ticket had already run out. Tickets live only in
-  felis-api's memory, so start the export again.
-
-A world export whose Job never reaches felis-api keeps the world until the Job's
-deadline; `kubectl -n minecraft delete job -l app.kubernetes.io/managed-by=felis-export,felis.lolicon.best/server=<name>`
-releases it at once. [GO-TESTED: `TestExportBackupGate`, `TestExportWorldGate`,
-`TestExportLimits`, `TestExportRendezvous`, `TestExportExpiry`,
-`TestExportStatusReportsFailedJob`, `TestExportRegistryRaces`,
-`TestExportBackupDigest`, `TestExportUploadPace`, `TestK8sExportJobs`,
-`TestExportJobIsolation`, `TestExportJobDefaults`, `TestCmdExportWorld`,
-`TestCmdExportBackup`, `TestCmdExportWiring`]
-
-### Every world at once: `felis backup-now` {#every-world-at-once-felis-backup-now}
-
-A world lives only in its volume, and the off-site copy holds only its archives.
-Before anything that could lose a volume (growing the disk, moving the data to its
-own disk, moving to another host: [Operations guide §2](/en/operations/#_2-sizing) and [Operations guide §5](/en/operations/#_5-disaster-recovery)), archive every world
-from the node:
+When you ask someone for help, attach a support bundle:
 
 ```bash
-sudo felis backup-now                    # the plan; nothing changes
-sudo felis backup-now -yes               # archive every world, one at a time; running servers live
-sudo felis backup-now -yes -stop         # stop the running servers first and leave them stopped
-sudo felis backup-now -yes alpha bravo   # only these servers
+sudo felis support-bundle
 ```
 
-It runs as root because it reads the ops token (`felis/felis-ops-token`, §6) and
-asks felis-api's internal face for each backup. Each archive is an ordinary manual
-backup (the same Job, the same 10% free-disk check, the audit action
-`backup.create` with the source `internal:ops` and the sudo user as actor), exempt
-from the owner cooldown and the `max_local_bytes` cap like the break-glass console.
-
-- **The plan** lists every user server with its phase and what the run does with
-  it: `back up` (stopped), `back up while it runs (saving pauses for the copy)`
-  (running and ready), `stop, then back up` (running, with `-stop`), `skip:
-  starting or stopping (run again later, or pass -stop)`, or `skip: no world
-  volume (never started, nothing to save)`. With nothing to archive it ends
-  `Nothing to back up.`
-- **Running servers are backed up live** ("Live backups" above): their players
-  stay on, and the game stops saving only while its world is copied. Each
-  request returns once the game has flushed its world and the Job exists, which
-  can take up to 2 minutes on a large world. A running server whose console
-  does not answer (RCON off, §12b) fails its backup; back it up with `-stop`,
-  or turn its RCON on first.
-- **Each archive counts against `manual_keep`**: a server that already holds that
-  many manual backups loses its oldest, and the plan says so. Raise
-  `[archive] manual_keep` (or the panel's value, below) first when those older
-  backups matter.
-- **Stopped servers go first**, so a felis-api that cannot take a backup is found
-  before anything is stopped for one. The run waits for each Job (`alpha: archived
-  in 42s`) before starting the next.
-- **`-stop` stops each running server before its backup**, as every run did
-  before live backups. This disconnects its players, and the server stays
-  stopped (`Left stopped: …`; start them from the panel). It also takes the
-  servers that are starting or stopping. Use it when no world may change after
-  its archive, as before a move to another host ([Operations guide §5](/en/operations/#_5-disaster-recovery)). Each stop
-  writes `break_glass.halt` to the audit log. A server still up after 10
-  minutes counts as failed, and the run moves on.
-- **An unreachable felis-api ends the run** (`Stopped: nothing more can be backed
-  up until felis-api answers`). Ctrl-C ends it after the current step; a backup Job
-  already started runs to its end.
-- **The archives stay on the node** until the hourly off-site copy. After a run
-  that archived something the command prints `sudo systemctl start
-  felis-offsite.service`, which sends them now; `sudo felis offsite status` shows
-  what still waits.
-
-The run ends with a count (`3 backed up, 1 skipped (starting or stopping).`). It
-exits 0 when every world with a volume was archived, 1 when a backup failed, a
-server starting or stopping was skipped (no `-stop`) or the run was interrupted,
-and 2 for a name that is no user server. [GO-TESTED:
-`TestBackupNowPlanChangesNothing`, `TestBackupNowPlanWithNothingToSave`,
-`TestBackupNowBacksUpEachWorldInTurn`, `TestBackupNowBacksUpRunningServersLive`,
-`TestListBackupNowWorlds`, `TestBackupNowStopsAtAnUnreachableAPI`,
-`TestBackupNowStopsWhenInterrupted`, `TestBackupNowNamedServers`]
-
-### Scheduled backups (daily restore points) {#scheduled-backups-daily-restore-points}
-
-A world played every day never idles 15 days, so the reaper never archives it.
-felis-api therefore takes a `scheduled` backup of every owned world that
-somebody joined since its owner's last intact scheduled backup, once that
-backup is `scheduled_every` old. This works without a worlds root: it is the
-same backup Job "Back up now" starts, so it needs only `FELIS_IMAGE` and
-`FELIS_BACKUP_PVC` (felis-api logs `scheduled backups off (needs the backup
-executor)` at start when either is missing). A `scheduled_every` of `0s`, in
-felis.toml or in the panel, turns the points off; felis-api reads it again at
-every check, so a change in the panel needs no restart.
-
-| Key | Default | Effect |
-|---|---|---|
-| `scheduled_every` | `1d` | how old a world's newest scheduled backup must be before it gets the next one (`0s` turns scheduled backups off) |
-| `scheduled_keep` | `7` | scheduled backups kept per server and owner; the Job removes older ones like `manual_keep` |
-| `scheduled_retention` | `90d` | when a scheduled backup expires |
-
-How it behaves:
-
-- **Running worlds are taken live.** A stopped world is archived as it is; a
-  running one gets a live backup (above), its saving paused only while the
-  world is copied, so a server kept running around the clock gets its daily
-  point too. A server starting or stopping, or whose world another operation
-  holds, waits for a later check. One whose game does not answer its console
-  (`live_backup_console` above) is tried again after a quarter of
-  `scheduled_every`.
-- **One Job at a time, cluster-wide.** felis-api checks every 2 minutes and
-  starts one scheduled backup only while no backup or restore Job is running,
-  worlds without a point first. It holds the world like any backup, so a player
-  who wakes a stopped server during those minutes sees the maintenance message
-  and can retry once it finishes.
-- **Paused while the store is full.** While the present backups add up to
-  `max_local_bytes`, no scheduled backup starts (felis-api logs
-  `scheduled backups paused` and `resumed` once each). The backup Job's 10%
-  free-disk check applies too.
-- **A failed backup is retried** after a quarter of `scheduled_every` (6 hours
-  by default); the failure shows under Recent operations as "Scheduled backup".
-- **Counted per owner.** A backup the world's previous owner took before it was
-  reaped and claimed again is no restore point of the new owner's world, and the
-  new owner's backups never prune it. The keep-N prune of every reason is scoped
-  to the backup's owner the same way.
-- Scheduled backups write the audit action `backup.scheduled` (actor
-  `scheduler`) and never start the owner's `manual_cooldown`. They are copied
-  offsite and evicted by `max_local_bytes` like manual backups.
-
-[GO-TESTED: `TestBackupScheduler`, `TestK8sScheduledBackupJobs`,
-`TestBackupJobRecordsAScheduledBackup`, `TestBackupPolicyPerReason`,
-`TestReaperConfigScheduledKeys`, `TestBackupSchedulerTakesARunningWorldLive`,
-`TestScheduledBackupsFollowThePolicy`; PG-TESTED: `TestScheduledBackupCandidates`,
-`TestExcessBackupsPerOwner`]
-
-### Retention set in the panel {#retention-set-in-the-panel}
-
-The Owner can set the backup and audit retention on the panel's **Platform
-settings → Backup and audit retention** card instead of in `felis.toml`. The
-values live in one `platform_settings` row (`archive_policy`), and each
-overrides the matching key of `[archive]` or `[audit]`:
-
-| Panel field (API key) | Overrides | Bounds |
-|---|---|---|
-| Manual backups, kept per server (`manualKeep`) | `manual_keep` | 1–100 |
-| Manual backups, days kept (`manualRetentionDays`) | `manual_retention` | 1–3650 days |
-| Minutes between two backups (`manualCooldownMinutes`) | `manual_cooldown` | 0–1440 (0: no cooldown) |
-| Scheduled restore points, interval (`scheduledEveryHours`) | `scheduled_every` | 0–720 hours (0: off) |
-| Scheduled restore points, kept per server (`scheduledKeep`) | `scheduled_keep` | 1–100 |
-| Scheduled restore points, days kept (`scheduledRetentionDays`) | `scheduled_retention` | 1–3650 days |
-| Days a removed world's archive is kept (`releasedRetentionDays`) | `retention`, which covers every archive the reaper writes: of idle, released and deleted worlds | 1–3650 days |
-| Backup store cap (`maxStoreGiB`) | `max_local_bytes` | 0–1048576 GiB (0: no cap) |
-| Days audit rows are kept (`auditRetentionDays`) | `[audit] retention` (§17) | 0 (keep every row), or 30–3650 days |
-
-Until a policy is saved, the card shows what felis.toml amounts to, rounded to
-the card's units (the store cap rounded up to whole GiB). felis-api applies a
-save at once, on every replica within 15 seconds; the backup Job reads the
-policy when it starts, and the reaper on its next daily run. `warn_before`
-stays in felis.toml. **Restore install-time settings** clears the row, and
-felis.toml applies again. A row that cannot be read leaves felis.toml in force:
-felis-api logs `felis.toml stands`, the backup Job and the reaper log `the
-panel's retention policy is unreadable, [archive] stands`. The off-site copy's
-removal of bucket objects no backup row lists (§16) waits for the longest of the
-three retentions in force, the panel's when it holds a policy.
-
-Saving and clearing take a fresh identity confirmation, like other sensitive
-changes; a save made against a policy that changed since the card loaded
-answers `409 conflict`. The audit actions are `platform.archive_policy` and
-`platform.archive_policy.clear`. API: `GET`, `PUT` and `DELETE
-/api/v1/settings/archive-policy` (Owner). [GO-TESTED: `TestValidateBounds`,
-`TestFromConfigAndApplyRoundTrip`, `TestArchivePolicyRoutesAreOwnerOnly`,
-`TestArchivePolicyOverridesTheHostAndHandsItBack`,
-`TestArchivePolicyAsksForAFreshProof`, `TestBackupLimitsFollowThePolicy`,
-`TestScheduledBackupsFollowThePolicy`, `TestOffsiteSyncerSnapshotsAndSweeps`]
-
-### Exemptions (world never reaped) {#exemptions-world-never-reaped}
-
-- `spec.reaperExempt=true` → skipped entirely (system servers). [GO-TESTED
-  `TestReapExemptServerNeverTouched`.]
-- CRD missing → logs `reaper: CRD missing, skipping`, skipped.
-- Idle `≤ 15d` → not yet eligible.
-
-### Pre-reap warnings (the `warn_before` offsets) {#pre-reap-warnings-the-warn-before-offsets}
-
-An OWNED server inside a warning window gets an email notice (`3d`/`1d` before
-the deadline, `warn_before` from `[archive]`) to the owner's **verified** email —
-the same relay felis-api uses: the one the Owner saved in the panel (§17,
-"The mail relay set in the panel"), else `[smtp]`. The reaper reads the panel's
-relay from the database at each run [CODE-ONLY]. The `warned_3d_at` /
-`warned_1d_at` stamps record a **delivered** notice:
-
-- No relay configured, in the panel or as `[smtp]` (or owner has no verified
-  address): the run logs `reaper: warning suppressed — no warner wired` / a
-  delivery error and does NOT stamp. Nothing is falsely recorded as sent, and
-  the day a relay is configured the pending warning can still go out.
-- Delivery failure (relay down): logged and retried on the next daily run —
-  bounded by the warning window, since the reap removes the candidate anyway.
-- `warned=` in the run output counts DELIVERED notices, not attempts.
-
-For the `[smtp]` relay, the reaper runs in the minecraft namespace and reads
-the **mirrors** of `felis-smtp` and `felis-config` there (a `secretKeyRef` is
-namespace-local). The
-installed `felis setup`'s "configure email" screen refreshes both mirrors when it
-applies, so configuring SMTP after install is enough; a manual edit of the
-control-namespace Secret alone is not. [GO-TESTED: the delivered/retried/
-suppressed matrix in `internal/reaper`; live-drilled end to end against a local
-SMTP sink.]
-
-The screen also keeps the password in `/etc/felis/smtp-password` (mode 0600),
-and the uploads screen keeps the bucket keys in `/etc/felis/uploads-s3-access-key`
-and `uploads-s3-secret-key`. Secrets live in k3s's datastore, which a reinstall
-or a host rebuilt from a bundle's `state/` starts empty, so **every installer
-run applies `felis-smtp` (both namespaces) and `felis-uploads-s3` from these
-files**. The files win: a hand edit of either Secret lasts until the next
-installer run, so change a credential through `felis setup`. An install from
-before these files gets them from the Secrets on its first re-run. When
-`[smtp]` has a `username` but no password is on either side, or uploads go to
-`s3://` without both keys, the installer says so and names the `felis setup`
-screen that takes them again. [SH-TESTED: `deploy/bootstrap_test.sh`, the move
-from the Secrets, the host copy winning, both warnings, no value in kubectl's
-argv. GO-TESTED: the host copy's mode and replacement.]
-
-### Genuine false-delete risk vectors {#genuine-false-delete-risk-vectors}
-
-- **Stale `last_active_at`.** The keep-alive is `RecordJoin`, called from the
-  internal `join-event` handler. **If join events are not delivered to the API,
-  the activity clock never resets** and an actively-played world becomes
-  reap-eligible after 15 days. Verify join events are flowing (§3a) — this is the
-  most important reaper check. [INTEGRATION-ONLY for the live Postgres write.]
-  A claim also resets it: `ClaimServer` sets `last_active_at` to the claim and
-  clears `warned_*`, so a world reaped long ago and claimed again gets a full 15
-  days, and a later reap archives the new owner's world rather than reusing the
-  previous owner's archive (`FreshBackup` counts only `inactive_15d` archives
-  taken since the claim). [PG-TESTED `TestReclaimRestartsReaperClock`.]
-- **Unowned servers are still reaped.** A server with `owner_id=""` gets **no
-  pre-deletion warning** (`maybeWarn` skips unowned), but is still reaped at 15d.
-  [GO-TESTED `TestReapUnownedServerStillReaped`.] Claim or exempt servers you
-  want to keep.
-- `DeletePVC` is idempotent (missing PVC is not an error), so a re-run will not
-  fail on already-reaped worlds.
-- **An idle server whose world volume is already gone.** With a fresh reaper
-  archive taken since the last activity, the run takes it as a reap that was
-  interrupted after the delete and finishes it (release, audit, count). An
-  unowned server with no such archive only has its idle clock restarted, so it
-  is neither counted nor audited again every day. An owned one is released and
-  audited once, since there is no world to archive. [GO-TESTED:
-  `TestReapFinishesInterruptedReap`, `TestReapUnownedWithoutWorldRestartsClock`,
-  `TestReapOwnedWithoutWorldReleases`.]
-
-Only `TarLocal` (tar+gzip) archiving is implemented; VolumeSnapshot/Longhorn
-backends return `not implemented in this build`. The live PVC delete / Postgres
-store paths are [INTEGRATION-ONLY].
-
-### Where worlds are read from (hostPath resolution) {#where-worlds-are-read-from-hostpath-resolution}
-
-The CronJob mounts `--worlds-host-path` read-only at `/worlds` through a static
-PersistentVolume (`felis-worlds-root-<digest>`, hostPath type `Directory`,
-`Retain`, pre-bound to the same-named PVC in the minecraft namespace), since the
-namespace's PodSecurity baseline refuses an inline hostPath in any pod. A
-re-install with a different worlds root or `--reaper-node` renders a new pair
-under a new digest; the old PV/PVC pair is left behind unused and can be
-deleted by hand (Retain: deleting it never touches the directory). The resolver
-runs `cmd/felis/reaper.resolveWorldDir`: it looks for `<root>/<pvc>`, then for
-the stock local-path directory `<root>/<pv-name>_<ns>_<pvc-name>` derived from
-the live PVC's `spec.volumeName` (never a glob — a leftover directory of a
-deleted PV must not stand in for the world the PVC currently binds). Pointing
-the flag at k3s's storage root (`/var/lib/rancher/k3s/storage`) is therefore the
-supported way to enable retention on a stock install. Two deployment facts the
-resolver cannot fix:
-
-- **Permissions.** The reaper Pod runs as **root** and carries `DAC_OVERRIDE`:
-  k3s's storage root is `0700 root:root`, worlds are written by the game uid
-  (1000) — or by root, for a world an older release wrote — and Paper saves
-  `level.dat` mode-0600, so a fixed non-root identity (the previous uid-1000
-  convention, and the ACL setup that went with it) could neither walk the tree
-  nor read the files — every archive failed `open …/level.dat: permission
-  denied`. The installer no longer grants uid 1000 any access to the storage
-  root: that uid is now the game servers'. If a world is still **preserved**
-  while a reap was expected, it is a different cause: check the run's ERROR
-  logs for the resolver's `lstat` messages before suspecting permissions.
-- **Node placement.** Multi-node clusters: the world's directory exists only on
-  the node holding its volume, so pass `--reaper-node`; it pins both the
-  CronJob's pod and the PV (single-node starters are pinned implicitly).
-
----
-
-## 11. Idle auto-stop never fires; player count always shows 0 {#_11-idle-auto-stop-never-fires-player-count-always-shows-0}
-
-Every server created from the panel or `felis apply` stops itself after 600 s
-with nobody online (`spec.idle`), and the next join wakes it. An admin changes
-or turns it off under **Edit server → Idle auto-stop**. A server created before
-this default has no `spec.idle` and never stops; `sudo felis converge` gives it
-the default (§12b). The login gate and the lobby never idle out, whatever their
-spec says.
-
-```sh
-kubectl get minecraftserver <name> -o jsonpath='{.spec.idle}'
-```
-
-Both idle stop and the player count also hang off **`spec.rcon.enabled`**.
-Check it next.
-
-```sh
-kubectl get minecraftserver <name> -o jsonpath='{.spec.rcon.enabled}'
-```
-
-The player tally is a by-product of the RCON readiness probe: `prober.go` runs
-`list` on the same connection that just authenticated, and `parseListReply`
-reads the tally from the vanilla/Paper/Fabric/Forge reply (`There are 3 of a
-max of 20 players online`), the 1.12/Bukkit reply (`There are 3/20 players
-online`) or the EssentialsX reply (`There are 3 out of maximum 20 players
-online`, vanished players included), with `§` color codes stripped. With RCON
-disabled the probe never runs and no tally is ever read, so a permanent 0 means
-"never sampled", not "nobody online".
-
-A tally that could not be read counts as **unknown**, never as zero. Idle
-auto-stop only acts on a count it actually read:
-
-```go
-if players.Known && server.Spec.Idle.AutoStopEnabled && server.Spec.Idle.EmptySecondsBeforeStop > 0 {
-```
-
-An unknown tally leaves `status.players` at the last real count, neither starts
-nor clears the empty countdown, and sets the `PlayersCounted` condition to
-`False` with reason `ListUnreadable`. So enabling `spec.idle.*` without RCON is
-a no-op by design, and a server whose `list` reply is in a format Felis does
-not know (a plugin that rewrites `/list`, a translated reply) never idles out:
-
-```sh
-kubectl get minecraftserver <name> -o jsonpath='{.status.conditions[?(@.type=="PlayersCounted")]}'
-# Reason ListUnreadable: run `list` in the server's panel console to see
-# what the server actually answers.
-```
-
-Fix it by restoring a supported `/list` (for example, drop the plugin's
-override or its translation of that one message). The server keeps running
-either way; only the idle stop waits.
-
-Both fields set and still nothing happens? Then the probe is failing rather than
-disabled: the server would be stuck in `Starting` with `RconNotReachable`
-(`reconciler.go:156`), which is §1's symptom, not this one.
-
-This path used to fail even with everything configured correctly, through three
-stacked defects proven and fixed on a live cluster (auditfix21/22): the
-`emptySince` stamp was pruned by a missing CRD status field, a quiescent empty
-server produced no watch events to re-check the timer, and the Role lacked the
-`minecraftservers:patch` grant the stop write needs. If auto-stop ever looks
-dead again, check these three in order (each is now pinned by a test):
-
-```sh
-# ① The stamp must persist — should print a timestamp, not an empty string,
-#    a few seconds after a server goes Ready with zero players.
-kubectl get minecraftserver <name> -o jsonpath='{.status.emptySince}'
-
-# ② The operator must be able to write spec.desiredState (403 in the operator
-#    log = missing patch grant on Role felis-operator).
-kubectl auth can-i patch minecraftservers -n <ns> --as=system:serviceaccount:<ctl-ns>:felis-operator
-
-# ③ A wake-up must be scheduled: while empty, expect whatever you set
-#    as emptySecondsBeforeStop to elapse and the box to flip to Stopped without
-#    any external action.
-```
-
-While players are online the operator re-probes on a 30s cadence so it notices
-the moment the last one leaves; while empty it schedules a wake-up exactly at
-the deadline. Quiet operator logs on an idle server are normal — the action is
-the scheduled wake-up, not a stream of reconciles.
-
-Note the reaper's `last_active_at` (§10) is a *different* subsystem (Postgres
-business layer, bumped by join events) — it keeps worlds alive against the
-reaper, but it does **not** auto-stop empty running servers.
-
----
-
-## 12. A configuration field seems to be ignored {#_12-a-configuration-field-seems-to-be-ignored}
-
-Every field below is read by a controller. What varies is the condition that
-decides whether setting it does anything.
-
-| Field | What you might expect | Reality |
-|---|---|---|
-| `spec.startup.timeoutSeconds` | Start budget before `Failed` | Read by `startupTimedOut` (`reconciler.go:479`), called at `:126`. `0` or unset falls back to **300s**, then `markFailed("StartupTimeout")` |
-| `spec.startup.readinessTimeoutSeconds` | First-probe budget | Read by `readinessTimedOut` (`reconciler.go:490`), called at `:157`. `0` or unset falls back to **300s**, then `markFailed("ReadinessTimeout")`. Not to be confused with the prober's own 5s dial timeout (`prober.go:45`) |
-| `spec.idle.autoStopEnabled` | Auto-stop empty servers | Read at `reconciler.go:175` — but gated on `spec.rcon.enabled`, since the player tally comes from the RCON probe (§11) |
-| `spec.idle.emptySecondsBeforeStop` | Empty grace period | Same branch. Must be `> 0`; the guard treats `0` as "off", not "stop immediately" |
-
-Both startup budgets are measured from the same `status.startRequestedAt`, so
-`readinessTimeoutSeconds` is not a budget *after* pod readiness — it is a
-deadline for the whole start, applied on the RCON-probe branch.
-
----
-
-## 12b. A newer field never reaches an already-installed system server (`felis converge`) {#_12b-a-newer-field-never-reaches-an-already-installed-system-server-felis-converge}
-
-Provisioning is create-if-absent: `felis setup` never rewrites an existing
-`login`/`lobby` `MinecraftServer` beyond the config-derived env it owns, so a
-field the desired spec gained after your install sits absent forever — this is
-how a deployment ends up with a lobby that has no `spec.rcon` (a dead console
-and an online-player count that is always 0) and a login gate without
-`spec.startup.healthHTTPPort`. `felis converge` is the explicit pass that fills
-exactly those zero-valued fields (and re-adds a derived env key that is
-missing). It never overwrites a value that already holds one — an operator's
-RCON secretRef or tuning survives.
-
-```
-sudo felis converge
-```
-
-Run it **after the images are in place**. Enabling RCON, or the HTTP readiness
-gate, on a server whose image predates the listener would hold that server in
-`Starting` until the operator marks it `Failed` — that ordering is the reason
-this is a command you run rather than something setup does on every re-run.
-System servers that are already current report `already converged`.
-
-The same pass gives every **user** server whose `spec.idle` was never set (one
-created before idle stop became the default) the default: stop after 600 s
-empty. A server whose idle stop an admin turned off keeps a duration on its
-spec (`autoStopEnabled: false`, `emptySecondsBeforeStop` set), so converge
-leaves it off; only servers it actually filled get a line.
-
-A **user** server created before every new server got RCON (`spec.rcon` wholly
-unset) has a dead console, always shows 0 online, and never idles out, since all
-three ride RCON. Plain `felis converge` lists each such server and changes
-nothing; `-user-rcon` turns RCON on for them with the block a server created
-today gets (the `<name>-rcon` Secret the operator provisions):
-
-```
-sudo felis converge -user-rcon
-kubectl -n minecraft get minecraftserver -o custom-columns=NAME:.metadata.name,RCON:.spec.rcon.enabled
-```
-
-It is opt-in for the reason above: the new start waits on the RCON probe, and a
-server whose image does not open the listener that `RCON_PASSWORD` asks for
-stays in `Starting` until it is marked `Failed`. Felis's own paper and lobby
-images open it; check a server running an image a user brought before filling
-it. A server whose RCON someone set, on or off, is never touched. The change
-applies at the server's next start.
-
----
-
-## 13. World PVC survives after I deleted the MinecraftServer {#_13-world-pvc-survives-after-i-deleted-the-minecraftserver}
-
-This is expected. The world PVC is a StatefulSet `VolumeClaimTemplate`, and the
-operator sets the StatefulSet's `persistentVolumeClaimRetentionPolicy` to
-`Retain` on delete and on scale, explicitly rather than by the API default.
-There is no finalizer. Deleting the `MinecraftServer` garbage-collects the
-StatefulSet and keeps the claim, so a `MinecraftServer` that comes back under
-the same name mounts the same world. The **only** code that deletes a world PVC
-is the reaper, and only after a verified backup (§10).
-
-A kept claim holds the name: creating a new server with it answers
-`409 world_volume_exists`, since the new server would otherwise mount the old
-world and hand it to its new owner. List the world claims whose server is gone:
-
-```
-comm -23 \
-  <(kubectl -n minecraft get pvc -l felis.lolicon.best/server -o jsonpath='{range .items[*]}{.metadata.labels.felis\.lolicon\.best/server}{"\n"}{end}' | sort) \
-  <(kubectl -n minecraft get minecraftservers -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)
-```
-
-To reclaim one (take a backup first if the world may still matter):
-
-```
-kubectl -n minecraft delete pvc world-<name>-0      # irreversible — the world is gone
-```
-
-`spec.storage.retainOnDelete` sat in the CRD and reached no controller. Spec
-v4.1 §5 asks for it — “Deletion: the finalizer cleans up Service/STS/ConfigMap; PVC follows
-`retainOnDelete`” — and neither half was ever built: there is no finalizer, and
-nothing read the field. It was removed rather than implemented, which is a
-deliberate departure from that line, recorded here because the spec is a frozen
-document and still says otherwise.
-
-The reasoning is that implementing it buys a second path that deletes a world —
-one that skips the reaper's verified-backup check — in order to restore a
-finalizer whose other listed duties (Service, StatefulSet, ConfigMap)
-ownerReference GC already performs. A CR still carrying the field keeps working:
-the API server prunes the unknown key on its next write, and nothing above
-changes, because retention was never conditional in the first place.
-
----
-
-## 13b. Node runs out of disk: what survives, and how to recover {#_13b-node-runs-out-of-disk-what-survives-and-how-to-recover}
-
-A full disk is the most destructive failure this stack sees: kubelet evicts game
-pods (the control plane is protected below), and its image GC then collects
-images nothing is running. The images have a pull source now — the in-cluster
-registry — so they come back without an operator re-import; freeing space is
-what completes the recovery.
-
-**Eviction.** Every control-plane pod (api, operator, reaper, registry) runs
-under the BUILT-IN `system-cluster-critical` PriorityClass (value 2e9). Kubelet's
-node-pressure eviction refuses to touch those pods — the log shows
-*"Eviction manager: cannot evict a critical pod"* for each of them — while
-game-server pods at the default priority 0 are evicted first. A drill that filled
-the disk to 1.7G free saw exactly this: login/lobby evicted, the whole control
-plane still Running (before the fix the same drill evicted the api, operator and
-registry too, and the image-GC stage below followed). User-defined
-PriorityClasses cannot substitute: the API caps them at 1e9, below kubelet's
-critical threshold. The built-in class allows preemption (its policy is fixed),
-so a control-plane pod that cannot fit may preempt a game pod — deliberate: the
-management plane must be placeable.
-
-**The pressure condition clears slowly.** After you free space, the node can stay
-`DiskPressure:True` for up to ~5 minutes
-(`--eviction-pressure-transition-period` defaults to 5m, to stop the condition
-flapping); pods that need scheduling wait for it. This is the bulk of the
-"recovery takes minutes" observation, not a stuck node.
-
-**The images may be gone — they come back on their own.** If pods were evicted,
-the kubelet can garbage-collect their images (unused > 2 minutes under imagefs
-pressure). Every image this platform runs is ALSO hosted in the in-cluster
-registry: the installer builds each one as `registry.<ns>.svc:5000/felis/…`
-and mirrors it there, and the node's containerd is configured (a registries.yaml
-mirror onto the registry's loopback hostPort) to relay those refs back through
-it. So a GC'd image is re-pulled on the next attempt with no operator action —
-delete the stuck pod to force an immediate retry (or wait out the backoff), and
-the workload converges.
-
-If a pull does NOT come back:
-
-1. Free disk on the node (`df -h /var/lib/rancher`; the biggest consumers are
-   `k3s ctr images ls -q` and the world/backup PVCs under
-   `/var/lib/rancher/k3s/storage`).
-2. Check the registry: `kubectl -n felis get pods -l
-   app.kubernetes.io/component=registry` and, on the node,
-   `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5000/healthz`
-   (expect `200`: the registry gate answers it only while registry:2 behind it
-   does). An anonymous `GET /v2/` answers `401` by design — see §9.
-3. Check the mirror file: `/etc/rancher/k3s/registries.yaml` must map
-   `registry.felis.svc:5000` to `http://127.0.0.1:5000`. Missing or changed:
-   re-run the installer (it rewrites the file and restarts k3s only when the
-   content changed).
-4. Re-mirror a tag the registry does not have (hand-built images were never
-   pushed): `sudo systemctl start docker` (the installer leaves the daemon
-   stopped), log in as `platform` (password: `kubectl -n felis get secret
-   felis-registry-auth -o jsonpath='{.data.platform}' | base64 -d`), then `docker tag <ref>
-   127.0.0.1:5000/<repo>:<tag> && docker push 127.0.0.1:5000/<repo>:<tag>`.
-
-For an image that is in neither place, the old fallback still stands: re-run the
-installer (it rebuilds/re-imports from the local Docker store AND mirrors into
-the registry), or for a single image
-`docker save felis:<tag> | k3s ctr images import -`. The Docker store remains a
-deliberate second copy on the node; treat it as the recovery path, not as free
-space.
-
-## 13c. The host's address, name or clock changed {#_13c-the-host-s-address-name-or-clock-changed}
-
-An install is bound to the address it was made on. `bootstrap.sh` gives that
-address to the k3s node and writes it into the network policies, the panel
-certificate and the default `<ip>.nip.io` root domain, and nothing re-addresses
-a live install. When the host loses the address (a DHCP lease that came back
-different, a moved VM), the cluster and the proxy's path to the game servers
-still name the old one, and the panel stops answering on its old name. The watchdog reports it as
-`host-address` (critical, after 5 minutes). The installer warns at install time
-when the address is a DHCP lease.
-
-Remedy: give the host its old address back, either as a DHCP reservation on
-the router or as a static address (`nmcli con mod <con> ipv4.method manual
-ipv4.addresses <ip>/<prefix> ipv4.gateway <gw> ipv4.dns <dns> && nmcli con up <con>` on Rocky), then restart felis-api (`sudo k3s kubectl -n felis rollout restart
-deploy/felis-api`) and the proxy (`sudo systemctl restart felis-velocity`). Moving an install
-to a new address is a reinstall onto a restored backup ([Operations guide §5](/en/operations/#_5-disaster-recovery)). A
-default `<ip>.nip.io` root domain names the old address too; once the install runs on
-its new address, `sudo felis domain set <new-ip>.nip.io` moves it ([Operations guide §6](/en/operations/#_6-changing-the-root-domain-vm-verified-go-tested-sh-tested)).
-
-The node **name** is pinned. Every local-path volume (worlds, registry,
-uploads, backups) is bound to its node by name, and k3s takes the name from the
-hostname unless told otherwise, so renaming the host used to bring k3s back as
-a second, empty node with every volume Pending on the old one. The installer
-pins the name in `/etc/rancher/k3s/config.yaml.d/50-felis.yaml`
-(`node-name:`); a hostname change is then harmless. Check the pin with `sudo
-k3s kubectl get node -o jsonpath='{.items[0].metadata.annotations.k3s\.io/node-args}'`.
-That file also sets `write-kubeconfig-mode: "0600"`: the admin kubeconfig
-`/etc/rancher/k3s/k3s.yaml` is cluster-admin and readable by root only, so
-use `sudo k3s kubectl` (or `sudo -E kubectl`).
-
-The **clock** must be kept by NTP. Sign-in codes and sessions expire by it,
-S3 refuses off-site uploads signed more than 15 minutes off, and certificate
-checks fail on a clock far off. The installer turns NTP on (`timedatectl
-set-ntp true`, installing chrony where there is no client to enable) unless
-`FELIS_MANAGE_TIME_SYNC=0`. The watchdog reports an unsynchronized clock as
-`clock` (warning, after 30 minutes). Check with `timedatectl` (want `System
-clock synchronized: yes` and `NTP service: active`) and `chronyc sources`;
-a firewall that drops outbound UDP 123 keeps it unsynchronized.
-
-The system journal is persistent (`/etc/systemd/journald.conf.d/50-felis.conf`,
-capped by `FELIS_JOURNAL_MAX_USE`, default 1G), so `journalctl -b -1` shows the
-boot before a reboot.
-
----
-
-## 13d. k3s certificates expire after a year {#_13d-k3s-certificates-expire-after-a-year}
-
-k3s issues its own client and serving certificates (the API server's, the
-kubelet's, the admin kubeconfig's, etcd's) for 365 days and its CA certificates
-for ten years. It renews the client and serving certificates only as it starts:
-each start reissues, from the same keys, every one that has expired or is within
-120 days of expiring. A host that reboots or takes a k3s upgrade
-(`FELIS_UPGRADE_DEPS=1`, [Operations guide §4](/en/operations/#_4-upgrading-the-pieces-around-felis)) inside that window renews them
-unnoticed. A host that runs a year without restarting k3s loses its API server
-and its node the day they lapse, and the panel can no longer start, stop or back
-up servers. No restart renews a CA certificate; that takes `k3s certificate
-rotate-ca` and the procedure in the k3s documentation (Certificate Management).
-
-The watchdog reads the `*.crt` files under `/var/lib/rancher/k3s/server/tls`
-(and its `etcd`, `kube-controller-manager` and `kube-scheduler` directories) and
-`/var/lib/rancher/k3s/agent`, the set `k3s certificate check` reads, and never
-the keys beside them. It reports the certificate that expires first as
-`k3s-certs`: a warning 30 days before, critical in the last 7 days and once it
-has lapsed, and the hint says whether a restart renews it (a CA it does not).
-`felis watchdog -k3s-cert-dirs ""` turns the check off. [GO-TESTED: `TestCertFinding`]
-[VM-VERIFIED: against the real certificates of a v1.36.4+k3s1 install, with the
-clock moved ahead]
-
-Check and renew:
-
-```sh
-sudo k3s certificate check --output table   # every certificate, its expiry and residual time
-sudo systemctl restart k3s                  # reissues the ones within 120 days of expiry
-sudo k3s certificate check --output table   # the renewed ones show about a year again
-```
-
-A restart stops k3s alone. The unit's `KillMode=process` leaves the containers
-running, so game servers, PostgreSQL and the control plane keep serving while
-the API server comes back within a minute. [VM-VERIFIED: every container ID and
-restart count unchanged across `systemctl restart k3s`] `k3s-killall.sh` stops
-every container along with k3s; keep it out of this.
-
-To renew ahead of the 120-day window (to line it up with a maintenance slot),
-reissue every client and serving certificate at once:
-
-```sh
-sudo systemctl stop k3s && sudo k3s certificate rotate && sudo systemctl start k3s
-```
-
-The panel's own certificate (`/etc/felis/panel-tls.crt`, which the installer
-self-signs for 825 days) is a different certificate, outside this check.
-
----
-
-## 14. Health alerts, and metrics for diagnosis (spec §23) {#_14-health-alerts-and-metrics-for-diagnosis-spec-§23}
-
-Every full install runs `felis watchdog` from `felis-watchdog.timer`, which
-mails the owners when something breaks, with no monitoring stack needed. The
-metrics and Prometheus rules below are for a deployment that also runs its own
-Prometheus.
-
-### The watchdog: what mails the owners {#the-watchdog-what-mails-the-owners}
-
-Every two minutes the host checks:
-
-| Check | Mailed after | Severity |
-|---|---|---|
-| `felis-api`, `felis-operator` or `registry` Deployment has no available pod (or is missing) | 5 min | critical |
-| Kubernetes API unreachable (k3s down): the cluster checks below are then unknown and keep their state | 5 min | critical |
-| Login gate not `Running` while it should be | 10 min | critical |
-| Other system servers (lobby) not `Running` while they should be | 10 min | warning |
-| A user server in `Failed` (§2) | 5 min | warning |
-| A backup, restore or reaper Job failed in the last 24h | at once, once | warning |
-| The reaper CronJob last succeeded over 26h ago (§10) | at once | warning |
-| Node `NotReady`, or kubelet reports Disk/Memory/PID pressure (§13b) | 2–5 min | critical |
-| PostgreSQL unreachable | 3 min | critical |
-| The game proxy (`felis-velocity`) refuses connections on the game port | 3 min | critical |
-| Newest daily control-plane database backup over 26h old, or none (§16); a newer manual or off-site bundle leaves it standing | 10 min | critical |
-| A watched filesystem below 15% free (below 5%: critical) | 15 min (5 min) | warning |
-| Host memory available below 10% | 15 min | warning |
-| The host no longer holds the address the install was made on (§13c) | 5 min | critical |
-| The system clock is not synchronized by NTP (§13c) | 30 min | warning |
-| A k3s certificate expires within 30 days (within 7 days, or lapsed: critical) (§13d) | at once | warning |
-| The watchdog's own runs keep failing (`watchdog/run`, below) | 10 min | critical |
-| The watchdog's state file did not parse and was moved aside (`watchdog/state`, below) | at once, once | warning |
-
-How it mails:
-
-- **Recipients** are the verified email addresses of enabled owner accounts.
-  The relay is the one sign-in codes use: the relay the Owner saved in the
-  panel (**Platform settings → Mail delivery**, §17), read from the database at
-  each run, else `[smtp]`.
-- **One mail per run**, holding everything that came due: new problems, a
-  daily reminder for each problem still open, and a resolved notice once a
-  problem has stayed gone for 10 minutes. A condition that heals before its
-  delay is never mailed; one that turns critical is mailed again at once.
-- **During an install** nothing is mailed. `bootstrap.sh` writes
-  `/run/felis/watchdog-quiet-until` and removes it when it exits.
-- **On a host built from another host's backup** (a rehearsal on a spare
-  machine, a rebuild before `felis offsite take-over`) nothing is mailed while
-  the host the off-site bucket names ran in the last 3 hours: the owners in
-  the restored database are that host's, and it mails them itself. The run
-  logs `this host stands by for host ...; holding this mail`. Once that host
-  stops running, the standby is mailed like any other finding (§16).
-  [GO-TESTED: `TestMailHold`]
-- **Caching:** for the `[smtp]` relay the password comes from
-  `/etc/felis/smtp-password`, which the watchdog reads even while the API
-  server is down (an install without that file reads the `felis-smtp` Secret
-  instead). The relay in use, its password and the recipient list are cached
-  in `/var/lib/felis/watchdog/state.json` (root-only). A run that cannot read
-  the database keeps mailing through the panel's relay as the last good run
-  cached it, and falls back to `[smtp]` only when that run used `[smtp]` too.
-  An outage of PostgreSQL or of the API server can therefore still be mailed.
-  [GO-TESTED: a run with the API server and PostgreSQL both down caches the
-  host copy; `TestRelayForPrefersThePanelRelay`.]
-- **No relay or no verified owner address:** each alert is written to the
-  journal only, and a run with a heartbeat pings its failure endpoint while an
-  alert is open (below). Setup runs without mail, so a fresh install is in
-  this state. The install ends with `NO ALERT MAIL`, and the card at the end
-  of `sudo felis setup` has an `alerts` row that says where alerts go: `mailed
-  to <address> via <relay>`, or what is missing, marked `⚠`. Press `e` there
-  to configure email (or save a relay in the panel), then verify the Owner's
-  address in the panel (Account → Email Verification). The `heartbeat` row
-  below it shows the check that is pinged. That card and `felis doctor` read
-  the relay and the heartbeat the Owner saved in the panel first, and fall back to
-  `felis.toml` and the heartbeat file, as the watchdog does. [SH-TESTED; GO-TESTED:
-  `TestAlertRouteLines`, `TestHostAlertRoute`]
-
-Commands:
+The bundle is written to `/var/lib/felis/support/felis-support-<host>-<time>.tar.gz` with
+mode 0600; `-o DIR` writes it to another directory. It contains the output of `felis status`
+and `felis doctor`, a configuration summary without credentials, the Felis units and their
+journals (`-since 48h` and `-log-lines 2000` by default), and the state, events and recent
+logs of the control-plane, build and server namespaces. Game server logs contain player
+names, IP addresses and chat; the bundle includes them only with `-server-logs`.
+
+Secrets, ConfigMaps, configuration file contents, the database and worlds are never
+collected, and credentials are removed from everything that is collected. `MANIFEST.txt` in
+the bundle lists what it holds, what was removed and what could not be collected.
+
+::: warning
+Read the bundle before you send it anywhere. A secret written in a format the redaction
+rules do not recognise stays in the bundle.
+:::
+
+See [Support bundle](/en/operations/monitoring#support-bundle) for the full contents.
+
+### Find the logs {#logs}
+
+| Component | Command |
+| --- | --- |
+| Panel and API (`felis-api`) | `sudo k3s kubectl -n felis logs deploy/felis-api` |
+| Operator (server lifecycle) | `sudo k3s kubectl -n felis logs deploy/felis-operator` |
+| Database | `sudo k3s kubectl -n felis logs deploy/felis-postgres` |
+| A game server | `sudo k3s kubectl -n minecraft logs <server>-0`, or the server's console in the panel |
+| Login space and lobby | `sudo k3s kubectl -n minecraft logs login-0`, `sudo k3s kubectl -n minecraft logs lobby-0` |
+| Game proxy (Velocity) | `sudo journalctl -u felis-velocity` |
+| Watchdog | `sudo journalctl -u felis-watchdog` |
+| Host operations started from the panel | `sudo journalctl -u felis-node-control` |
+| k3s | `sudo journalctl -u k3s` |
+
+Add `--tail=200` to `kubectl logs`, or `-n 200` to `journalctl`, to read only the most recent
+lines.
+
+### Use the panel {#panel-diagnostics}
+
+The Owner can run the same checks without a shell:
+
+- **Maintenance & Backups → Status** shows the host status (`felis status`) and the
+  watchdog's open alerts.
+- **Maintenance & Backups → Diagnostics** contains the **Health check** card
+  (`felis doctor`; select **Run health check**) and the **Support bundle** card
+  (`felis support-bundle`; select **Create support bundle**, and enable
+  **Include game server logs** only when the problem concerns a server). The bundle
+  downloads through the browser.
+
+Each host task requires a fresh identity verification and is recorded in the audit log, and
+only one host task runs at a time. When the panel cannot reach the host, for example because
+`felis-node-control` is down, use the commands above.
+[Running host operations from the panel](/en/operations/#panel-host-operations) lists every
+operation and its command-line equivalent.
+
+## Servers {#server-problems}
+
+### A server stays in Starting {#server-stuck-starting}
+
+The panel shows **Starting** for a long time, or players wait in the lobby and are never
+moved to the server.
+
+A short period in **Starting** is normal. A start that does not succeed is checked again
+every 2 seconds until one of two time limits runs out; the server then moves to
+**Failed to start** (see [A server shows Failed to start](#server-failed)). A server that was
+**Running** returns to **Starting** after three consecutive failed readiness checks.
+
+**Cause**
+
+The readiness check is an RCON connection and login: the server counts as ready as soon as
+RCON accepts its password. The operator records why a server is not ready yet as the reason
+of its conditions:
+
+| Reason | Meaning | Checked again after |
+| --- | --- | --- |
+| `PodNotReady` | The game pod has not opened its game port yet | 2 s |
+| `SpecChanged` | The server's settings changed while the pod was not ready; the operator recreated the pod from the new settings | 2 s |
+| `AutoRestart` / `StartRetried` | A timed-out start was retried, automatically or with **Retry start**, by recreating the pod | 2 s |
+| `ServiceAddressPending` | The server's Service has no cluster address yet | 2 s |
+| `RconSecretUnavailable` | The Secret holding the RCON password is missing or lacks the referenced key | 10 s |
+| `RconNotReachable` | The RCON check could not connect or log in | 2 s |
+
+**Diagnosis**
+
+1. Open the server's console in the panel. While the server starts, the console shows the
+   current stage (**Waiting for resources and scheduling**, **Preparing files and pulling
+   images**, **Starting Minecraft and checking readiness**) and, when something blocks the
+   start, the reason: insufficient schedulable memory, an image pull failure or a container
+   exit.
+2. Read the condition reason and message:
+
+   ```bash
+   sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.status.conditions}'
+   ```
+
+3. For `PodNotReady`, inspect the pod and its log:
+
+   ```bash
+   sudo k3s kubectl -n minecraft describe pod <server>-0
+   sudo k3s kubectl -n minecraft logs <server>-0
+   ```
+
+4. If the server stays in **Starting** longer than its time limit and never moves to
+   **Failed to start**, the operator is not processing it. Read the operator log:
+
+   ```bash
+   sudo k3s kubectl -n felis logs deploy/felis-operator --tail=200
+   ```
+
+**Resolution**
+
+For `PodNotReady`, act on what `describe pod` shows:
+
+| What you see | Cause | Resolution |
+| --- | --- | --- |
+| Pod `Pending` with an `Unschedulable` or insufficient-memory event | The node has too little free memory | Lower the server's memory, stop other servers, or add capacity |
+| `ImagePullBackOff` or `ErrImagePull` | The image reference is wrong, the tag does not exist, or the registry is unreachable | Correct the image; see [game images](#game-images) and [registry errors](#registry-errors). Editing the server is enough, even after it failed: the operator replaces the stuck pod, and the server returns to **Starting** with reason `SpecChanged`, a fresh time limit and its retry count reset |
+| Volume claim `Pending` (`sudo k3s kubectl -n minecraft get pvc`) | The storage class does not exist, or no class can provide the requested size | Correct the storage class or the size |
+| The container restarts before the game port opens | The server software, its plugins or its start script fail | Read the container log and fix the server's configuration, plugins or image |
+| Stuck in an `Init:` step, or `AccessDeniedException` / `Permission denied` in the log | Game servers run as uid and gid 1000 with all capabilities dropped. Before each start, the `prepare-data` init container hands world files to 1000:1000 | Read `sudo k3s kubectl -n minecraft logs <server>-0 -c prepare-data`: it reports how many entries it changed and lists up to 20 it could not change. An image that writes outside `/data` and `/tmp` must be rebuilt to keep its state under `/data` |
+| Every start waits about 30 seconds in its last `Init:` step | The `egress-gate` init container waits until the server's network fence is in effect | Read `sudo k3s kubectl -n minecraft logs <server>-0 -c egress-gate`. `is unreachable after …; the egress lock is in effect` is the normal result. `still answers after 30s; starting anyway` means network policies are not enforced (a CNI without NetworkPolicy support, or k3s started with `--disable-network-policy`), or an allowed private range for game servers (`--server-egress-allow-cidr`) covers the node. Narrow the range to the hosts the servers need |
+| `FailedCreate … violates PodSecurity "baseline"` | The `minecraft` namespace enforces the `baseline` Pod Security profile, and the refused pod was created or edited outside Felis | Run `sudo k3s kubectl get events -n minecraft --field-selector reason=FailedCreate` to see the offending field, and remove that change |
+
+For `RconSecretUnavailable`, the message names the problem:
+
+- `rcon.secretRef.name and .key are required when rcon is enabled`: RCON is enabled, but the
+  Secret name or key in `spec.rcon.secretRef` is empty.
+- `secret "<name>" has no key "<key>"`: the Secret exists but lacks the key.
+
+Create the Secret with the referenced key, or correct `spec.rcon.secretRef`. The operator
+provisions a Secret named `<server>-rcon` for servers that Felis created with RCON. Confirm
+that the key holds a value:
 
 ```bash
-journalctl -u felis-watchdog -n 40          # every check of the latest runs
-sudo felis watchdog -dry-run                # run the checks now; mail nothing, change nothing
-systemctl list-timers felis-watchdog.timer  # when it last and next runs
+sudo k3s kubectl -n minecraft get secret <secret> -o jsonpath='{.data.<key>}' | base64 -d | wc -c
 ```
 
-A healthy run logs `every check passed`. Otherwise it logs one line per
-finding, and the mail's subject once one is sent.
+For `RconNotReachable`, the message is the connection error:
 
-A `-dry-run` from a shell uses the command's defaults, and those do not include
-the game-proxy or the address check. The unit carries `-proxy-addr
-127.0.0.1:<game port>`, `-node-ip <install address>` and the disk list the
-install chose. `systemctl cat felis-watchdog` shows them.
+- `rcon: authentication failed`: the password in the Secret differs from the server's
+  `rcon.password`. Make the two match.
+- `connection refused` or `i/o timeout`: the server has not opened its RCON port yet, RCON is
+  disabled in `server.properties`, or the image listens on a port other than 25575, the only
+  port `spec.rcon.port` accepts.
 
-### The heartbeat: what notices the host itself going down {#the-heartbeat-what-notices-the-host-itself-going-down}
+Each RCON check has a fixed 5-second timeout. The time limit for the whole start is a
+separate setting (see [A server shows Failed to start](#server-failed)).
 
-A host that is off, a timer that stopped, a watchdog that fails before it can
-mail: the host reports none of these about itself. A heartbeat covers them.
-Every run pings a check at an outside monitoring service (Healthchecks.io, or
-one that copies its API), and that service mails you when the pings stop.
+If the operator is not processing the server, restore the operator first; see
+[Monitoring and alerts](/en/operations/monitoring#alerts) for the related alerts.
 
-1. Create a check there with a period of 2 minutes and a grace of 10 minutes.
-2. Give the watchdog the check's ping URL, in either of two places:
-   - In the panel, on the **Platform settings → Monitoring heartbeat** card.
-     The next watchdog run pings it.
-   - On the host: re-run the installer with `FELIS_WATCHDOG_HEARTBEAT_URL=<the
-     check's ping URL>`. It writes the URL to `/etc/felis/watchdog-heartbeat-url`
-     (root-only, 0600).
+### A server shows Failed to start {#server-failed}
 
-   The URL's path is the check's key, so the panel, the install and the
-   journal show only its scheme and host.
+The panel shows **Timed out · retrying** or **Failed to start**. A player who tries to join
+reads `« <server> » failed to start and its automatic retries are spent. The owner can check
+its log in the panel and start it again.` The watchdog reports user servers that failed.
 
-A later install without the variable keeps the file, and
-`FELIS_WATCHDOG_HEARTBEAT_URL=off` removes it. An install with no heartbeat
-file ends with a `NO HEARTBEAT` warning. [SH-TESTED: `deploy/bootstrap_test.sh`]
+**Cause**
 
-The URL saved in the panel lives in one `platform_settings` row
-(`watchdog_heartbeat`) and wins over the host file. Each run reads it from the
-database and caches it in the watchdog's state, so a run while the database is
-down, and the failure fallback below, still ping it. **Remove heartbeat URL**
-on the card clears the row; the watchdog then pings the host file's URL, if
-the installer wrote one, and the check at the service alerts on the missing
-pings until it is paused there. Saving and removing take a fresh identity
-confirmation; the audit actions are `platform.heartbeat` and
-`platform.heartbeat.clear`. API: `GET`, `PUT` and `DELETE
-/api/v1/settings/heartbeat` (Owner); `GET` answers only whether a URL is set
-and its scheme and host. The installer's closing summary (through `felis
-panel-settings`), the setup card's `heartbeat` row and `felis doctor` count a
-URL saved in the panel, and warn only when neither the panel nor the host file
-has one.
-[GO-TESTED: `TestHeartbeatForPrefersThePanelURL`,
-`TestWatchdogUnitFailedPingsThePanelHeartbeat`,
-`TestHeartbeatSettingKeepsItsKeyPrivate`, `TestHeartbeatSettingAsksForAFreshProof`,
-`TestCheckAndRedact`]
+| Reason | Meaning |
+| --- | --- |
+| `StartupTimeout` | The pod did not open its game port within `spec.startup.timeoutSeconds` (default 300 seconds) |
+| `ReadinessTimeout` | RCON did not accept the password within `spec.startup.readinessTimeoutSeconds` (default 300 seconds) |
+| `InvalidSpec` | The server's workload could not be built, usually because `spec.storage.size` is not a valid quantity: `invalid storage size "<value>": <parse error>` |
 
-What a run pings:
+Both time limits are measured from the moment the start was requested, and both use 300
+seconds when they are unset or 0.
 
-| The run | Ping |
-|---|---|
-| Its alerts reach the owners (mailed, or nothing due) | `GET <url>` |
-| An alert is open and reaches no one (no relay, no verified owner address), the mail fails, or the state does not save | `POST <url>/fail`, with the reason and the findings in the body |
-| One of those failures while the installer runs | nothing |
-| A host standing by for another host's off-site bucket (§16) | nothing: the host that writes the bucket pings the check |
+After a timeout, the operator retries the start by recreating the pod, up to 3 times. It
+waits 1, 2 and then 4 minutes after the time limit before each attempt. Meanwhile the panel
+shows **Timed out · retrying** with the number of retries used, and players who join are
+queued for the coming attempt. When the retries are spent, or for `InvalidSpec`, the server
+stays in **Failed to start** until someone acts; a join does not start another attempt.
 
-A URL with a query (`?`) has no `/fail` endpoint, so a failing run sends no
-ping and the check trips once its grace runs out. A ping that times out (10 s)
-or gets a non-2xx answer logs `felis watchdog: heartbeat: ...`; the run's exit
-status stays that of its checks and its mail. [GO-TESTED:
-`TestHeartbeatSend`, `TestWatchdogRunHeartbeat`]
+**Diagnosis**
 
-A bundle (§16) carries `/etc/felis` and the heartbeat file with it, and a URL
-saved in the panel with the database. A host rebuilt from one stands by and
-pings nothing until `felis offsite take-over`; from then on it pings the same
-check.
+1. Open the server's console in the panel and read the startup log and the reported error.
+2. Read the conditions:
 
-### When the watchdog itself fails {#when-the-watchdog-itself-fails}
+   ```bash
+   sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.status.conditions}'
+   ```
 
-`felis-watchdog.service` carries `OnFailure=felis-watchdog-failed.service`. A
-failed run (a crash, the 3 min time limit, a `felis.toml` that no longer loads)
-starts `felis watchdog -unit-failed`, which:
+3. For a timeout, work through [A server stays in Starting](#server-stuck-starting): the
+   causes are the same, and the time limit ran out before they were fixed.
 
-- pings the heartbeat's `/fail` at once with systemd's result, e.g.
-  `felis-watchdog.service failed: result exit-code, exit status 3`, except
-  while the installer runs or the host stands by;
-- records `watchdog/run` and mails it once runs have kept failing for 10
-  minutes. The relay and recipients come from `felis.toml` when it loads and
-  from the watchdog's cache when it does not; a relay the Owner saved in the
-  panel, as the last good run cached it, takes precedence over `felis.toml`.
-  The first passing run resolves it like any other finding.
+**Resolution**
 
-[VM-TESTED: on systemd 252, a failing unit with this `OnFailure=` passed
-`result exit-code, exit status 3` to the fallback, which posted it to a local
-`/fail` endpoint; with the installer's quiet file present it withheld the
-ping. GO-TESTED: `TestWatchdogUnitFailedBrokenConfig`, six failures two
-minutes apart mail once, at 10 minutes, through the cached relay.]
+1. Fix the cause: the image, the memory, the configuration or RCON.
+2. Select **Retry start** on the server's console. This resets the retry count and starts the
+   server again at once. Editing the server's settings also replaces a stuck pod.
+3. For `InvalidSpec`, set `spec.storage.size` to a valid quantity such as `10Gi` (`10 GB` is
+   invalid). The server leaves the failed state at the next reconcile.
+4. For a server that starts correctly but needs more than 300 seconds, such as a large
+   modpack, raise `spec.startup.timeoutSeconds` and `spec.startup.readinessTimeoutSeconds` on
+   the server resource.
 
-A state file (`/var/lib/felis/watchdog/state.json`) that does not parse is
-renamed to `state.json.unreadable-<unix time>`. The run starts from a fresh
-state and mails `watchdog/state` once. The fresh state has lost the open
-alerts' history, so each problem still present is mailed again as new. A
-power loss right after a save or a hand edit usually causes this; check
-`df -h /var/lib/felis`, then delete the set-aside copy. [GO-TESTED: `TestRecoverState`]
+### A server does not stop {#server-wont-stop}
 
-A state file that cannot be written (a full or read-only `/var/lib/felis`)
-leaves the run's state in `/run/felis/watchdog-state.json` (tmpfs, root-only).
-The next run reads whichever of the two was written last, so an alert that was
-mailed is not mailed again every two minutes. Each such run logs `save state:
-...; kept in /run/felis/watchdog-state.json until the host restarts`, exits 1
-and pings the heartbeat's `/fail`; after five in a row `watchdog/run` is mailed
-once. The first run whose state file saves again deletes the tmpfs copy. A
-restart before that forgets what was mailed, so the open problems are mailed
-again as new. [GO-TESTED: `TestSaveStateOr`, `TestWatchdogRunStateThatDoesNotSave`,
-`TestWatchdogUnitFailedStateThatDoesNotSave`]
+After **Stop**, the server stays **Running** or **Stopping**, or the panel shows
+**Status unavailable**.
+
+**Cause**
+
+- **Players are online.** Before a server with players stops, the operator sends everyone
+  online a yellow chat warning, waits 30 seconds, sends a last notice and then stops the
+  server, which saves the world. Starting the server again within the 30 seconds cancels the
+  stop, and the players are told so. An empty server, a server without RCON, or a server
+  whose player count or warning fails stops at once.
+- **A live backup is copying the world.** The operator waits for the copy to finish before
+  it shuts the server down, for at most about six minutes.
+- **The game is saving.** The server shows **Stopping** until its pod has exited, which takes
+  longer for a large world.
+- **The panel cannot reach the control API.** The console marks the state as
+  **Status unavailable**, shows when it was last read and retries on its own. The state shown
+  is for reference only; a server shown as starting or running is no proof that its game
+  process is healthy.
+- **The game process or the operator does not respond**, so the normal stop never completes.
+
+**Diagnosis**
 
 ```bash
-journalctl -u felis-watchdog-failed -n 20   # what the fallback reported and pinged
-systemctl status felis-watchdog             # the failed run's result
+sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.spec.desiredState} {.status.phase}{"\n"}'
+sudo k3s kubectl -n minecraft get pods -l felis.lolicon.best/server=<server>,felis.lolicon.best/component=server -o wide
+sudo k3s kubectl -n minecraft get events --field-selector involvedObject.name=<server>
 ```
 
-### Metrics {#metrics}
+A `StopNotice` event means the 30-second warning is running.
 
-All four mandated metrics have real producers; scrape them when triaging:
+**Resolution**
 
-- `felis_servers_total` — managed server count.
-- `felis_server_phase{server,role,phase,desired}` — 1 for each server's
-  current phase. `role` is `login`/`lobby` for system servers and empty for
-  user servers. `desired` tells a server that is down on purpose from one that
-  failed to come up.
-- `felis_build_info{component,version}` — 1 on the process serving it
-  (`operator` or `api`). Its absence is how an alert tells which process is down.
-- `felis_start_duration_seconds` — histogram, observed once per start when
-  readiness is first reached (`ReadySignalAt − StartRequestedAt`). A start that
-  never completes (§1) contributes **nothing** here — absence of observations is
-  itself the signal that starts are hanging.
-- `felis_image_build_failures_total` — increments on build Job failure (§8d).
-- `felis_reaper_worlds_deleted_total` — increments only after a world PVC is
-  actually deleted post-backup (§10); a spike here means worlds crossed the 15d
-  idle line — cross-check that join events are flowing (§10 risk vectors).
-- `felis_http_requests_total{face,method,route,code}` and
-  `felis_http_request_duration_seconds{face,route}` — every API request, by the
-  route pattern it matched (`/api/v1/servers/{name}/status`, never the raw
-  path; `unmatched` for a path no route serves). `face` is `internal` or
-  `external`. Log streams count as requests but stay out of the latency
-  histogram. A rise in `code=~"5.."` on one route narrows a failure to one
-  handler; `route="unmatched"` rising is someone scanning.
-- The Go runtime and process series (`go_*`, `process_*`) of `felis-api`:
-  goroutines, heap, open file descriptors. Goroutines that climb without
-  falling back usually mean streams or uploads that never end.
-- `go_sql_*{db_name="felis"}` — the API's database pool. It is capped at 25
-  connections, and every connection runs with `statement_timeout=15s` and
-  `idle_in_transaction_session_timeout=60s` (a `[database] url` that sets
-  either keeps its own). `go_sql_in_use_connections` sitting at
-  `go_sql_max_open_connections` with `go_sql_wait_count_total` climbing means
-  requests are queueing for a connection: look for a slow query or a lock
-  (`SELECT pid, state, wait_event, query FROM pg_stat_activity`). A statement
-  cut off by the limit logs `canceling statement due to statement timeout`.
+1. Wait for the warning period and the shutdown save. **Stopping** changes to **Stopped**
+   once the pod is gone.
+2. If the normal stop does not respond, the Owner selects **More actions → Emergency stop** on
+   the server's console, types the server's name and confirms their identity. Emergency stop
+   saves the stop intent (`desiredState=Stopped`) and then scales the server's StatefulSet to
+   zero, bypassing the game's RCON and the operator. The normal termination grace period
+   applies and no world is deleted, but changes the game has not saved may be lost. The panel
+   shows **Stopping** while the replica target is above zero or the game pod is still running
+   or exiting. If the scale-down fails, the stop intent stays saved and the panel reports the
+   result as unconfirmed.
+3. If the control API itself is offline, expand **Host emergency shutdown procedure** on the
+   console page and run its commands on the host in order. Replace `minecraft` if the
+   deployment uses another namespace:
 
-The API also writes one access-log line per request to its log, in logfmt:
-`face`, `method`, `route`, `path`, `status`, `duration_ms`, `bytes`,
-`request_id` (the id in every error envelope) and `principal` (the user id,
-once signed in). Successful probes and scrapes are left out.
+   ```bash
+   sudo k3s kubectl patch minecraftserver <server> -n minecraft --type=merge -p '{"spec":{"desiredState":"Stopped"}}'
+   sudo k3s kubectl scale statefulset <server> -n minecraft --replicas=0
+   sudo k3s kubectl get pods -n minecraft -l felis.lolicon.best/server=<server>,felis.lolicon.best/component=server -o wide
+   ```
+
+4. If the node is offline, check the node and its container runtime. While a pod is
+   terminating or its node is unreachable, the game process may still be running.
+5. If the emergency stop fails with a permission error, apply the current platform update,
+   which installs the permissions it needs (see [Upgrading](/en/operations/upgrade#update)).
+
+::: danger
+Do not resolve a lost control connection by force-deleting worlds, pods or volume claims.
+Force-deleting a pod is no evidence that the game process has exited.
+:::
+
+### A server does not stop when empty {#idle-stop}
+
+Servers created from the panel stop after 600 seconds with nobody online, and the next join
+wakes them. The login space and the lobby never stop when idle. A server that keeps running
+with nobody online, or whose player count always shows 0, has one of the causes below.
+
+**Cause**
+
+- Idle auto-stop is set to **Never** in **Edit Server Config → Idle auto-stop**.
+- The server was created before idle auto-stop became the default and has no idle setting.
+- RCON is off on the server. The player count comes from the RCON readiness check, which runs
+  `list`; without RCON the count is never read and stays at 0, and idle auto-stop never acts.
+- The server's `list` reply has a format Felis does not recognise, such as a plugin that
+  rewrites `/list` or a translated reply. A count that cannot be read counts as unknown,
+  never as zero: the server keeps running, the panel shows **The online player count could
+  not be read. Idle shutdown is paused until player count retrieval resumes.**, and the
+  `PlayersCounted` condition is `False` with reason `ListUnreadable`.
+- The server became ready less than 3 minutes ago. A zero count in that window starts no
+  countdown, so the server does not stop while players are still arriving.
+- A live backup is copying the world. The operator does not idle-stop a server during the
+  copy.
+
+**Diagnosis**
 
 ```bash
-kubectl -n felis logs deploy/felis-api | grep 'msg=request' | grep 'status=5'
-kubectl -n felis logs deploy/felis-api | grep 'request_id=<id from the error>'
+sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.spec.idle}{"\n"}{.spec.rcon.enabled}{"\n"}'
+sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.status.conditions[?(@.type=="PlayersCounted")]}'
 ```
 
-The plugins' calls are the `face="internal"` series, one route per call: a
-failing join-event, wake or link-status poll shows up as its own route.
+Run `list` in the server's console in the panel to see the reply. Felis reads these formats:
 
-```promql
-sum by (route, code) (rate(felis_http_requests_total{face="internal", route="/api/v1/internal/servers/{name}/join-event"}[5m]))
-sum by (route, code) (rate(felis_http_requests_total{face="internal", route="/api/v1/internal/servers/{name}/wake"}[5m]))
-histogram_quantile(0.95, sum by (le, route) (rate(felis_http_request_duration_seconds_bucket{face="internal"}[5m])))
-```
+- `There are 3 of a max of 20 players online` (vanilla, Paper, Fabric, Forge)
+- `There are 3/20 players online` (1.12 and Bukkit)
+- `There are 3 out of maximum 20 players online` (EssentialsX)
 
-A call that never reached felis-api (refused, reset, timed out) is missing from
-those series; the caller counts it. The proxy logs one line per active 10 minutes
-with felis-api as it saw it plus its own failures, and `/felis` at the proxy
-console prints the totals since start:
+**Resolution**
+
+1. Set **Idle auto-stop** in **Edit Server Config** to a duration between 1 minute and 24
+   hours.
+2. For servers created before idle auto-stop or RCON became defaults, run system server
+   completion: `sudo felis converge` gives servers without an idle setting the default of 600
+   seconds, and `sudo felis converge -user-rcon` turns RCON on for older user servers. Read
+   [System server fields](#system-server-fields) before you enable RCON: a server whose image
+   has no RCON listener then fails to start.
+3. Restore a supported `list` reply, for example by removing the plugin's override or its
+   translation of that message.
+
+### An operation reports that the world is busy {#world-busy}
+
+A wake, restore, backup, download or file change is refused with
+`409 maintenance_in_progress`, and the panel shows **The world is undergoing restoration,
+backup, export, file download, file modification, or reclamation. Retry after the operation
+completes. Exports and downloads remain active until the browser completes the transfer.**
+Or the panel shows **This operation modifies the world volume, which is exclusively mounted
+by the running server. Stop the server completely first.** (`409 not_stopped`).
+
+**Cause**
+
+Only one operation at a time may hold a server's world. A restore, a backup, a world download
+or a file change holds it until its Job finishes; reading and listing files never hold it.
+While the world is held, every wake (from the panel or from a join) and every other world
+operation on that server is refused. The operator applies the same rule: it does not start
+the server, and the `Ready` condition reads `MaintenanceInProgress` until the Job ends.
+
+The world is held by one of these:
+
+1. An unfinished Job for the server: a restore, a backup, a file change, or a world download
+   until the download ends.
+2. The admission lock `felis.lolicon.best/maintenance=<kind>@<time>` on the server, which
+   covers the moment between admitting an operation and creating its Job. If felis-api stops
+   in between, the lock lapses after at most two minutes, and the next wake clears it.
+3. World cleanup while it archives an idle world. It writes the same lock as `reap@<time>`
+   and renews it every 30 seconds; refusals name `the idle-world reaper`, and a join-driven
+   wake gets `409 world_reclaiming`.
+
+`409 not_stopped` while the panel already shows **Stopped** means the game pod is still
+shutting down and saving.
+
+**Diagnosis**
 
 ```bash
-journalctl -u felis-velocity | grep 'Felis: last 10 min'
-# Felis: last 10 min: felis-api calls=412 (no answer=0, 4xx=3, 5xx=0, retried=0), avg=18 ms, max=240 ms,
-#   busy refusals=0, join-events failed=0, join-events dropped=0, transfers failed=0,
-#   server-list refreshes failed=0, waiting now=0
-journalctl -u felis-velocity | grep 'server list refresh'
-kubectl -n minecraft logs login-0 | grep 'link status poll'
+sudo k3s kubectl -n minecraft get jobs -l felis.lolicon.best/server=<server>
+sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.metadata.annotations}'
+sudo k3s kubectl -n minecraft get pods -l felis.lolicon.best/server=<server>
 ```
 
-`no answer` rising with a flat `felis_http_requests_total` means the path to the
-internal face is broken (NetworkPolicy, Service, the api Pod down); `busy
-refusals` or `join-events dropped` above zero means felis-api is slower than the
-proxy's pool of 8 threads can absorb. A refresh or link-status outage warns when it
-starts, every 5 minutes while it lasts with the failure count, and at info when
-it recovers.
+The server's **Backups & restore** page also lists recent backup, restore and export jobs
+with their result.
 
-### Scraping {#scraping}
+**Resolution**
 
-The series come from two processes. Both Services carry the
-`prometheus.io/scrape|port|path` annotations, so a Prometheus that discovers
-annotated Service endpoints picks them up as is.
+1. Wait for the Job to finish. A Job that is truly stuck is ended by its own time limit
+   (`activeDeadlineSeconds`).
+2. To release the world at once, delete the Job:
 
-- `felis-operator` `:8080/metrics` (Service `felis-operator-metrics`) —
-  `felis_servers_total`, `felis_server_phase`, `felis_start_duration_seconds`,
-  `felis_build_info{component="operator"}`, and controller-runtime's
-  `controller_runtime_reconcile_*` / `workqueue_*` series.
-- `felis-api` internal face `:8081/metrics` (Service `felis-api-internal`) —
-  `felis_build_info{component="api"}`, the `felis_http_*` request series, the
-  `go_*`/`process_*` runtime series, the `go_sql_*` pool series,
-  `felis_image_build_failures_total`, and the sign-in series of §17
-  (`felis_mail_total`, `felis_rate_limited_total`,
-  `felis_auth_otp_lockouts_total`, `felis_auth_failures_total`,
-  `felis_sessions_revoked_total`, `felis_audit_write_failures_total`).
-  Unauthenticated like the probes;
-  ClusterIP-only, and the external face never serves it.
-- `felis_reaper_worlds_deleted_total` is produced inside the one-shot reaper
-  CronJob, which exits long before any scrape interval — without a pushgateway
-  it has no scrape path. Read the reaper Pod log or the `world_backups` table
-  for deletions instead.
-
-### Alert rules {#alert-rules}
-
-`deploy/alerts/` ships ready-made rules for these groups:
-
-- **Control plane:** `felis-operator` or `felis-api` down or unscraped
-  (`FelisOperatorDown`, `FelisAPIDown`).
-- **Servers:** the login gate or another system server not running
-  (`FelisLoginGateDown`, `FelisSystemServerDown`), and a user server in
-  `Failed` (`FelisServerFailed`).
-- **Operator reconcile:** errors piling up (`FelisReconcileErrors`), and a
-  pass stuck past its 3-minute bound (`FelisReconcileStuck`). The operator's
-  liveness probe restarts a pod whose pass passes 10 minutes; its readiness
-  waits for the informer caches to sync.
-- **World Jobs (kube-state-metrics):** a failed backup/restore/reaper Job
-  (`FelisWorldJobFailed`) and a reaper that has not succeeded in 26h
-  (`FelisReaperStale`).
-- **Builds and starts:** build failures and slow starts.
-- **Node:** disk and memory thresholds, and the kubelet `DiskPressure`
-  condition.
-- **Database backups:** control-plane backup freshness (§16; needs
-  node-exporter's textfile collector).
-- **Sign-in abuse (§17):** the mail budget, relay failures, throttled floods,
-  account code locks and the refused sign-in rate, plus lost audit rows.
-
-- Plain Prometheus: add `felis-alerts.yaml` to `rule_files`. Check and unit-test
-  it standalone with `promtool check rules felis-alerts.yaml` and
-  `promtool test rules felis-alerts_test.yml` (the tests pin exactly when each
-  alert fires).
-- kube-prometheus-stack / prometheus-operator: `kubectl apply -f
-  felis-prometheusrule.yaml` (adjust its `release:` label to your stack's
-  ruleSelector).
-
----
-
-## 15. Control-plane upgrades, and rolling back a bad one {#_15-control-plane-upgrades-and-rolling-back-a-bad-one}
-
-`felis update` checks only; it prints a target and explicit `--apply` command. The host
-updater downloads the installer from the target's resolved full commit, backs up the
-database and deployment state, then uses that installer to reconcile the CLI, core
-services, plugins and system images. See operations §4 for `--version`, `--ref`, `--dev`
-and `--all`. Use the exact printed command to retain the reviewed target. Application
-requires an active maintenance window or explicit `--now`; `--force` never skips the
-backup, an unreadable window or compatibility guards.
-
-A host whose `felis update -h` lacks `--apply` still needs one installer run
-(`curl -fsSL <installer URL> | sudo bash`) to acquire the new CLI. `sudo felis setup`
-on a completed install opens the configuration console, so it is not an upgrade path.
-The updater reuses the same checksum, image import/build and rollout checks as that installer.
-Two properties of the control plane matter when you do:
-
-- Both Deployments use strategy **Recreate** (single replica, no leader election:
-  two overlapping instances would fight over the same cluster). An upgrade takes
-  the panel/API down for the rollout window — seconds normally, longer if the new
-  image still has to be imported.
-- If the new pod cannot start (bad tag, missing image), the installer's rollout
-  wait fails after 180s and prints `kubectl describe` diagnostics: you see
-  `ErrImagePull`/`ImagePullBackOff` there instead of a silent hang.
-
-**What the installer checks before it runs anything it downloaded:**
-
-| Download | Check |
-|---|---|
-| `felis-linux-<arch>` (release channel) | its sha256 must match the release's `SHA256SUMS`; a release without one, or a mismatch, is compiled from the same tag instead |
-| the image tars `felis-image-*-linux-<arch>.tar`, their listing `felis-images-linux-<arch>.txt`, `felis-velocity.jar` (release channel, `FELIS_ARTIFACT_DIR`) | each sha256 must match the release's `SHA256SUMS`; the listing must give one known role per line with sha256 digests, and each image must be in containerd under the digest the listing names once its tar is imported. An asset that fails is built on the host instead (§15c); from `FELIS_ARTIFACT_DIR` the install stops |
-| k3s's own images (`k3s-airgap-images-<arch>.tar.zst`) | against the k3s release's `sha256sum-<arch>.txt`; a mismatch leaves k3s pulling them from Docker Hub |
-| k3s (fresh install, or `FELIS_UPGRADE_DEPS=1`) | the install script is read at `FELIS_K3S_VERSION`'s tag (default `v1.36.4+k3s1`), and it checks the binary against that release's sha256 list |
-| cloudflared (when absent, or `FELIS_UPGRADE_DEPS=1`) | release `FELIS_CLOUDFLARED_VERSION` (default `2026.9.1`) against a pinned sha256; another version needs `FELIS_CLOUDFLARED_SHA256` |
-| Go toolchain (nano, source builds) | pinned sha256 per architecture; another version needs `FELIS_GO_SHA256` |
-| the registry and PostgreSQL images | pinned by digest (`registry:2.8.3@sha256:a3d8…`, `postgres:18.6-trixie@sha256:5a5a…`); a release's copy must carry that name and digest |
-| Limbo, its spawn schematic, Paper, LuckPerms, Velocity | the builds and sha256s in `deploy/game-stack.lock`; each image build and the proxy install refuse a download that hashes differently (§15b) |
-| the Temurin JRE the proxy runs on | release `25.0.4.1+1` against a pinned sha256 per architecture |
-| base images of the felis, limbo, lobby and paper images | pinned by digest in each `Dockerfile` |
-
-On a public repository each release also carries a signed build-provenance
-attestation. Check a downloaded binary with
-`gh attestation verify felis-linux-amd64 --repo FelisMC/Felis`; it names the
-workflow run and commit that built it.
-
-Each release runs under its own image tag, `felis/felis:v1.2.3` (a source
-build's stamp `v1.2.3+gabc1234` becomes `v1.2.3-gabc1234`; a build that reports
-no version uses `:demo`). At the end of an upgrade the installer prints the tag
-it moved away from, and keeps it in `/etc/felis/previous-felis-image`. Roll
-back with:
-
-```
-kubectl -n felis rollout undo deployment/felis-api deployment/felis-operator
-kubectl -n felis rollout status deploy/felis-api
-```
-
-`rollout undo` returns each Deployment to its previous ReplicaSet, which names
-the previous release's tag. That image is normally still on the node; if the
-image GC collected it, the registry re-serves it (§13b): the pruner keeps the
-five newest `felis/felis` tags and every image a game pod still runs. A rerun
-of the same version reuses its tag and restarts both Deployments onto the
-rebuilt image, so after such a rerun undo lands on that same tag again. The
-next installer run re-applies the bundle and moves the image to whatever that
-run installs.
-
-A platform upgrade leaves running game servers alone. Their init containers
-run the felis image too; a running server keeps the one it started with and
-picks up the new release on its next start. A release that changes the game
-pod in any other way still restarts running servers once, as a server edit
-does.
-
-**What a rerun restarts.** Each of these drops every connected player (or cuts
-felis-api's open transactions), so the installer restarts one only when what it
-runs changed:
-
-| Component | Restarted when |
-|---|---|
-| `felis-velocity` (the proxy) | its unit, the JRE, `velocity.jar`, `velocity.toml`, the forwarding secret, the felis-link settings (all but `service-token`, which the plugin re-reads) or a plugin jar changed, or it was not running. The fingerprint lives in `/etc/felis/velocity.fingerprint`; delete it to force a restart. |
-| login and lobby pods | the rebuilt limbo or lobby image has a new image ID (`/etc/felis/system-server-images`). The installer then pins that server's `spec.image` to the digest its tag names now (`felis pin-images --system login\|lobby`) and the operator rolls the pod onto it, each on its own; with the registry unreachable it recreates the pod instead. The installer turns off BuildKit's default provenance attestation (`BUILDX_NO_DEFAULT_ATTESTATIONS=1`): it records the build time, which would give every rebuild a new ID. |
-| felis-postgres | the release moved `POSTGRES_IMAGE` or changed the pod; a few seconds without the API. A rerun that changes neither leaves it running. |
-| felis-api, felis-operator, the registry pod (its gate and GC containers run the felis binary) | the image tag changed (an upgrade), or a same-version rerun rebuilt it. |
-
-**PostgreSQL across reruns.** The database runs in k3s from the image the release
-pins, so a distribution upgrade never moves it. The installer refuses to start a
-PostgreSQL whose major version differs from the cluster in `/var/lib/felis/postgres`
-and names the dump-and-restore path ([Operations guide §4](/en/operations/#_4-upgrading-the-pieces-around-felis)). The first rerun of a
-release with felis-postgres on a host an earlier release installed moves the
-database off the host PostgreSQL ([Operations guide §4](/en/operations/#_4-upgrading-the-pieces-around-felis), "The database's move into
-k3s"), and removes that release's `felis-postgres-firewall.service`. On Arch the
-installer's `pacman -Syu` keeps holding the host `postgresql` package back while its
-cluster exists: that cluster is the copy a rollback of the move starts again.
-
-`rollout undo` reverts the image only. The upgrade's database migrations stay
-applied; when they are the problem, restore the `pre-migrate` bundle the upgrade
-took (§16, "Roll back an upgrade that broke the database").
-
-**Schema guard.** felis-api, the reaper, the off-site copy and `felis migrate up`
-compare the migrations the database records with the ones their build embeds, as
-sets. A database a newer release migrated stops them with `database schema is
-newer than this felis build: it records migration 0026, and this build knows
-migrations up to 0025`, so an undo across an upgrade that migrated shows up as
-felis-api in CrashLoopBackOff until the `pre-migrate` bundle is restored. A
-database still missing migrations stops felis-api, the reaper and the off-site
-copy with `database schema is behind this felis build` until `felis migrate up`
-runs; `felis setup`'s preflight applies them itself. [PG-TESTED]
-
-**A failed rerun and the host binary.** The installer replaces
-`/usr/local/bin/felis` early (the steps after it run the new binary) and keeps
-the old one as `felis.prev` until the new one is in use. A run that fails before
-the database migrations start puts the old binary back, so the host timers and
-`felis setup` keep matching the database and the control plane that are still
-running; a rerun continues from there. Once migrations have started, the new
-binary stays. [VM-VERIFIED]
-
-## 15b. Game images, pinned builds, and moving a world to a newer Minecraft {#_15b-game-images-pinned-builds-and-moving-a-world-to-a-newer-minecraft}
-
-Each release pins the upstream builds it installs in `deploy/game-stack.lock`:
-the Limbo CI build and its Minecraft version, the Paper build for that version,
-LuckPerms and Velocity, each with its sha256. Every host installing one release
-builds the same login gate, lobby and plain-Paper image, and a rerun of the same
-release rebuilds nothing. Moving the stack to newer upstream builds is a release
-change: `bash deploy/update-game-stack-lock.sh` resolves and hashes upstream's
-newest builds and rewrites the lock (`--check` only reports whether upstream
-moved on). Two installer knobs leave the lock:
-
-- `FELIS_GAME_STACK=latest` resolves upstream's newest builds at install time,
-  hashes the ones that publish no digest, and warns that they are not the
-  release's builds.
-- `FELIS_VELOCITY_VERSION=<minor>` installs that minor's newest Velocity build
-  (content-addressed, so still sha256-checked).
-
-`FELIS_JRE_VERSION` picks the proxy's Java feature release (default 25, pinned
-to Temurin `25.0.4.1+1`). A JRE the installer put there moves to the pinned
-build on the next rerun; a JRE from any other vendor is left in place.
-
-The platform's game images live under mutable tags
-(`registry.felis.svc:5000/felis/paper:demo`): an installer run that builds a
-different stack pushes the new build over the same tag. A server never follows
-that tag on its own. felis-api stores the image a server is
-created with pinned to the digest the tag named at that moment
-(`…/felis/paper:demo@sha256:…`), and the installer's `pin_user_server_images`
-step pins any older server still on a bare tag *before* it pushes the new
-builds. Kubernetes pulls a digest-qualified ref by the digest, so a pinned
-server wakes on exactly the build it was created on, however often the tag moves.
-The login and lobby servers are pinned the same way, by the installer, each time
-it moves them onto a new build, so `kubectl -n minecraft get minecraftserver login
--o jsonpath='{.spec.image}'` names the build the login gate runs.
-
-Each installer run also pushes every game build under a tag no later run
-rewrites, `<Minecraft version>-<12 hex of the image id>`
-(`felis/paper:26.2-3f9c0a1b2c4d`). Whitelist one of those to create servers on a
-specific Minecraft version after `:demo` has moved on.
-
-Moving an existing world to a newer build is an explicit step: pick the image in
-the panel's **Edit server** dialog (re-picking the current tag moves it to that
-tag's newest build) and tick the backup confirmation. Over the API the same
-PATCH needs `"confirmImageChange": true`, or it is refused with `409
-image_change_unconfirmed`. Back the world up first: Minecraft upgrades chunks
-as it loads them, and the old version cannot open them again. The audit log keeps
-`image_from`/`image_to` for every change, so the exact previous build can be set
-back (it is admitted by its tag) together with a restore of the pre-upgrade
-backup. That rollback works while the registry still holds the old build: a
-build no server and no whitelist entry names is pruned after 24 hours, and the
-5 newest builds of each `felis/` repository are kept regardless (§9).
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Create/edit refused with `image_not_in_registry` | the whitelisted tag was never pushed to the internal registry, or was deleted | push or rebuild the image, then retry |
-| Create/edit refused with `registry_unavailable` | felis-api could not reach `registry.felis.svc:5000` | `kubectl -n felis get pods -l app.kubernetes.io/component=registry`; check the `felis-registry-ingress` NetworkPolicy still admits felis-api |
-| Installer warns `could not pin every user server` | the registry was down, or a server names a tag the registry lost | fix the registry, then `sudo felis pin-images` before starting those servers; a server whose tag is gone keeps its bare tag until an admin picks a new image |
-| Installer warns `could not pin the login system server` (or lobby) | the registry did not answer right after the push | the installer recreated the pod instead, which starts the new build only while `spec.image` names the bare tag; rerun the installer once `kubectl -n felis get pods -l app.kubernetes.io/component=registry` is Ready |
-| A running server restarted during an installer re-run | it was pinned in place: the operator rolled it onto the pinned ref, the build it already ran | nothing; it happens once per server |
-| Create/edit refused with `the registry no longer holds build …` | the image names a digest the pruner deleted: nothing referenced it for 24 hours (§9) | pick a current tag; whitelist the versioned tag of a build you want kept |
-
-## 15c. The installer builds on the host although it installs a release {#_15c-the-installer-builds-on-the-host-although-it-installs-a-release}
-
-A release install takes its images and the Velocity plugin from the release's assets
-(operations §1, "Where the binary and the images come from"). When one cannot be used the
-installer names it and the reason, and builds that image with Docker instead (the registry
-and PostgreSQL images are pulled from Docker Hub). Nothing unchecked is used either way
-**[SH-TESTED]**. Each download is tried three times, five seconds apart, before it counts as
-failed, and a transfer that stalls under 1 KiB/s for a minute is cut off and tried again.
-
-Preflight counts no Docker builds for a release install, so the first build it falls back
-to checks the room first: Docker's images and build cache take about 8 GiB under
-`/var/lib/containerd` (2 GiB when Docker already has a cache there). Without it the install
-stops before Docker is installed, with `building here what the release did not supply takes
-about … MiB under /var/lib/containerd, and … has … MiB free; nothing has been built`. Rerun
-once the asset downloads (the messages above it say which one failed), free that space, or
-set `FELIS_PREFLIGHT=warn` to build anyway **[SH-TESTED]**.
-
-Host builds keep Docker's output in the terminal scrollback. During plugin builds,
-`[felis] Downloading <file> (<host>)` identifies each Gradle dependency download;
-every ten seconds an active download reports bytes, speed and elapsed time. A
-percentage appears only when the server supplies a total size. After thirty seconds
-without new bytes the line says `no new data for …; waiting for the download`;
-this reports a wait, without changing Gradle's timeout or retry behavior.
-
-| Message | Meaning | What to do |
-|---|---|---|
-| `release vX publishes no SHA256SUMS … building them on this host instead` | the release predates release assets, or release.yml is still uploading them | nothing for an old release; for a new one, rerun once the release page lists `SHA256SUMS` |
-| `SHA256SUMS lists no <file>` or `could not download <file> from release vX` | the release lacks that asset (a partial upload) | rerun later; the host build is correct meanwhile |
-| `downloaded <file> hashes to …, but release vX's SHA256SUMS says …` | the download was corrupted, or the asset was replaced after `SHA256SUMS` was written | rerun: the bad copy is gone and is fetched again; the same mismatch every time means the asset itself is bad, so report it |
-| `the release's image listing … is malformed` | `felis-images-linux-<arch>.txt` does not parse | report it; every image is built on the host |
-| `the release's registry image is …, but this installer runs …` | the release's base tar carries another digest than this `bootstrap.sh` pins: the installer and the release are from different versions | run the installer read at the release's tag (`felis update --panel` prints that command) |
-| `k3s containerd holds no <image> from <tar>` | the tar was imported but did not hold the image under the listed digest | `sudo k3s ctr images ls \| grep felis` shows what it holds; report it |
-| `FELIS_ARTIFACT_DIR: …`, and the install stops | an asset is missing from the directory or fails its checksum; nothing is built from a directory | copy the named file from the release again and rerun |
-
-An install that stops part way leaves the downloaded tars in `/var/lib/felis/artifacts`; the
-rerun reuses those that still match `SHA256SUMS` and deletes the directory once the images
-are in the registry.
-
-## 16. Control-plane database backups and disaster recovery {#_16-control-plane-database-backups-and-disaster-recovery}
-
-The PostgreSQL database behind felis-api holds everything that is not a world:
-accounts, passkeys, Minecraft account links, server ownership, quotas, audit
-logs, and the `world_backups` index that maps an archive (§10) back to its
-owner. Losing it orphans every world archive. It runs in k3s as the
-`felis-postgres` Deployment, with its cluster on the host in
-`/var/lib/felis/postgres`; `felis db` runs `pg_dump`, `psql` and `pg_restore`
-inside that pod (the host config's `[database] deployment`) and keeps the
-bundles on the host.
-
-### What runs, and where the bundles go {#what-runs-and-where-the-bundles-go}
-
-- **`felis-db-backup.timer`** runs `felis db backup` daily at
-  `FELIS_DB_BACKUP_TIME` (default `*-*-* 03:30:00`, plus up to 15 min random
-  delay). `Persistent=true` catches up at boot after the host was off at that
-  time. The installer takes the first backup during the install, so a broken
-  pipeline shows up there. [CODE-ONLY; unit and timer content GO-TESTED in
-  `deploy/bootstrap_test.sh`]
-- **Every upgrade** (`felis migrate up`, which the installer runs) takes a
-  `pre-migrate` bundle first when the database already has data and a
-  migration is pending, and **applies nothing** if that backup fails
-  (`pre-migration backup failed, nothing applied`). [GO-TESTED]
-- **Every restore** takes a `pre-restore` bundle of the database it is about to
-  replace (skip with `-no-safety-backup`). [GO-TESTED]
-
-Bundles land in `FELIS_DB_BACKUP_DIR` (default `/var/lib/felis/db-backups`,
-mode 0700; outside `/var/lib/rancher` so a k3s reinstall cannot take them
-along). One bundle is `felis-db-<UTC stamp>-<label>.tar`:
-
-| Member | Content |
-|---|---|
-| `MANIFEST.json` | version, schema version, `pg_dump --version`, sha256 of every member |
-| `db.dump` | `pg_dump --format=custom` of the `felis` database |
-| `state/etc/felis/...` | every file in `/etc/felis`: `secrets.env` (DB password, forwarding secret, caller and registry tokens), `felis.host.toml`, `felis.pod.toml`, the `felis.toml` symlink, `offsite.env` (bucket credentials and encryption key), `smtp-password`, `uploads-s3-access-key` and `uploads-s3-secret-key` (the mail relay password and the uploads bucket keys `felis setup` took), the panel TLS pair, and the installer's own markers (`system-server-images`, `velocity.fingerprint`). `bootstrap.done` is left out on purpose |
-| `k8s/minecraftservers.json` | every MinecraftServer, status and server-side metadata stripped, ready for `kubectl apply`. The export is tried 3 times, 10 s apart; when the cluster still does not answer, the bundle is written without it and the manifest records why (next section) |
-
-next to a `.sha256` sidecar in `sha256sum` format. **A bundle contains the
-secrets; treat it like `/etc/felis` itself.** Retention per label: `daily` 14
-(`FELIS_DB_BACKUP_KEEP`), `pre-migrate` 10, `pre-restore` 5, `offsite` 1
-(taken by the off-site copy, §16), `manual` never pruned.
-
-Installer knobs: `FELIS_DB_BACKUP_DIR`, `FELIS_DB_BACKUP_KEEP`,
-`FELIS_DB_BACKUP_TIME`, `FELIS_DB_BACKUP_METRICS` and
-`FELIS_PRE_MIGRATE_BACKUP` (below).
-
-### Is the newest backup fresh? {#is-the-newest-backup-fresh}
-
-Four places answer, all with the same 26 h limit on the newest **daily**
-bundle, the one `felis-db-backup.timer` writes. A manual, `pre-migrate` or
-`offsite` bundle taken since counts for a restore and leaves the alarm
-standing: the timer has still stopped, and that bundle only ages from here.
-
-- The panel: **Admin → Maintenance & Backups** shows the newest backup, its kind and size,
-  and turns red with the fix commands when the daily one is missing or overdue
-  (read from the `db_backup_last` platform setting each backup writes; its
-  `daily_at` is the newest daily bundle on disk when it was written).
-- `sudo felis db check` exits 1 with the reason; `sudo felis db list` shows every
-  bundle with its age.
-- The watchdog mails the owners (§14).
-- Prometheus: `FelisDBBackupStale` (critical) and `FelisDBBackupMetricMissing`
-  (warning) in `deploy/alerts/`. They read
-  `felis_db_backup_last_success_timestamp_seconds`, which each daily run writes
-  to `FELIS_DB_BACKUP_METRICS` (default
-  `/var/lib/node_exporter/textfile_collector/felis_db_backup.prom`). Point
-  node-exporter's `--collector.textfile.directory` at that directory, or
-  `FelisDBBackupMetricMissing` fires after 2 h.
-
-When a backup is overdue:
-
-```
-sudo systemctl status felis-db-backup.timer          # enabled? next run?
-sudo journalctl -u felis-db-backup -n 50 --no-pager   # why the last run failed
-sudo systemctl start felis-db-backup.service         # run the daily backup now; clears the alarm
-```
-
-**A bundle without the MinecraftServer objects.** When the cluster does not
-answer the export (`k3s kubectl get minecraftservers`) three times running,
-the bundle is still written, since it holds the database, but a restore from it
-brings back no servers. `felis db backup` then exits 1 (the timer's run shows
-failed) after `wrote ...` and the reason; the panel card turns amber
-(**incomplete**) with the reason and the commands; the watchdog mails the owners
-(`the newest control-plane database backup ... lacks the MinecraftServer
-objects`) while that bundle is the newest; `felis db verify` and
-`felis offsite list`/`fetch-db` name the gap. A pre-migrate or pre-restore
-bundle goes the same way without stopping the upgrade or the restore, whose
-rollback needs the database alone. The bundle the off-site copy takes after
-copying archives refuses to go without them and is tried again next pass. Once
-`sudo k3s kubectl get minecraftservers -A` answers, run `sudo felis db backup`.
-[GO-TESTED: `internal/dbbackup`, `cmd/felis`, `internal/watchdog`; the panel card
-in `DBBackupCard.test.tsx`]
-
-Common failures: felis-postgres not running (`kubectl exec` reports no running
-pod, or `pg_dump: ... connection refused`; next section); `k3s: executable file not
-found` from a `felis` that runs with neither `/usr/local/bin` on PATH nor k3s
-anywhere else; the backup directory's disk full (the half-written `.partial` is
-removed and the previous bundles stay intact); `pg_dump: server version mismatch`
-when an external database (no `deployment` in `[database]`) is newer than the
-host's client tools (install the matching `postgresql` client package).
-
-### felis-postgres is not running, or never became ready {#felis-postgres-is-not-running-or-never-became-ready}
-
-The installer stops with `felis-postgres did not become ready` after 10 minutes
-and prints the pod's events; the watchdog reports the Deployment the same way it
-reports felis-api. Look at the pod:
-
-```sh
-sudo k3s kubectl -n felis get pods -l app.kubernetes.io/component=postgres -o wide
-sudo k3s kubectl -n felis describe deploy/felis-postgres | tail -n 30
-sudo k3s kubectl -n felis logs deploy/felis-postgres --tail=60
-```
-
-| What it says | Cause | Fix |
-|---|---|---|
-| `ImagePullBackOff` / `ErrImagePull` on `postgres` | the node cannot reach Docker Hub and has no copy | §8e, "The platform's own images on an air-gapped node" |
-| `CreateContainerConfigError`, `secret "felis-postgres" not found` | the superuser Secret is gone | rerun the installer, which makes a new one. The image reads it only when it creates a cluster; the installer and `felis db` reach the database over the pod's socket |
-| the log says `Permission denied` on `/var/lib/postgresql/18/docker` | the hostPath lost its owner (uid 999) or, with SELinux enforcing, its `container_file_t` label (a restore of `/var/lib/felis` by hand, `restorecon` without the installer's rule) | rerun the installer, which sets both; by hand: `sudo chown -R 999:999 /var/lib/felis/postgres` and `sudo restorecon -R /var/lib/felis/postgres` |
-| the log says `database files are incompatible with server` | the cluster was made by another major version | [Operations guide §4](/en/operations/#_4-upgrading-the-pieces-around-felis), "PostgreSQL major versions" |
-| `Pending`, `Insufficient memory` | the node is full | §13b |
-
-Query the database by hand from inside the pod, as the superuser over its socket:
-
-```sh
-sudo k3s kubectl -n felis exec -it deploy/felis-postgres -c postgres -- psql -U postgres felis
-```
-
-The copy an earlier release's host PostgreSQL still holds, from before the move
-into k3s, stays on the host; [Operations guide §4](/en/operations/#_4-upgrading-the-pieces-around-felis) covers going back to it.
-
-### Check a bundle {#check-a-bundle}
-
-```
-sudo felis db verify felis-db-20260924T033012Z-daily.tar   # bare names resolve in the backup dir
-sha256sum -c felis-db-20260924T033012Z-daily.tar.sha256    # on a copy, without felis
-```
-
-`verify` checks the sidecar, every member against the manifest, that nothing
-is missing or unlisted, and that the manifest comes first. It does not touch
-the database.
-
-### Restore on the same host (undo a mistake) {#restore-on-the-same-host-undo-a-mistake}
-
-```
-kubectl -n felis scale deployment felis-api felis-operator --replicas=0
-sudo felis db restore -yes felis-db-20260924T033012Z-daily.tar
-sudo felis migrate up -config /etc/felis/felis.host.toml
-kubectl -n felis scale deployment felis-api felis-operator --replicas=1
-```
-
-- Without `-yes`, restore prints what the bundle holds and exits 2.
-- It refuses while other clients are connected (`other clients are connected to the database (N)`)
-  and prints the scale command; `-force` overrides, for a client you know is
-  idle.
-- The replay is one transaction: it drops everything the `felis` role owns and
-  loads the dump. **Any failure rolls back and leaves the database exactly as it
-  was** (`rolled back, the database is unchanged`, with the psql and pg_restore
-  errors). [PG-TESTED]
-- The database before the restore is in the `pre-restore` bundle it names;
-  restoring that one undoes the restore.
-- `migrate up` brings an older bundle's schema up to the running release.
-  Nothing migrates at startup, so skip it only when you are rolling back to the
-  release that wrote the bundle (next section).
-- Restore replaces the database only. World data (PVCs and archives, §10, §13)
-  is not in the bundle and is not touched; a server created after the bundle
-  keeps its PVC but loses its owner row.
-
-### Roll back an upgrade that broke the database {#roll-back-an-upgrade-that-broke-the-database}
-
-The installer's migrations only roll forward. The `pre-migrate` bundle taken by
-the upgrade is the way back:
-
-```
-kubectl -n felis scale deployment felis-api felis-operator --replicas=0
-sudo felis db list | grep pre-migrate                  # newest one is the upgrade's
-sudo felis db restore -yes <that bundle>
-kubectl -n felis rollout undo deploy/felis-api
-kubectl -n felis rollout undo deploy/felis-operator
-kubectl -n felis scale deployment felis-api felis-operator --replicas=1
-```
-
-Do **not** run `felis migrate up` here: the host binary is already the new
-release and would re-apply the migrations you are rolling back. Bring the host
-back in line by installing the earlier release from its own assets, with the
-installer read at that same tag (`v1.2.3` here):
-
-```
-curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/v1.2.3/deploy/bootstrap.sh \
-  | sudo FELIS_RELEASE=v1.2.3 bash
-```
-
-`FELIS_RELEASE` makes the installer install that release where it would
-otherwise resolve the newest one, which would install the new release again and
-re-apply its migrations. It is refused together with `FELIS_REF`,
-`FELIS_ARTIFACT_DIR`, `FELIS_SKIP_FETCH` or `FELIS_VERSION_BOOTSTRAP=dev`, and
-an unpublished tag stops the install before anything changes. [SH-TESTED]
-
-- An installer older than `FELIS_RELEASE` ignores it and installs the newest.
-  `curl -fsSL <that URL> | grep -c FELIS_RELEASE` prints `0` for one of those;
-  run it with `FELIS_REF=v1.2.3` instead, which builds that tag from source
-  (slower, and it needs the build resources of §15c).
-
-### Whole-host disaster recovery: what comes back, and from where {#whole-host-disaster-recovery-what-comes-back-and-from-where}
-
-When the host (or its disk) is gone, everything Felis needs comes back from the
-off-site bucket (next sections) plus a fresh install. What the host holds:
-
-| Data | On the host | In the bucket | Brought back by | Lost at most |
-|---|---|---|---|---|
-| Control-plane database (accounts, passkeys, ownership, quotas, audit, submissions, the `world_backups` index) | felis-postgres, `/var/lib/felis/postgres` | every bundle, copied within the hour of being written, plus a fresh one after every pass that copied a world archive | `fetch-db`, `db restore` | changes since the newest bundle: up to a day plus an hour with the daily timer |
-| Host state (`/etc/felis`: secrets, both `felis.toml` copies, `offsite.env`, the mail relay password and uploads bucket keys, panel TLS pair) | `/etc/felis` | inside every bundle | `tar -x` of the bundle's `state/` | as the database |
-| MinecraftServer objects | k3s | inside every bundle (`k8s/minecraftservers.json`) | `kubectl apply` | as the database |
-| World archives (reaper, scheduled restore points, "Back up now", pre-restore snapshots) | `felis-backups` volume | each one within the hour, followed by a bundle listing it | `fetch-worlds` | archives written in the last hour |
-| Live worlds | `world-*` volumes under `/var/lib/rancher/k3s/storage` | **only as their archives** | a restore from the newest archive (§10) | everything since that world's newest archive |
-| User images | `registry` volume | hourly; image lists kept 14 days | `fetch-images` | images pushed in the last hour |
-| Submission uploads (modpacks awaiting or past review) | `felis-uploads` volume | hourly; upload lists kept 14 days | `fetch-uploads` | uploads of the last hour |
-| The Cloudflare Tunnel connector (when the panel is behind one) | `/etc/felis/cloudflared.yml`; `/root/.cloudflared/cert.pem` and `<tunnel-id>.json`; `cloudflared-felis.service` | the config inside every bundle; the login certificate, the tunnel's credentials and the unit are not copied | the Cloudflare step of `sudo felis setup` (step 11 below) | nothing: the tunnel, its DNS records and the Access application live at Cloudflare |
-| Platform images, Velocity, the JRE, build tools | registry, `/opt/felis` | not copied | the installer builds and pushes them again | nothing |
-| k3s itself (its token, CA, datastore, Secrets, Deployments) | `/var/lib/rancher/k3s` | not copied | the installer makes a new single-node cluster and renders every Secret and Deployment from `/etc/felis` | nothing: no Felis data lives only there |
-
-**Live worlds are the gap.** A world's current state exists only in its
-volume; the bucket holds the archives the reaper, the scheduled restore points,
-an owner's "Back up now" or a pre-restore snapshot wrote. Scheduled restore
-points are taken of running worlds too (§10), so a world played since its last
-point normally has one no older than `scheduled_every` (one day by default).
-A world that was never archived comes back as a server with an empty world.
-Tell owners to back up before anything they would hate to lose, and treat the
-newest archive's age (the server's backup page) as that world's recovery point.
-
-For a smaller database loss window, give the installer a tighter
-`FELIS_DB_BACKUP_TIME` (any systemd calendar, e.g. `*-*-* 00/6:30:00` for
-every 6 hours) with a matching `FELIS_DB_BACKUP_KEEP`, on every installer
-run; the hourly off-site copy picks each bundle up within the hour.
-
-How long a rebuild takes is mostly transfer time. The installer on a blank
-host builds and pushes every platform image, so it runs longer than an upgrade
-and depends on the host's network; the database restore takes seconds to
-minutes; the three fetches move what `sudo felis offsite status` reports the
-bucket holding (images, uploads, world archives) at the bucket's bandwidth,
-and each skips what is already in place, so an interrupted one resumes. Write
-those sizes down with the bucket's download rate and you have the recovery
-time for your install. A whole-host rehearsal on a spare machine, once per
-release, is the way to know it for sure. The spare runs `felis restore-host`
-without `-take-over` (next section), or follows the manual steps below
-without steps 8 and 11. It finds the production host named in the bucket and
-stands by, so it copies nothing into the bucket, prunes nothing there and,
-while production keeps writing, mails none of the owners its restored
-database holds. A second connector on the production tunnel would take a
-share of the real visitors, so the spare leaves the tunnel alone and is
-reached by its own address (step 10 moves it to one).
-
-The order below matters: the state goes in before the installer so it reuses
-the old secrets and bucket; the images go back before the database so the
-servers the database restores find the digests they pin, inside the pruner's
-24-hour grace; the MinecraftServers go back with the database that names their
-owners; the worlds come after them because a restore needs a server to
-restore into. Mail is checked before the domain moves, because a move can
-cost passkeys and email codes are the way back in; the domain moves after the
-MinecraftServers are applied, since the login gate's env carries it.
-
-### Rebuild on a new host (the old one is gone) {#rebuild-on-a-new-host-the-old-one-is-gone}
-
-This needs the off-site copy (next section) or a bundle you copied off the old
-host yourself, plus the off-site encryption key if the copy is in the bucket.
-
-**In one command: `felis restore-host`.** With the off-site copy, the installer
-rebuilds a fresh host on its own. Give it the old install's bucket, its
-credentials and its key (with `FELIS_OFFSITE_REGION` and `FELIS_OFFSITE_PREFIX`
-when the old install had them) and ask for the rebuild:
-
-```
-FELIS_OFFSITE_ENDPOINT=https://s3.example.com FELIS_OFFSITE_BUCKET=felis-backups \
-FELIS_OFFSITE_ACCESS_KEY=... FELIS_OFFSITE_SECRET_KEY=... FELIS_OFFSITE_KEY=... \
-FELIS_RESTORE_FROM_OFFSITE=1 FELIS_RESTORE_TAKE_OVER=1 \
-  bash deploy/bootstrap.sh          # or the curl | sudo bash one-liner
-```
-
-The installer checks the request before it touches the host: it refuses
-`FELIS_RESTORE_FROM_OFFSITE=1` without all five `FELIS_OFFSITE_*` values
-above, and on a host where Felis is already installed (`sudo felis restore-host
--yes -force` replaces such an install's data). `FELIS_RESTORE_BUNDLE` names an
-older bundle than the newest (`felis-db-<stamp>-<label>.tar`, from `felis
-offsite list`). Leave `FELIS_RESTORE_TAKE_OVER` unset on a rehearsal machine.
-Once the install is complete, and before its summary and the setup console, it
-runs `felis restore-host -yes` (with `-bundle` and `-take-over` from those
-variables), so the setup console finds the old install's Owner. When the
-rebuild stops, the installer says `the rebuild stopped before it finished; fix
-the cause above and run: sudo felis restore-host -yes`; that command carries
-on where the run stopped (add `-take-over` when the installer had it).
-
-On a host already installed with the old bucket in its `[offsite]` settings
-and no servers yet, run the command directly, as root:
-
-```
-sudo felis restore-host                      # the steps; nothing changes
-sudo felis restore-host -yes                 # rebuild, leaving the bucket to the old host
-sudo felis restore-host -yes -take-over      # rebuild, then make this host write the bucket
-```
-
-It runs the numbered steps below up to taking the bucket over, each as the
-command the step names:
-
-| `restore-host` step | What it does | Manual step |
-|---|---|---|
-| `fetch_db` | `felis offsite fetch-db` of the newest bundle (or `-bundle <name>`) into `/var/lib/felis/restore-host` | 1 |
-| `images` | `felis offsite fetch-images` | 4 |
-| `uploads` | `felis offsite fetch-uploads` | 5 |
-| `database` | scales felis-api and felis-operator to 0, `felis db restore -yes -no-safety-backup`, `felis migrate up`, scales both back and waits up to 5 minutes for felis-api | 6 |
-| `servers` | applies the bundle's `k8s/minecraftservers.json`: user servers only (the new install made its own login gate and lobby), each `Stopped`, without the old cluster's node placement, volume claim names, locks or in-flight marks | 6 |
-| `worlds` | `felis offsite fetch-worlds` | 7 |
-| `restore_worlds` | restores each brought-back server's newest intact backup through felis-api and waits for its restore Job (up to 2 hours each); a server with no backup keeps an empty world | 7 |
-| `take_over` | `felis offsite take-over -yes`, only with `-take-over` | 8 |
-
-- **Resumable.** Each step is recorded in
-  `/var/lib/felis/restore-host/state.json` once done, so a run cut short (a
-  dropped SSH session, a bucket timeout) picks up where it stopped. The
-  database is restored once only: a rerun never restores it over what the
-  rebuilt install has written since. The bundle the first run fetched stays
-  the rebuild's bundle on later runs.
-- **A fresh install only.** Before the database step it refuses an install
-  whose database already holds servers; `-force` restores over them.
-- **Failed worlds are retried.** A server whose restore fails is listed with
-  the reason and fails the step; the next run retries only the servers not yet
-  restored.
-- **Host state stays this host's.** It does not put the old `/etc/felis` in
-  place (step 2): the installer generated fresh secrets, and this host keeps
-  its own root domain, `[smtp]` relay, uploads bucket keys and tunnel
-  configuration. A mail relay, retention or heartbeat the Owner saved in the
-  panel comes back with the database. To reuse the old host's state as well,
-  put it in place as in step 2 before running the installer with the variables
-  above. [CODE-ONLY]
-- **The end of the run** prints which backup each server's world came from and
-  what is left by hand: step 9 (mail), step 10 (pointing the domain here and
-  `felis domain set`, or keeping this host's address, in which case passkeys
-  registered on the old address stop working and their users sign in with an
-  email code and register new ones), step 11 (the Cloudflare tunnel) and,
-  without `-take-over`, step 8. After a take-over, `sudo systemctl start
-  felis-offsite.service` sends this host's first copy before the hourly timer
-  does.
-
-Flags: `-yes` (without it the steps are printed and nothing changes),
-`-bundle <name>`, `-take-over`, `-force`, `-dir` (default
-`/var/lib/felis/restore-host`) and `-config` (default `/etc/felis/felis.toml`).
-A rerun with a different `-bundle` fetches and uses that bundle while the
-database has not been restored yet; once it has, the run refuses and names the
-bundle the database came from (delete `/var/lib/felis/restore-host/state.json`
-to start over).
-[GO-TESTED: `TestRestoreHostRunsTheRunbookOnce`, `TestRestoreHostTakesTheNamedBundle`,
-`TestRestoreHostResumesAfterAFailure`, `TestRestoreHostRefusesAnInstallWithServers`,
-`TestRestorableServersCleansTheOldCluster`, `TestNewestBundleAndBundleEntry`,
-`TestInternalRestoreRebuildsAWorld`] [SH-TESTED: the installer's checks of the
-`FELIS_RESTORE_*` variables, `deploy/bootstrap_test.sh`] [CODE-ONLY: a whole
-rebuild through the installer on a real host]
-
-**By hand.** The numbered steps are the reference for what `restore-host`
-does, the way to rebuild from a bundle copied off the old host without a
-bucket, and the way to finish a step the command could not.
-
-1. Get the newest bundle. From the bucket, with any `felis` binary of the same
-   or a newer release (the `felis-linux-<arch>` release asset runs on its own;
-   this works from any machine that can reach the bucket):
-
-   ```
-   export FELIS_OFFSITE_ACCESS_KEY=... FELIS_OFFSITE_SECRET_KEY=... FELIS_OFFSITE_KEY=...
-   sudo -E felis offsite fetch-db -endpoint https://s3.example.com -bucket felis-backups \
-        [-region ...] [-prefix ...] latest
+   ```bash
+   sudo k3s kubectl -n minecraft delete job <job>
    ```
 
-   It writes the bundle into `/var/lib/felis/db-backups` (`-dir` to change),
-   checks it (`felis db verify`) and names it, with when it was taken, the
-   release and schema that took it, and how many accounts and servers its
-   database holds. Read those before going on. A wrong key fails with
-   `object does not decrypt with this key` (naming the bucket's key id and this
-   key's, once the bucket records one) and writes nothing. For a copy you
-   made yourself, check it with `sha256sum -c felis-db-....tar.sha256`.
+   ::: warning
+   Deleting a Job discards whatever it was writing.
+   :::
 
-   `latest` is the newest bundle, unless that one holds no servers and at
-   most one account while an older one holds more. That is the database a
-   rebuilt host copies off-site when it takes the bucket over before anyone
-   restores onto it (with an older release, within its first hour), so
-   `fetch-db latest` refuses it and names up to
-   three older bundles with their counts; fetch the one you want by name in
-   place of `latest` (`felis offsite list` shows them all, each with its
-   counts). A bundle fetched by name that looks like a new install's is
-   written with a warning. Bundles from releases before the counts were
-   recorded show `not recorded`.
-2. Put the old host's state in place **before** installing, so the installer
-   reuses the same DB password, caller tokens, forwarding secret, the mail
-   relay password and uploads bucket keys `felis setup` took, and the
-   `[offsite]` bucket with its credentials and key (`offsite.env`):
+3. To remove a stale admission lock:
 
-   ```
-   sudo install -d -m 0700 /etc/felis
-   sudo tar -xpf felis-db-....tar -C / --strip-components=1 state/etc/felis
+   ```bash
+   sudo k3s kubectl -n minecraft annotate minecraftserver <server> felis.lolicon.best/maintenance-
    ```
 
-3. Run the installer as for a first install. `bootstrap.done` is not in the
-   bundle, so it takes the fresh-install path, creates the empty database with
-   the restored password and migrates it. It finds `[offsite]` in the restored
-   `felis.host.toml`, turns the hourly copy back on and reports that another
-   host writes the bucket: this host was built from its backup, so it stands
-   by and copies nothing there until step 8, and ends with `OFF-SITE COPY ON
-   STANDBY`.
-4. Push the user images back into the new registry:
+   Removing a `reap@` lock also cancels that cleanup run: world cleanup keeps the world and
+   tries again the next day (see [World cleanup](/en/operations/backup#world-cleanup)).
+4. For `not_stopped`, retry once the pod list for the server is empty.
 
-   ```
-   sudo felis offsite fetch-images
-   ```
+## Players and routing {#player-problems}
 
-   It restores the newest image list in the bucket (`-at <stamp>` for an
-   older one; `felis offsite list` shows them) through the registry's loopback
-   port as the platform principal, verifying every manifest and layer against
-   its digest, and pushes only what the registry lacks. The pruner counts a
-   restored image as freshly pushed and keeps it for 24 hours; finish the
-   database step within that window so the restored servers and whitelist
-   entries keep naming it. When the new host has already taken the bucket over
-   and recorded its still-empty registry, `fetch-images` refuses that newest list and names
-   the version to pass with `-at`; `fetch-uploads` does the same.
-5. Put the submission uploads back:
+### Players cannot join {#players-cannot-join}
 
-   ```
-   sudo felis offsite fetch-uploads
-   ```
+Every new connection passes through the game proxy (Velocity) and the login space, then
+reaches the lobby or the target server according to the player entry policy. A failure at
+any of these steps keeps players out.
 
-   It writes every upload of the newest upload list (`-at <stamp>` for an
-   older one) into the `felis-uploads` volume, owned by the control plane's
-   uid, checking each against its sha256, and leaves one already in place
-   alone.
-6. Restore the database and bring the servers back:
+**Cause**
 
-   ```
-   kubectl -n felis scale deployment felis-api felis-operator --replicas=0
-   sudo felis db restore -yes -no-safety-backup /var/lib/felis/db-backups/felis-db-....tar
-   sudo felis migrate up -config /etc/felis/felis.host.toml
-   kubectl -n felis scale deployment felis-api felis-operator --replicas=1
-   tar -xOf felis-db-....tar k8s/minecraftservers.json | kubectl apply -f -
+| What the player sees | Cause |
+| --- | --- |
+| The connection fails or times out | The game proxy is not running, or the game port is unreachable |
+| `Finish signing in before joining a server.` | The player has not completed sign-in in the login space |
+| `Login verification is temporarily unavailable. Please try again shortly.` | The proxy cannot reach felis-api |
+| `The lobby is unavailable right now. Try again shortly.` | The lobby is not running or not registered with the proxy |
+| `Starting « <server> » — you'll be moved in automatically.`, and the move never happens | The server does not become ready; see [A server stays in Starting](#server-stuck-starting) |
+| A message that the server cannot be started | The wake was refused; see [Waking a sleeping server is refused](#wake-refused) |
+| The player lands in the lobby instead of the server, or the connection is rejected | Routing is disabled, or the player entry policy sends the connection elsewhere |
+
+Players see these messages in Chinese or English, following their game language. A player
+waiting for a server hears a progress line every minute. The proxy drops a waiting
+player after 120 seconds without an answer from felis-api, and after one hour in any case.
+
+**Diagnosis**
+
+1. Run `sudo felis status` and read the game proxy line (the `felis-velocity` unit and
+   whether the game port accepts connections) and the state of the login space and the lobby.
+2. Read the proxy's state and log:
+
+   ```bash
+   sudo systemctl status felis-velocity
+   sudo journalctl -u felis-velocity -n 200
    ```
 
-   When `tar` answers `Not found in archive`, the bundle lacks the
-   MinecraftServer objects (`fetch-db` said so when it fetched it). Fetch the
-   newest bundle `felis offsite list` shows without `no MinecraftServer
-   objects` and apply its `k8s/minecraftservers.json` instead; servers that
-   bundle does not list do not come back from it.
+3. Look for the line `Felis routing ready: rootDomain=…, login=…, lobby=…`. A line starting
+   with `Felis routing DISABLED` leads to [Routing is disabled](#routing-disabled).
+4. `server list refresh failed` or `server list refresh still failing` in the proxy log means
+   the proxy cannot reach felis-api; see [internal API errors](#internal-api-errors).
+5. Check the login space and the lobby:
 
-7. Bring the world archives back into the archive volume:
-
-   ```
-   sudo felis offsite fetch-worlds
+   ```bash
+   sudo k3s kubectl -n minecraft get minecraftserver login lobby
    ```
 
-   It fetches every archive the restored `world_backups` index lists as present
-   and the volume lacks, provisioning the `felis-backups` volume first if
-   nothing has used it yet (a short-lived `felis-bind-felis-backups-*` pod). It
-   lists any it could not find in the bucket. Restore a world from its archive
-   as usual (§10, §13). With the newest bundle restored, every archive in the
-   bucket is listed; an older bundle leaves the archives copied after it
-   unlisted, and the sync removes those once they pass the longest retention.
-8. Make this host the one that writes the bucket, and send its first copy:
+6. Check the player entry policy in **Platform settings → Player entry**.
 
-   ```
-   sudo felis offsite take-over          # names the host the bucket names now
-   sudo felis offsite take-over -yes
-   sudo systemctl start felis-offsite.service
-   ```
+**Resolution**
 
-   Without `-yes` it names the host the bucket records and when that host last
-   wrote it, and exits 4. With `-yes` it records this host; the old host, if it
-   ever runs again, copies nothing more and says it was taken over. Skip this
-   step on a rehearsal machine.
-9. Check that this host can send mail, when the old one had a relay. Email
-   codes are how users sign in without a passkey, and step 10 can cost them
-   their passkeys. Run `sudo felis setup`, press `e` (configure email) on the
-   status screen and save the pre-filled relay with its password typed again
-   (the form never shows the stored one). Saving delivers one self-test
-   message to the From address and writes nothing unless it arrives. A relay
-   that admits senders by address, or an SPF record for the From domain that
-   lists the old host's address, refuses this host or sends its mail to spam:
-   add the new address there and save again. A relay the Owner saved in the
-   panel came back with the database in step 6 and is the one in force; saving
-   the setup screen replaces it with the relay typed there (§17). Check that
-   one from the panel instead, with **Send test message** on **Platform
-   settings → Mail delivery**, once the panel is reachable. With no relay at
-   all, an Owner who cannot sign in recovers with `sudo felis breakGlass` (§17).
-10. Move the install to this host's address when its names still lead to the
-    old one. The installer kept the bundle's root domain (its log says
-    `(reusing the installed domain)`).
+1. If the proxy is not running, start it with `sudo systemctl restart felis-velocity`. If it
+   keeps failing, read its journal. Long garbage-collection pauses or `OutOfMemoryError` call
+   for a larger heap: raise **Heap ceiling** on the **Game proxy** card in
+   **Platform settings → Access and security**. The proxy restarts and disconnects all
+   players.
+2. If players have not completed sign-in, they follow the steps in
+   [Player access](/en/guide/players#joining) and link their account.
+3. If the proxy cannot reach felis-api, restore felis-api (see [The panel shows an
+   error](#panel-errors)) and the internal API (see [internal API errors](#internal-api-errors)).
+4. If the login space or the lobby is not running, treat it like any server: see
+   [A server stays in Starting](#server-stuck-starting) and
+   [A server shows Failed to start](#server-failed).
+5. Review the player entry policy (see [Player entry policy](/en/guide/players#entry-policy)).
+   With **Route by hostname** and no default destination, connections that require web
+   sign-in enter the lobby and other connections are rejected. Saved changes reach the proxy
+   within 15 seconds and apply to new connections.
 
-    - The `<old-address>.nip.io` default resolves to the dead host by
-      construction. Move it:
+### Waking a sleeping server is refused {#wake-refused}
 
-      ```
-      sudo felis domain set <new-address>.nip.io       # the plan
-      sudo felis domain set -yes <new-address>.nip.io
-      sudo felis domain check
-      ```
+When a player joins a stopped server, the proxy holds the player and asks felis-api to wake
+the server. felis-api checks, in order, the server's autostart policy, the per-server wake
+cooldown and the running-server limit. A server counts as ready only when the operator's RCON
+check succeeds; the proxy polls the server's status every 2 seconds and moves the player when
+it is ready.
 
-      It runs after step 6 because the MinecraftServers applied there carry
-      the domain in the login gate's env. The plan counts the passkeys that
-      stop working; their users sign in with an email code (step 9) and
-      register a new one. [Operations guide §6](/en/operations/#_6-changing-the-root-domain-vm-verified-go-tested-sh-tested) has the rest of what it moves.
-    - A domain of your own stays. Point its records at the new address:
-      `<root>`, `*.<root>`, `console.<root>` and `op.console.<root>`, or only
-      `<root>` and `*.<root>` when the tunnel serves the panel. Confirm each
-      with `dig +short <name>` before going on: `felis domain check` warns
-      while a name does not resolve and accepts any address once it does.
-      Lower the records' TTL beforehand if the old host is still around to
-      plan with.
-11. Bring the Cloudflare edge back, when the old host served the panel
-    through a tunnel. The bundle carries `/etc/felis/cloudflared.yml`; the
-    login certificate (`/root/.cloudflared/cert.pem`), the tunnel's
-    credentials (`/root/.cloudflared/<tunnel-id>.json`) and the
-    `cloudflared-felis` unit stay behind with the old disk, so the panel
-    hostnames answer Cloudflare error 1033 until a connector runs here.
+**Cause and resolution**
 
-    Run `sudo felis setup`, press `n` (change connection) on the status
-    screen and choose Cloudflare Tunnel + Access. On the step's first screen
-    press `i` to install cloudflared, then `l` for `cloudflared tunnel login`
-    (browser consent on your account, which writes `cert.pem`); `enter` opens
-    the form once both are in place. Enter an API token and the account ID,
-    then the same Admit identity, hostnames and tunnel name as before. The
-    hostnames come pre-filled from the restored config and the tunnel name
-    defaults to `felis`; for another name, look up the id on the `tunnel:`
-    line of the restored `cloudflared.yml` in Zero Trust → Networks → Tunnels.
+| Answer | The player sees | Cause | Resolution |
+| --- | --- | --- | --- |
+| `403 forbidden` | `You're not allowed to start « <server> ».` | The autostart policy is **Owner only** and the player is not the owner, or **Wake list** and the player has no wake permission | Grant the player wake permission on the server's **Wake list**, have the owner start the server, or change the policy in **Edit Server Config** (see [Autostart](/en/guide/servers#autostart)) |
+| `409 maintenance_in_progress` | `« <server> » is under maintenance (restore, backup or file edit). Please try again shortly.` | Another operation holds the world | Wait for it to finish; see [An operation reports that the world is busy](#world-busy) |
+| `409 world_reclaiming` | `« <server> » sat idle too long and its world is being archived, so it can't start.` | World cleanup is archiving the idle world; afterwards the server is released with an empty world | The old world stays in the archive; see [World cleanup](/en/operations/backup#world-cleanup) |
+| `409 server_retiring` | `« <server> » has been given up or is being deleted, so it can't be started.` | The owner gave the server up or an admin is deleting it; it stays down until the next daily cleanup run | Cancel the request in the panel to make the server startable again |
+| `409 start_failed` | `« <server> » failed to start and its automatic retries are spent.` | The last start failed and its automatic retries are spent | See [A server shows Failed to start](#server-failed) |
+| `429 cooldown` | No message; the player keeps waiting | A wake for this server is already under way | None |
+| `503 at_capacity` | `The cluster is at capacity right now — « <server> » can't start. Please try again later.` | The running-server limit is reached | Stop another server, or raise the limit |
+| Any other answer | `Couldn't start « <server> » right now. Try again shortly.` | The proxy logs `Felis: wake <server> failed (status=…)` | Read the proxy log; see [internal API errors](#internal-api-errors) |
 
-    The step finds the existing tunnel by name and fetches its credentials
-    again, points the panel records at it, finds the existing Access
-    application (so its audience stays the one the restored config names)
-    and rewrites its policy, installs and starts `cloudflared-felis`, and
-    closes the panel's NodePort once the tunnel serves. A kept copy of the
-    old `<tunnel-id>.json` can go back into `/root/.cloudflared` (mode 0600)
-    first; the step still needs `cert.pem`. A different tunnel name makes a
-    second tunnel, moves the panel records to it and leaves the old one idle:
-    delete that one in the dashboard afterwards. Skip this step on a
-    rehearsal machine.
+The Owner sets the running-server limit and the wake cooldown on the
+**Startup and wake policy** card in **Platform settings → Player entry**:
 
-Check the rebuild before letting players in:
+- **Running server limit (0–10000)**: 0 means unlimited. The limit applies to panel starts,
+  in-game wakes and scheduled starts; system services can always start. It is checked when a
+  start is admitted, so concurrent requests can exceed it briefly, and lowering it does not
+  stop running servers. Available memory still decides whether Kubernetes can schedule a
+  server.
+- **Wake cooldown (0–3600 seconds)**: the minimum interval between accepted wake requests for
+  the same server; 0 disables the cooldown.
 
-```
-sudo felis db check                     # the database answers and has a fresh bundle
-kubectl get minecraftservers -A         # every server the bundle held
-kubectl -n minecraft get pods           # servers pull their pinned images (no ImagePullBackOff)
-sudo felis offsite status               # the hourly copy runs from this host again
-sudo felis domain check                 # every name, the certificate and the tunnel on the new address
+Saved values apply on all API replicas without a restart.
+
+### Routing is disabled {#routing-disabled}
+
+Players can connect, but servers are not reached by their hostname and no server wakes when
+someone joins. The proxy log contains one of these lines:
+
+```text
+Felis routing DISABLED: the proxy is in offline mode (online-mode=false). Domain autostart and the allowlist trust Mojang-verified UUIDs; refusing to route on spoofable identities. /link remains available. Set online-mode=true to enable routing.
 ```
 
-A rehearsal machine that restored a tunnel install and moved to a `nip.io`
-name in step 10 fails the Cloudflare tunnel line, since the tunnel still
-routes production's names; that one failure is expected there.
-
-In the panel, reached by its hostname (steps 10 and 11):
-
-- Sign in with an old account; accounts and passkeys come back with the
-  database, except passkeys step 10 counted as lost.
-- Sign out and sign in again with an email code, to an Owner account whose
-  inbox you read. The code arriving proves felis-api itself mails through the
-  relay to an outside inbox; step 9's self-test came from the setup console
-  and went to the From address. A code that never comes: §17.
-- Open a restored server's backup page and confirm its archives are listed,
-  restore the newest one, start the server and join it at
-  `<name>.<root>`.
-
-### Keep a copy somewhere else {#keep-a-copy-somewhere-else}
-
-A bundle on the same disk as the database protects against mistakes and bad
-upgrades, and a world archive on the same disk as the worlds protects against
-a deleted server. Neither survives losing the disk, and neither do the user
-images in the platform registry or the modpacks users uploaded for review. The
-installer's off-site copy sends all four to an S3-compatible bucket (AWS S3,
-Cloudflare R2, Backblaze B2, MinIO, ...), encrypted on this host:
-
-```
-FELIS_OFFSITE_ENDPOINT=https://<account>.r2.cloudflarestorage.com \
-FELIS_OFFSITE_BUCKET=felis-backups \
-FELIS_OFFSITE_ACCESS_KEY=... FELIS_OFFSITE_SECRET_KEY=... \
-  bash deploy/bootstrap.sh          # or the curl | sudo bash one-liner
+```text
+Felis routing DISABLED: no root-domain configured. Add 'root-domain=' to felis-link.properties (or set FELIS_ROOT_DOMAIN) to enable host-based routing. /link remains available.
 ```
 
-Optional: `FELIS_OFFSITE_REGION`, `FELIS_OFFSITE_PREFIX` (a key prefix, so one
-bucket can hold several installs) and `FELIS_OFFSITE_DB_KEEP` (default 30).
-The installer writes `[offsite]` into `felis.toml`, keeps the credentials and
-a generated encryption key in `/etc/felis/offsite.env` (mode 0600), and
-**shows the key once, on the terminal**. It stays out of the installer's output, so a
-`2>&1 | tee` log, cloud-init's log or a CI artifact never holds it; with no terminal
-to show it on, the installer names the command that reads it from `offsite.env`
-instead. Store it in a password manager: the bucket holds only
-sealed objects, and without the key they cannot be read. A later re-run keeps
-the key; it refuses a `FELIS_OFFSITE_KEY` that differs from the one in
-`offsite.env`, since every object already in the bucket is sealed with it.
-Without a bucket the installer ends with `NO OFF-SITE COPY`. Installers before
-the fix for a pipe race in reading `[offsite]` could also end that way on a
-host that has a bucket, and removed `felis-offsite.timer` as they did; a re-run
-of the current installer puts it back. `systemctl list-timers felis-offsite.timer`
-shows whether the timer is there. [SH-TESTED] [VM-TESTED: a re-run that lost the race]
+**Cause**
 
-The bucket records which key sealed it: `felis-key-id`, the one object kept in
-the clear, holds the key's id (the `key id:` of `felis offsite status`), which
-names the key without revealing it. The first sync writes it; a bucket from
-before it was recorded is judged by whether the key opens its newest objects.
-The installer runs `felis offsite check-key`, and every sync checks before
-anything else. A key other than the bucket's (a reinstall that lost
-`offsite.env` and was given no `FELIS_OFFSITE_KEY` generates a new one) stops
-the sync before it copies or prunes anything, the installer ends with
-`OFF-SITE COPY STOPPED`, `status` exits 1 and the watchdog mails the owners
-at once. Set `FELIS_OFFSITE_KEY` in `/etc/felis/offsite.env` to the bucket's
-key and `sudo systemctl start felis-offsite.service`, or give `[offsite]` an
-empty bucket or prefix and re-run the installer.
-[GO-TESTED: `TestSyncRefusesAnotherKeysBucket`, `TestCheckKey`] [SH-TESTED]
-[VM-TESTED: MinIO, the other key's sync refused with the bucket unchanged, check-key 0/3, fetch-db naming both ids]
+- Wakes, claims and the wake list trust Minecraft identities that Mojang verified. A proxy in
+  offline mode would accept forged identities, so the Felis plugin refuses to route.
+  Server-side settings such as the autostart policy cannot make an offline proxy safe; the
+  proxy is where this is enforced.
+- The plugin has no root domain, so it has no hostnames to route by.
 
-The bucket also names the host that writes it: `felis-writer`, rewritten by
-every sync, holds that host's id (kept in `/var/lib/felis/offsite/host-id`,
-which no bundle carries), its name and the time of its last run. A host
-restored from a bundle has the bucket's key and credentials but no id, so it
-finds another host named there and stands by: its syncs copy and prune
-nothing, `felis offsite status` names the host that writes the bucket and exits
-1, and while that host ran in the last 3 hours the watchdog holds this host's
-mail (§14). Once it has not run for 3 hours, the watchdog mails this host's
-owners that it copies nothing into the bucket. A bucket that holds sealed
-objects and names no writer puts a host on standby too, except a host that
-copied to it with a release before writers were recorded, which claims it on
-its next sync. `sudo felis offsite take-over` names the host that writes the
-bucket; with `-yes` it records this host instead (step 8 of a rebuild). The
-host it replaced copies nothing from its next sync on: its `status` exits 1,
-and its watchdog mails its owners at once that `the off-site copy has
-stopped`. When that happened by mistake (a rehearsal machine took the bucket
-over), run `sudo felis offsite take-over -yes` on the production host to take
-it back. [GO-TESTED: `TestLeasePlan`, `TestSyncStandsBy`, `TestOffsiteTakeOver`,
-`TestRestoredHostKeepsStandingBy`] [SH-TESTED]
-[VM-TESTED: MinIO, a restored host standing by with the bucket unchanged, take-over, the old host displaced and taking it back, an older release's host claiming its prefix]
+In both cases `/link` keeps working.
 
-What runs:
+**Diagnosis**
 
-- **`felis-offsite.timer`** runs `felis offsite sync` hourly (plus up to
-  10 min random delay, `Persistent=true`). Each run copies every world archive
-  whose row has no `offsite_at` yet and records it, copies the newest
-  `db_keep` database bundles the bucket lacks and prunes older ones there, and
-  deletes a world archive from the bucket once its row has been deleted and
-  its retention (`expires_at`) has passed. An object already in the bucket at
-  the right size is recorded without being sent again, so a run cut short
-  resumes. [GO-TESTED: `internal/offsite`]
-- A run that copied a world archive then takes a fresh `offsite` database
-  bundle (`felis-db-<stamp>-offsite.tar`, the same layout as a daily one, host
-  state from `-state-dir`, default `/etc/felis`) and sends it, so the newest
-  bundle in the bucket lists every archive there and a restore from it fetches
-  them all. The host keeps one such bundle locally, and the bucket keeps it
-  only while it is the newest; the `db_keep` count covers the other labels, so
-  a busy day of snapshots never pushes the dailies out. A run that copied
-  nothing, or whose newest bundle already postdates the last copy, takes none.
-  The panel's backup card keeps watching `felis-db-backup.timer` alone.
-  [GO-TESTED: `internal/offsite`, `TestOffsiteSyncerSnapshotsAndSweeps`]
-  [PG-TESTED]
-- A world archive in the bucket that no row lists (the database came back
-  from a bundle older than the archive) is removed once it has been in the
-  bucket longer than the longest `[archive]` retention (`retention`,
-  `manual_retention`, `scheduled_retention`); younger ones stay, and the run
-  logs how many and when each goes. The sweep skips a database that lists no
-  archive at all, so a sync against a database not restored yet removes
-  nothing. [GO-TESTED: `internal/offsite`]
-- The same run copies the user images in the platform registry: every
-  repository outside `felis/` and `mirror/`, each manifest the registry's index
-  lists and every layer it names, read through the loopback hostPort. A layer
-  shared by many images is stored once. The installer pushes `felis/` and
-  `mirror/` again on a new host, but at new digests, so from those the run
-  copies only the revisions a MinecraftServer or a whitelist entry pins by
-  digest (a server created from the platform's Paper image, for one), without
-  their tags; a restore puts them back by digest and leaves the installer's
-  tags alone.
-  When the set changed, a new version of the image list is written; versions
-  replaced more than 14 days ago are dropped together with the layers only
-  they named, so an image deleted by mistake stays restorable for two weeks
-  (`fetch-images -at`). A manifest the registry lost mid-run keeps its earlier
-  copy and is listed under `not whole:` in `status`. The copy covers the
-  in-cluster registry that `[registry] url` names; `-registry host:port` points
-  it elsewhere, `-registry off` skips images. [VM-TESTED: 16 images, 638 MiB,
-  restored into an empty registry at the same digests]
-- It also copies the submission uploads (`sub-*/context.tar.gz` on the
-  `felis-uploads` volume, §8), the source an admin rebuilds an approved image
-  from. Identical uploads are stored once; the upload list is versioned and
-  kept for 14 days like the image list (`fetch-uploads -at`). A context is read
-  again only when its size or modification time changed. It runs when
-  `[registry] user_uploads_context` is a local path (the installer's default);
-  `-uploads-dir` names the directory by hand, `-uploads-pvc ""` skips it.
-  [VM-TESTED: 17 uploads in 10 objects, 200 MiB, restored byte-identical]
-- Objects are `worlds/<archive>.fenc`, `db/<bundle>.fenc`,
-  `registry/blobs/<sha256>.fenc`, `registry/manifests/<sha256>.fenc`,
-  `registry/index/<stamp>.json.fenc`, `uploads/blobs/<sha256>.fenc` and
-  `uploads/index/<stamp>.json.fenc`: AES-256-GCM in 64 KiB segments, so
-  truncation, reordering and a wrong key are all refused on the way back.
-  `felis-key-id` and `felis-writer` next to them hold the key's id and the
-  host writing the bucket in the clear.
-- A pass sends the database bundles first, then world archives, the bundle
-  listing them, images and uploads. Each object has its own time limit: 10 minutes plus its size at
-  512 KiB/s (about 6 hours for 10 GiB). An archive the uplink cannot send in
-  that time fails alone, stays pending and is tried again next pass; the rest
-  of the pass still goes. A pass over a big archive can run for hours; the
-  timer starts no second one meanwhile. An upload cut off restarts from the
-  beginning of that object. [GO-TESTED: `internal/offsite`]
-- The reaper deletes an idle world only after its archive is in the bucket
-  (§10).
-- The watchdog mails the owners when no sync has completed for 12 hours
-  (`the off-site copy last completed ... ago`), and at once when the bucket
-  refuses this host's key or another host took the bucket over.
-
-Checking it:
-
-```
-sudo felis offsite status        # last run, errors, what the bucket holds, what waits
-sudo felis offsite list          # the bundles, image lists and upload lists in the bucket, newest first
-sudo felis offsite check-key     # whether offsite.env holds the key the bucket was sealed with
-sudo journalctl -u felis-offsite -n 50 --no-pager
-sudo systemctl start felis-offsite.service   # run one now
+```bash
+sudo journalctl -u felis-velocity | grep 'Felis routing'
+sudo grep -n 'online-mode' /opt/felis/velocity/velocity.toml
+sudo grep -n 'root-domain' /opt/felis/velocity/plugins/felis-link/felis-link.properties
 ```
 
-`status` exits 1 when no sync has completed in 12 hours. `missing:` lines are
-archives the database records but the volume no longer has (an archive
-removed by hand); there is nothing left to copy for those.
+**Resolution**
 
-To change the bucket, edit `[offsite]` in `/etc/felis/felis.host.toml` (and
-`offsite.env` for new credentials) and re-run the installer; to turn the copy
-off, delete the section and re-run. Keeping the same key across buckets keeps
-old copies readable.
+1. Re-run the installer (see [Installation](/en/guide/deployment#install)). The installer
+   manages both files: it writes `online-mode = true` to `velocity.toml` and the root domain
+   to `felis-link.properties`, and restarts the proxy when they change. Restarting the proxy
+   disconnects all players.
+2. For a proxy on another host, set `online-mode = true` in its `velocity.toml` and
+   `root-domain=<root domain>` in its `felis-link.properties` (or the `FELIS_ROOT_DOMAIN`
+   environment variable), then restart it.
+3. Confirm that the proxy log shows `Felis routing ready`.
 
-Without a bucket, copy the backup directory off the host on a schedule of your
-own (`rsync -a root@felis-host:/var/lib/felis/db-backups/ /backups/felis-db/`,
-with the `.sha256` sidecars; `sha256sum -c` on the far side proves the copy).
-That covers the database only; the world archives are under the
-`felis-backups` volume's directory in `/var/lib/rancher/k3s/storage/`, the
-registry's images under the `registry` volume's (`*_felis_registry`) and the
-uploads under the `felis-uploads` volume's (`*_felis_felis-uploads`).
+If the root domain itself has changed, follow [Changing the root
+domain](/en/operations/access#change-domain).
 
-### `FELIS_PRE_MIGRATE_BACKUP=0` {#felis-pre-migrate-backup-0}
+## Panel and sign-in {#panel-problems}
 
-Skips the pre-migration snapshot (`migrate up -no-backup`). The installer warns
-loudly when it is set. Use it only when the snapshot cannot work and you have
-another backup, e.g. an external database newer than the host's `pg_dump`.
+### The panel shows an error {#panel-errors}
 
-## 17. Sign-in refused: 429 limits, no mail relay, account code locks, failed sign-ins {#_17-sign-in-refused-429-limits-no-mail-relay-account-code-locks-failed-sign-ins}
+The API answers errors with a code and a message (`{"error":{"code","message","request_id"}}`),
+and the panel shows a translated message for common codes.
 
-The public sign-in doors (`/api/v1/auth/*` except logout and the op-login
-status poll) have three limits of their own. Each answers 429 with a
-`Retry-After` header and a distinct error code. The doors that mail a code
-also answer 503 `mail_unavailable` on an install with no mail relay.
+**Cause**
 
-### `rate_limited`: one address called the doors too often {#rate-limited-one-address-called-the-doors-too-often}
+| Panel message | Answer | Cause |
+| --- | --- | --- |
+| **The session has expired. Sign in again.** | `401 unauthorized` | No valid session. Sessions last 12 hours; staff sessions also end after 30 minutes without activity. Signing out on another device or revoking the session ends it too |
+| **The current account is not authorized to perform this operation.** | `403 forbidden` | The account's role does not allow the action, or an admin action was requested outside the operator console (see [Admin pages return 403](#admin-console-forbidden)) |
+| **This operation requires recent identity verification. Verify identity again using a Passkey or email code.** | `403 reauth_required` | Sensitive operations require an identity verification within the last 5 minutes |
+| **The sign-in service is currently unavailable.** | `503 auth_unavailable` | The session store, PostgreSQL, is unreachable |
+| **The service is currently unavailable. Retry later.** | `5xx` | felis-api, or a component behind it, is down or restarting |
+| **The operation failed because of an internal server error. Ask an admin to check the logs. Request ID: …** | `500 internal` | An unexpected error; the details are only in the felis-api log |
+| **Unable to connect to Felis. The network may be unavailable or the Cloudflare Access session may have expired. …** | No answer | The browser cannot reach the panel, or the Cloudflare Access session has expired |
+| **Host node service is unavailable. Inspect felis-node-control.service on the controller.** | `503 node_control_unavailable` | The service that runs host operations is down |
+| **Node maintenance is running. Server starts and additional node tasks are temporarily blocked.** | `409 node_operation_busy` | A host or node task is running. Only one runs at a time, and while a task that takes the control plane away runs (a database restore, a host rebuild, a credential rotation, a domain move), server starts are refused |
 
-Each client address gets 20 calls at once, refilled at 20 a minute, shared
-across every door. A person signing in makes three or four calls, so this only
-bites scripts. IPv6 clients share one limit per /64. Refusals count in
-`felis_rate_limited_total{scope="auth_door"}`; `FelisSignInFlood` fires when
-more than 10 a minute are refused for 10 minutes.
+**Diagnosis**
 
-The address comes from `[auth] client_ip_header`:
+1. For an internal error, search the felis-api log for the request ID shown in the panel.
+   The log line has the form
+   `api: <METHOD> <path>: unmapped error (request_id=<id>): <error>`:
 
-- Behind the Cloudflare tunnel it is `CF-Connecting-IP`. The edge setup writes
-  it, and an install with an `access_jwt_aud` implies it. The header is
-  trustworthy there because the same setup fences the panel NodePort to
-  loopback, so every request reaching the API came through cloudflared.
-- Behind your own reverse proxy it is `X-Forwarded-For` (the rightmost entry,
-  the one your proxy appended). Firewall the NodePort so only the proxy reaches
-  it, or a direct caller can write any address it likes.
-- Unset, the TCP peer is used. Behind any proxy every visitor then shares the
-  proxy's address and one limit, so **everyone gets `rate_limited` at once**.
-  The `felis api` log says at start which it keys on (`sign-in rate limit keys
-  on ...`). Set the header in `/etc/felis/felis.toml` and
-  `/etc/felis/felis.pod.toml`, then `felis converge`.
+   ```bash
+   sudo k3s kubectl -n felis logs deploy/felis-api | grep '<request-id>'
+   ```
 
-### `mail_rate_limited`: the install-wide mail budget is spent {#mail-rate-limited-the-install-wide-mail-budget-is-spent}
+2. For an unavailable service, check the control plane:
 
-Every code and notice the API mails spends one token of a single budget,
-`[smtp] max_per_hour`, or the **Hourly mail cap** of a relay saved in the panel
-(default 120; a quarter of it may go at once), so a flood
-cannot burn the relay's quota and get the sending account suspended. While it
-is spent, every address gets the same 429 and nothing reaches the relay.
-`felis_mail_total{result="throttled"}` counts refusals and
-`FelisMailBudgetExhausted` fires on the first one. Look at
-`felis_rate_limited_total` first: a flood shows there. If sign-ins are real,
-raise `max_per_hour` to what your relay allows.
+   ```bash
+   sudo felis status
+   sudo k3s kubectl -n felis get pods
+   ```
 
-`FelisMailDeliveryFailing` is the other half: the relay itself refused mail
-(`felis_mail_total{result="failed"}`, 502 `mail_undeliverable` to the caller).
-The relay's reason is in the `felis-api` log.
+3. For host operations, check the host service:
 
-### `mail_unavailable`: no mail relay {#mail-unavailable-no-mail-relay}
+   ```bash
+   sudo systemctl status felis-node-control
+   sudo journalctl -u felis-node-control -n 100
+   ```
 
-With no relay, neither saved in the panel nor as an `[smtp]` section, every
-door that mails a code answers 503 `mail_unavailable` before minting one:
-email sign-in, op.console sign-in, email verification, and the email step-up
-for sensitive changes and migration. The public doors answer before looking up
-the address, so every address gets the same reply. Sign-in is by passkey only,
-and a verified email stops counting as a way into the account (it is no longer
-offered as a re-verification factor). Codes are never logged. To open the
-doors, save a relay on the panel's **Platform settings → Mail delivery** card
-(next section), or run `felis setup` and configure email. When felis.toml has no
-`[smtp]`, `felis api` says so at start and names the panel's relay as the one in
-use; whether one is saved there shows on the Mail delivery card.
+**Resolution**
 
-### The mail relay set in the panel {#the-mail-relay-set-in-the-panel}
+- **Session expired**: sign in again. Sessions belong to one hostname, so signing in on the
+  operator console does not sign you in on the player console.
+- **Not authorized**: use an account with the required role (see
+  [Roles](/en/guide/administration#roles)), or open the operator console as described in
+  [Admin pages return 403](#admin-console-forbidden).
+- **Identity verification**: confirm with a passkey or an email code, then repeat the action.
+- **Sign-in service unavailable**: restore the database; see
+  [The database is unavailable](#database-unavailable).
+- **Service unavailable or internal error**: read the felis-api log, and run `sudo felis
+  doctor` for the state of every component.
+- **Unable to connect**: reload the page; behind Cloudflare Access, sign in to Access again.
+  See [Access methods](/en/operations/access#access-methods) for how the panel is reached.
+- **Host node service unavailable**: restart it with
+  `sudo systemctl restart felis-node-control`.
+- **Node maintenance is running**: wait for the running task to finish. Its stage and log
+  are shown in the panel where it was started.
 
-The Owner can configure the relay on the panel's **Platform settings → Mail
-delivery** card. It is stored in one `platform_settings` row (`smtp`), and
-every sender reads it: felis-api (sign-in codes, verification, step-up codes
-and notices), the reaper's pre-deletion notices (§10), the watchdog's alerts
-(§14) and the break-glass console's codes (below). Without the row each falls
-back to the `[smtp]` relay `felis setup` wrote into felis.toml. Once saved in
-the panel it wins everywhere without a restart: felis-api reads the row at
-most every 15 seconds, and the reaper, the watchdog and the break-glass
-console at their next run. The card shows which relay is in force: **Panel
-settings**, **Install-time settings** or **Not configured**.
+### Admin pages return 403 {#admin-console-forbidden}
 
-- **Saving proves the relay first.** **Check and save** delivers one self-test
-  message to the sender address and saves only once the relay has accepted it;
-  the check cannot be skipped, since a relay that silently fails would lock
-  people out. **Send test message** (`POST /api/v1/settings/smtp/test`) sends
-  one message through the relay as typed, saved or not, to the Owner's
-  verified address (else to the sender), and spends the install-wide mail
-  budget above. A failure names its stage: `smtp_unreachable`, `smtp_tls`,
-  `smtp_auth`, `smtp_sender_refused`, `smtp_recipient_refused`, else
-  `smtp_failed`. The relay's own text stays in the felis-api log, since it can
-  echo internal addresses.
-- **What the card accepts.** Ports 25, 465, 587 and 2525 only: felis-api dials
-  the relay from inside the cluster, and any other port would turn the check
-  into a probe of internal services. The sender is a plain address, without a
-  display name. **Require an encrypted connection** (on by default) refuses a
-  relay on a port other than 465 that does not offer STARTTLS, with no
-  exemption for a relay on this host. The **Hourly mail cap** replaces
-  `[smtp] max_per_hour` (0: the default, 120). felis-api refuses to dial a
-  link-local, unspecified or multicast address, checked after DNS, so a relay
-  setting cannot reach the cloud metadata address (169.254.169.254); such a
-  relay answers `smtp_unreachable`.
-- **The password** is never sent back to the panel (the card shows only that
-  one is saved, and an empty field keeps it) and never written to the audit
-  log. It lives in the database row, so it travels in the database bundles and
-  their encrypted off-site copies (§16).
-- **Revert to install-time settings** clears the row and hands the relay back
-  to felis.toml. The setup console's email screen does the same each time it
-  saves, so the relay typed there is the one in force.
-- Saving, clearing and the test take a fresh identity confirmation; a save made
-  against a relay that changed since the card loaded answers `409
-  mail_settings_changed`. The audit actions are `smtp.updated` and
-  `smtp.cleared`. API: `GET`, `PUT` and `DELETE /api/v1/settings/smtp`, and
-  `POST /api/v1/settings/smtp/test` (Owner).
-- `sudo felis doctor`, the `alerts` row of the `felis setup` card and the
-  installer's closing summary count a relay saved in the panel (the installer
-  asks `felis panel-settings`, which prints only yes or no), and report none
-  only when neither the panel nor felis.toml has one. [GO-TESTED:
-  `TestDoctorCountsPanelSettings`, `TestHostAlertRoute`,
-  `TestPanelSettingsSaysWhatThePanelHolds`] [SH-TESTED: `deploy/bootstrap_test.sh`]
+A staff account is signed in, but admin pages and actions answer
+**The current account is not authorized to perform this operation.**
 
-[GO-TESTED: `TestMailSettingsReadShowsWhereTheRelayComesFrom`,
-`TestMailSettingsSaveChecksTheRelayAndOverridesFelisToml`,
-`TestMailSettingsRefusesAPortOffTheSubmissionList`,
-`TestMailSettingsClearHandsTheRelayBack`, `TestMailSettingsTestMailsTheOwner`,
-`TestMailSettingsOwnerOnly`, `TestRelayTestErrorCategories`,
-`TestValidateRefusesWhatCannotBeARelay`, `TestParseTreatsAClearedRowAsAbsent`,
-`TestRelayForPrefersThePanelRelay`, `TestPanelFirstRecoveryMailer`,
-`TestRefuseLinkLocal`]
+**Cause**
 
-### Relay refused for lacking TLS {#relay-refused-for-lacking-tls}
+Felis recognises the operator console by the request's hostname: `admin_hostname`, by
+default `op.console.<root domain>`. A bare IP address counts as the operator console only
+when the installation names it: the address embedded in a `<ip>.nip.io` or `<ip>.sslip.io`
+root domain (the local panel address `felis setup` prints), or an `admin_hostname` set to
+that address. Any other address, loopback included, is served as the player console. A staff
+account that opens `https://127.0.0.1:30443` through an SSH tunnel therefore gets 403 on
+admin routes.
 
-A relay on port 465 is spoken to over TLS from the first byte. On any other
-port Felis upgrades with STARTTLS, and when the relay does not offer it the
-send fails with `smtp: <host>:<port> does not offer STARTTLS` (502
-`mail_undeliverable` to the caller, the full text in the `felis-api` log, the
-same error on the `felis setup` email screen, and `smtp_tls` on the panel's
-check). Without TLS anyone on the
-path reads the codes, and anyone who can rewrite the conversation can strip
-the STARTTLS offer, so this is the default for every relay except one on this
-host (`localhost`, `127.0.0.0/8`, `::1`). Use port 465 or a relay that offers
-STARTTLS. For a relay you reach over a link you trust, set
-`require_tls = false` under `[smtp]` in `/etc/felis/felis.toml` and
-`/etc/felis/felis.pod.toml`; installer re-runs and the setup email screen keep
-it. `felis api` warns at start whenever codes may go out without TLS. For a
-relay saved in the panel, turn off **Require an encrypted connection** on the
-**Mail delivery** card instead; that setting has no exemption for a relay on
-this host, so a local relay without STARTTLS needs it off too.
+On the operator console itself, every request from an account without a staff role is
+refused with 403.
 
-### `otp_account_locked`: ten wrong codes in 24 hours {#otp-account-locked-ten-wrong-codes-in-24-hours}
+**Diagnosis**
 
-Ten wrong email codes for one account within 24 hours, counted across every
-code it was sent, lock that account's email-code sign-in until 24 hours after
-the first miss. The public doors answer a locked account exactly like a wrong
-code, and the owner gets one mail saying so. Signed-in doors (email
-verification, migration step-up) answer 429 `otp_account_locked`. Passkey
-sign-in keeps working. Each lock is audited as `auth.otp.locked` and counted in
-`felis_auth_otp_lockouts_total{purpose}` (`FelisOTPAccountLocked`).
+Compare the hostname in the browser's address bar with the **Admin console hostname** field
+on the **Access and domain** card in **Platform settings → Access and security**.
 
-To lift a lock early once you have confirmed the owner locked themselves out:
+**Resolution**
 
-```sh
-sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c \
-  "DELETE FROM otp_failure_windows WHERE user_id = (SELECT id FROM users WHERE username = '<name>');"
+1. Open the operator console by its hostname. Through an SSH tunnel, add an `/etc/hosts`
+   entry on your computer that points the hostname at the tunnel's local address, or use
+   `curl --resolve` for scripted calls.
+2. Alternatively, set `admin_hostname` in the `[auth]` section of the configuration to the IP
+   address you use (see [Configuration reference](/en/reference/configuration#felis-toml)).
+
+### Sign-in fails {#sign-in-problems}
+
+**Cause and resolution**
+
+| Message | Answer | Cause | Resolution |
+| --- | --- | --- | --- |
+| **Owner account not initialized; sign-in unavailable** | — | No Owner exists yet | Run `sudo felis setup` on the host and open the one-time setup link it prints (see [Setup wizard](/en/guide/deployment#setup-wizard)) |
+| **The setup link is invalid or has already been used** | — | The one-time setup link expired or was used | Run `sudo felis setup` again to get a new link |
+| **Local sign-in is disabled in this deployment. Access the console through the organization's secure entry point.** | `403 local_auth_disabled` | The `local_auth_enabled` platform setting is off or missing. Creating the first Owner turns it on. While it is off, existing sessions are refused too | Run `sudo felis breakGlass` to create or recover the Owner, which turns local sign-in on (see [Emergency access](/en/operations/access#break-glass)) |
+| **Sign-in requests are rate-limited. Retry after the limit resets.** | `429 rate_limited` | One client address made too many sign-in calls | Wait for the time in the `Retry-After` header. If everyone is affected at once, see [Everyone is rate-limited at once](#sign-in-rate-limited) |
+| **Mail delivery is not configured, so verification codes cannot be sent. …** | `503 mail_unavailable` | No mail relay is configured, in the panel or in the configuration file | Sign in with a passkey, or players with a bind code. Configure a relay (see [Mail relay](/en/operations/monitoring#mail-relay)) |
+| **Mail delivery is rate-limited. …** | `429 mail_rate_limited` | The installation's mail budget is spent: the **Hourly mail cap** (default 120 messages per hour) | See [mail problems](#mail-problems) |
+| **The verification email could not be delivered — …** | `502 mail_undeliverable` | The mail relay refused the message | See [mail problems](#mail-problems) |
+| **Too many incorrect attempts, please request a new verification code.** | `429 otp_locked` | This code has used up its attempts | Request a new code |
+| **Too many wrong codes in 24 hours — email codes for this account are paused. …** | `429 otp_account_locked` | Ten wrong codes for the account within 24 hours | Use a passkey, or see [Email codes are locked for an account](#email-code-locked) |
+| **This is a staff account — use Operator sign-in instead.** | `403 staff_account` | Staff accounts (Admin and Owner) cannot sign in on the player console with an email code | Sign in on the operator console |
+| **The sign-in service is currently unavailable.** | `503 auth_unavailable` | PostgreSQL is unreachable | See [The database is unavailable](#database-unavailable) |
+| **Waiting for in-game approval…** does not end | — | Operator sign-in needs approval from an administrator who is online in the game | See [Operator sign-in waits for approval](#operator-sign-in) |
+
+Passkeys are bound to the panel hostname. After the hostname changes, users register their
+passkeys again.
+
+### Everyone is rate-limited at once {#sign-in-rate-limited}
+
+Every user gets **Sign-in requests are rate-limited.** at the same time.
+
+**Cause**
+
+Each client address may make 20 sign-in calls at once, refilled at 20 per minute and shared
+across all sign-in endpoints; IPv6 clients share one limit per /64. A person signing in makes
+three or four calls, so the limit normally affects only scripts. Felis reads the client
+address from the header named in `[auth] client_ip_header`. When no header is set, it uses
+the TCP peer address. Behind a reverse proxy or tunnel, every visitor then shares the proxy's
+address and one limit.
+
+**Diagnosis**
+
+felis-api logs at start which address the limit uses:
+
+```bash
+sudo k3s kubectl -n felis logs deploy/felis-api | grep 'sign-in rate limit keys on'
 ```
 
-### Who tried: the audit trail {#who-tried-the-audit-trail}
+`felis api: sign-in rate limit keys on the TCP peer ([auth] client_ip_header unset)` behind a
+proxy confirms the cause. Refusals are counted in
+`felis_rate_limited_total{scope="auth_door"}`, and the `FelisSignInFlood` alert fires when
+more than 10 a minute are refused for 10 minutes (see
+[Metrics](/en/operations/monitoring#metrics)).
 
-Every refused sign-in writes an `auth.<door>.failed` row (payload `reason`:
-`bad_code`, `no_account`, `staff_account`, `not_staff`, `bad_assertion`, ...)
-and counts in `felis_auth_failures_total{door,reason}`; `FelisSignInFailures`
-fires above 30 in 15 minutes. The first refusal of each throttled burst writes
-`auth.rate_limited` with the source address. Rows carry `actor_user_id` (the
-account, the column to attribute by), `client_ip` (the same address the limit
-keys on) and `user_agent`. `actor` is display text: a verified email or the
-username, never an address the caller set without verifying.
+**Resolution**
 
-```sh
+1. Select the access method that matches how the panel is reached, on the **Access and
+   domain** card in **Platform settings → Access and security** or in `felis setup` (see
+   [Access methods](/en/operations/access#access-methods)). **Own reverse proxy** keys the
+   limit on the rightmost `X-Forwarded-For` entry, the one your proxy appends;
+   **Cloudflare Tunnel** keys it on `CF-Connecting-IP`.
+2. Behind your own reverse proxy, firewall the panel port so that only the proxy reaches it.
+   Otherwise a direct caller can put any address in the header.
+3. Behind Cloudflare, you can also stop floods at the edge: under Security → WAF → Rate
+   limiting rules, match URI paths starting with `/api/v1/auth/` on the panel and operator
+   console hostnames, count by IP, and block for 10 seconds above 30 requests per 10 seconds.
+
+### Email codes are locked for an account {#email-code-locked}
+
+A user enters the right code and is still refused, or gets
+**Too many wrong codes in 24 hours — email codes for this account are paused.**
+
+**Cause**
+
+Ten wrong email codes for one account within 24 hours, counted across every code sent to it,
+lock email-code sign-in for that account until 24 hours after the first wrong code. Public
+sign-in answers a locked account exactly like a wrong code, and the account's owner receives
+one mail about the lock. Signed-in steps such as email verification and account migration
+answer `429 otp_account_locked`. Passkey sign-in keeps working.
+
+**Diagnosis**
+
+Each lock is recorded in the audit log as `auth.otp.locked` and counted in
+`felis_auth_otp_lockouts_total{purpose}` (alert `FelisOTPAccountLocked`). See
+[Find failed sign-ins](#sign-in-audit) for the query.
+
+**Resolution**
+
+1. Sign in with a passkey, or wait until the lock ends.
+2. To lift the lock early, after you have confirmed that the account's owner locked
+   themselves out, delete the account's wrong-code record:
+
+   ```bash
+   sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c \
+     "DELETE FROM otp_failure_windows WHERE user_id = (SELECT id FROM users WHERE username = '<name>');"
+   ```
+
+### Find failed sign-ins {#sign-in-audit}
+
+Every refused sign-in writes an `auth.<door>.failed` row to the audit log, with a `reason`
+such as `bad_code`, `no_account`, `staff_account`, `not_staff` or `bad_assertion`. The first
+refusal of each throttled burst writes `auth.rate_limited` with the source address. Rows
+carry `actor_user_id` (the account; use it for attribution), `client_ip` (the same address
+the rate limit uses) and `user_agent`.
+
+```bash
 sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c "
   SELECT created_at, action, actor, client_ip, payload->>'reason' AS reason
   FROM audit_logs
@@ -3433,363 +800,1001 @@ sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U post
   ORDER BY created_at DESC LIMIT 50;"
 ```
 
-A failed audit write does not fail the action; it logs `audit: lost ...` in
-`felis-api` and counts in `felis_audit_write_failures_total`
-(`FelisAuditWriteFailing`). The cause is almost always PostgreSQL (§16).
+Refusals are also counted in `felis_auth_failures_total{door,reason}`; the
+`FelisSignInFailures` alert fires above 30 in 15 minutes. When an audit row cannot be
+written, the action still succeeds, felis-api logs `audit: lost ...`, and the
+`FelisAuditWriteFailing` alert fires; the cause is almost always the database (see
+[The database is unavailable](#database-unavailable)). For audit retention and export, see
+[Audit log](/en/guide/administration#audit-log).
 
-### How long rows are kept {#how-long-rows-are-kept}
+### Operator sign-in waits for approval {#operator-sign-in}
 
-`felis-api` prunes the database a minute after it starts and every 6 hours
-after that, and logs `retention: pruned spent rows` with a count per table:
+**Operator sign-in** on the operator console stays at **Waiting for in-game approval…**.
 
-| Rows | Deleted |
-|---|---|
-| sessions | 30 days after they expired or were signed out |
-| email codes, passkey challenges, setup links, op-login requests | 30 days after they expired or were used |
-| `/felis link` bind codes | 30 days after they expired |
-| account migrations that never completed | 30 days after their last step (completed ones stay) |
-| wrong-code windows (`otp_failure_windows`) | 30 days after they began |
-| `audit_logs` | once older than `[audit] retention`, or the value saved in the panel |
+**Cause**
 
-`[audit] retention` defaults to `365d`; it takes days (`90d`), months of 30
-days (`18mo`) or `forever`, and refuses anything under `30d`. The Owner can
-override it on the panel's **Platform settings → Backup and audit retention**
-card (**Days audit rows are kept**: 0 keeps every row, otherwise 30 to 3650
-days; §10, "Retention set in the panel"), which felis-api applies at its next
-prune. The daily `felis db backup` bundles (§16) still hold the rows for as
-long as the bundles are kept. To keep audit rows past the retention, export
-them before they go:
+Operator sign-in requires two factors: a code mailed to the staff address, and approval from
+an administrator who is online in the game. Only a Minecraft account linked to a staff
+account can approve. The request expires after a short time.
 
-```sh
-sudo felis db audit-export -until 2026-01-01 -out /root/audit-2025.jsonl
+**Resolution**
+
+1. Ask an administrator who is online in the game to run `/felis web op approve <code>`. The
+   command shows whose request it is; the administrator approves it with
+   `/felis web op approve <code> <account>`, naming the account.
+2. Sign in with a passkey instead, which needs no in-game approval.
+3. If no staff account can sign in, restore access on the host with `sudo felis breakGlass`
+   (see [Emergency access](/en/operations/access#break-glass)).
+
+## Internal API and game plugins {#internal-api}
+
+### Game plugins cannot reach the internal API {#internal-api-errors}
+
+The game proxy, the login space, build Jobs and `felis backup-now` call felis-api's internal
+API (port 8081, routes under `/api/v1/internal/`). It is reached through the ClusterIP
+Service `felis-api-internal`, which is separate from the panel's `felis-api` Service on port
+443 and is never exposed on the node. Each caller authenticates with its own bearer token,
+and each route serves only the callers listed for it in the OpenAPI document (see
+[API reference](/en/reference/api#authentication)).
+
+| Caller | Secret in `felis` (key `token`) | API variable | Where the caller reads it |
+| --- | --- | --- | --- |
+| Game proxy (`velocity`) | `felis-service-token` | `FELIS_SERVICE_TOKEN` | `service-token` in `/opt/felis/velocity/plugins/felis-link/felis-link.properties` |
+| Login space (`limbo`) | `felis-limbo-token`, with a copy in `minecraft` | `FELIS_LIMBO_TOKEN` | The login pod's `FELIS_SERVICE_TOKEN` variable |
+| Build Jobs (`build`) | `felis-build-token`, with a copy in the build namespace | `FELIS_BUILD_TOKEN` | The build Job's fetch step |
+| `felis backup-now` (`ops`) | `felis-ops-token` | `FELIS_OPS_TOKEN` | The Secret, on each run |
+
+The installer generates the four tokens into `/etc/felis/secrets.env` (`SERVICE_TOKEN`,
+`LIMBO_TOKEN`, `BUILD_TOKEN`, `OPS_TOKEN`) and applies them on every run. The audit log
+records internal actions with the source `internal:<caller>`.
+
+When the internal API fails, the proxy logs `server list refresh failed …; keeping current
+registrations` and keeps routing on the last server list it received; players read
+`Login verification is temporarily unavailable.`; the login space logs
+`FelisLimbo: link status poll failed`; and builds fail while fetching their context.
+
+**Cause**
+
+| Symptom | Cause |
+| --- | --- |
+| Calls fail to connect, with no HTTP status | The `felis-api-internal` Service is missing or no longer selects the API pods, or felis-api is down |
+| Every call from one caller gets `401` | The caller's token is unset, or differs from the API's copy |
+| `403 wrong_caller` | The token is valid but belongs to a caller this route does not serve, for example the build token on a proxy route |
+| felis-api pods stay in `CreateContainerConfigError` | One of the four token Secrets is missing in `felis` |
+| felis-api refuses to start with `the X and Y tokens are the same value; each caller needs its own` | Two callers have the same token |
+
+**Diagnosis**
+
+1. Read the proxy's summary and refresh lines:
+
+   ```bash
+   sudo journalctl -u felis-velocity | grep -E 'Felis: last 10 min|server list refresh'
+   ```
+
+   The proxy logs a summary for every active 10 minutes, for example
+   `Felis: last 10 min: felis-api calls=412 (no answer=0, 4xx=3, 5xx=0, retried=0), …`.
+   A rising `no answer` count means the path to the internal API is broken: the Service, a
+   network policy, or the API pod. `busy refusals` or `join-events dropped` above zero means
+   felis-api answers more slowly than the proxy's pool of 8 threads can absorb.
+2. Check the Service; it must show a cluster IP with port 8081:
+
+   ```bash
+   sudo k3s kubectl -n felis get svc felis-api-internal
+   ```
+
+3. Look for unset tokens. felis-api logs one line per unset token at start, for example
+   `felis api: warning: FELIS_LIMBO_TOKEN unset — the internal face turns the limbo caller away`:
+
+   ```bash
+   sudo k3s kubectl -n felis logs deploy/felis-api | grep 'unset'
+   ```
+
+4. Compare the caller's token with its Secret, for example for the proxy:
+
+   ```bash
+   sudo k3s kubectl -n felis get secret felis-service-token -o jsonpath='{.data.token}' | base64 -d; echo
+   sudo grep '^service-token=' /opt/felis/velocity/plugins/felis-link/felis-link.properties
+   ```
+
+5. For the login space, read its log:
+
+   ```bash
+   sudo k3s kubectl -n minecraft logs login-0 | grep 'link status poll'
+   ```
+
+**Resolution**
+
+1. For a missing Service, a missing Secret or a mismatched token, re-run the installer (see
+   [Installation](/en/guide/deployment#install)). It applies the Service, the four Secrets and
+   every caller's copy of its token.
+2. For a proxy on another host, set `service-token` in its `felis-link.properties` to the
+   value in Secret `felis/felis-service-token`; the plugin reads the new value within a few
+   seconds.
+3. For `wrong_caller`, configure the caller with its own token from the table above.
+4. For two identical tokens, rotate one of them:
+
+   ```bash
+   sudo felis rotate-token <kind>
+   sudo felis rotate-token -yes <kind>
+   ```
+
+   Without `-yes`, the command only prints what it would change and what that interrupts.
+   [Credential rotation](/en/operations/access#rotate-credentials) lists what each rotation
+   restarts.
+
+## Account linking and claims {#account-linking}
+
+### Linking or claiming fails {#account-link-errors}
+
+A player links a Minecraft account by running `/link` in the game, which returns a one-time
+code, and entering the code in the **Link code** field of the **Minecraft link** card on the
+**Account** page, then selecting **Link**. Codes have 8 characters (letters and digits,
+without I, O, 0 and 1), are valid for 10 minutes and work once; case and surrounding spaces
+are ignored. Claiming an unowned server requires a linked account and enough quota (see
+[Account linking](/en/guide/players#account-linking)).
+
+**Cause and resolution**
+
+| Answer | Panel message | Cause | Resolution |
+| --- | --- | --- | --- |
+| `400 invalid_code` | **The binding code is invalid or expired. Obtain a new code.** | The code is unknown or older than 10 minutes | Run `/link` again and enter the new code within 10 minutes |
+| `409 already_linked` | **That Minecraft account is already linked to another user.** | The Minecraft account is linked to another panel account. The code stays valid, so the right account can still use it | Sign in with the account that holds the link, or ask an admin to check the accounts under **Admin → Users** |
+| `412 not_linked` | **Link your Minecraft account before claiming (Account → Link).** | Claiming and owner actions require a linked Minecraft account | Link the account first |
+| `403 quota_exceeded` | **You have reached your server quota.** | The claim would exceed the account's quota for servers, CPU, memory or storage | An admin raises the quota (see [Quotas](/en/guide/administration#quotas)) |
+| `409 already_claimed` | **This server has been claimed by another account.** | Another account claimed the server first; a claim succeeds for exactly one account | Refresh the server list |
+| `409 server_retiring` | **The server is pending release or deletion at the next daily reclaim run. …** | The server is being given up or deleted | Cancel the request in the panel |
+| `404 not_found` | **The requested content does not exist or has been deleted. Refresh and retry.** | The server does not exist | Refresh the server list |
+| `400 bad_request`, `400 bad_mc_uuid` | **The request was not accepted: …**, **Invalid Minecraft UUID format. …** | The game plugin sent a request without a UUID, with an empty code, with an invalid UUID, or with an authentication source other than `mojang` or `thirdparty` | Check that the game plugins match the installed Felis release |
+
+On a standalone server running a Felis mod, `/link` answers `This server runs with
+online-mode off, so /link is unavailable here.` when the server runs in offline mode. Behind
+the Felis proxy, the proxy serves `/link`.
+
+**Diagnosis**
+
+Successful links and claims appear in the audit log as `account.link` and `claim`. For
+failures, read the felis-api log and the proxy log:
+
+```bash
+sudo k3s kubectl -n felis logs deploy/felis-api --tail=200
+sudo journalctl -u felis-velocity -n 200
 ```
 
-`-since` and `-until` take a day (UTC midnight) or an RFC 3339 instant; the
-window is `[since, until)`. Each line is one row as JSON, oldest first. The
-file is created `0600` and an existing file is never overwritten.
+If `/link` itself fails in the game, check the internal API (see
+[internal API errors](#internal-api-errors)).
 
-### `felis breakGlass`: the recovery code and the OVERRIDE [VM-VERIFIED] {#felis-breakglass-the-recovery-code-and-the-override-vm-verified}
+## Builds and images {#builds-images}
 
-Once a staff account exists, `sudo felis breakGlass` asks which admin or owner
-is breaking the glass and mails that account's verified address a six-digit
-code through the same relay as the sign-in codes: the one the Owner saved in
-the panel when the database answers, else felis.toml's `[smtp]`. The code works
-for 10 minutes and five wrong ones end it. For `[smtp]` the console reads the
-relay password the way the watchdog does (the `password_ref` env var, else
-`/etc/felis/smtp-password`, else the `felis-smtp` Secret, else no AUTH), so a
-host whose k3s is down still gets its code, and the mail skips the API's
-`max_per_hour` budget.
-Only the right code makes the run a `recovery` attributed to that account; the
-mail says which host and OS user asked, so an admin who did not ask learns
-that root there is in other hands.
+These entries cover image builds from the **Build Pipeline**, the platform registry and the game images servers run on.
 
-Every other ending leads to the typed `OVERRIDE`, and the screen says why:
-the name matches no staff account, the account has no verified address, no
-relay (`[smtp] is not configured in felis.toml`, or the Secret could not be
-read), the relay refused the mail, the code expired or took five wrong tries,
-or the operator typed `OVERRIDE` at the code prompt. Esc on either screen
-starts over with a new code. With the relay down recovery still works, as an
-unverified override that records the reason.
+### An image build fails {#build-failures}
 
-The audit row is `break_glass.recovery` or `break_glass.root_override`
-(`break_glass.operator_create` for a new Operator account), source
-`break-glass`. `verified` is true only for a run a code proved, which also
-carries `verified_by: email_otp` and `code_sent_to`. An override carries
-`otp_skipped` (`unknown_admin`, `no_verified_email`, `no_relay`,
-`send_failed`, `code_expired`, `code_rejected`, `operator_skipped`) and, where
-something failed, `otp_skip_detail`. Root can edit the row afterwards, so it
-records attribution without proving it.
+**Cause**
 
-```sh
-sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c "
-  SELECT created_at, action, actor, payload->>'verified' AS verified,
-         payload->>'otp_skipped' AS skipped, payload->>'otp_skip_detail' AS detail
-  FROM audit_logs WHERE source = 'break-glass' ORDER BY created_at DESC LIMIT 20;"
+A build runs as a Job in the `felis-build` namespace. Its pod runs the steps `egress-gate`, `context-fetch`, `kaniko`, `trivy`, `sbom` and `scan-gate` in turn, and the final `push` step runs only after all of them succeed, so an image the scan blocks never reaches the registry. The build's error names the step that failed together with the last lines of its output, the deadline it exceeded, or the scan verdict.
+
+| Error or state | Cause |
+| --- | --- |
+| `the scan blocked the image: 1 CRITICAL, 1 HIGH (CVE-…, …)` | A vulnerability or leaked secret has a severity listed in `[registry] scan_fail_on` (default `CRITICAL`). |
+| The build hangs, then fails fetching a base image or packages | Build pods reach only cluster DNS, the internal registry and the API's internal face. Every download from the internet is blocked. |
+| `felis fetch-context: … it changed after approval; refusing to build` | The uploaded context no longer matches the digest the administrator approved. |
+| Approval answers `409 context_changed` | The submitter uploaded again after the review. |
+| Upload answers `507 uploads_full` or `403 submission_quota_exceeded` | Uploaded contexts exceed `user_uploads_max_bytes` (default 4Gi for all users together), 2 GiB for one user, or would leave the uploads volume under 10% free. One context is limited to `context_max_bytes` (default 1Gi). |
+| Submission refused with `400` and `must target the internal registry "…", not "…"` | The image reference points outside the internal registry. |
+| `push` fails with `403` | The target repository is under `felis/` or `mirror/`, which are reserved for the platform. |
+| `push` fails with `401` | The `felis-registry-push` Secret in the `felis-build` namespace is missing or stale. |
+| The build pod is `Evicted` | The build used more disk than `build_disk_limit` (default `12Gi`): extracted context, unpacked base image and image tarball together. |
+| `the build namespace's NetworkPolicy is not enforced` | The cluster runs without NetworkPolicy enforcement (a CNI without it, or k3s started with `--disable-network-policy`). |
+| `scan-gate` exits with code 2 | The scan report was missing or unreadable, and the build fails closed. |
+
+The build ServiceAccounts `felis-build` and `felis-restore` have no Role anywhere, so every Kubernetes API request they make is denied. This is part of the build isolation; leave them without permissions.
+
+**Diagnosis**
+
+1. In the panel, open **Build Pipeline** and select **Scan & logs** on the failed build. It shows the verdict and up to 100 findings with the blocking ones first, marks findings accepted as known risks as **Accepted**, and offers the Trivy report and the SBOM for download.
+2. Read the output of every step:
+
+   ```bash
+   sudo k3s kubectl -n felis-build get jobs,pods
+   sudo k3s kubectl -n felis-build logs job/<build-job> --all-containers --prefix
+   sudo k3s kubectl -n felis-build describe pod <build-pod>
+   ```
+
+Administrators can read the same scan data over the API: `GET /api/v1/images/build/{id}/scan`, `GET /api/v1/images/build/{id}/scan/report` and `GET /api/v1/images/build/{id}/sbom`. `404 scan_not_found` means the build stopped before the scan. `404 scan_document_not_kept` means the report or SBOM exceeded the 6 MiB kept per image; the verdict and findings are always kept.
+
+**Resolution**
+
+- **Scan blocked:** update the vulnerable component in the image and build again. To accept a finding as a known risk, add its id (a CVE or GHSA id, or a secret rule id such as `aws-access-key-id`) to `[registry] scan_accept`; accepted findings are still counted and listed. A vulnerability with no fixed release blocks only when `scan_fail_unfixed = true`. Adding `HIGH` to `scan_fail_on` blocks every build based on the platform's `felis/paper` image, whose upstream `paper.jar` carries five fixable HIGH findings, until those ids are accepted:
+
+  ```toml
+  [registry]
+  scan_fail_on = ["CRITICAL", "HIGH"]
+  scan_accept = ["CVE-2021-35515", "CVE-2021-35516", "CVE-2021-35517", "CVE-2021-36090", "CVE-2025-67030"]
+  ```
+
+  Review the accepted ids whenever the base image changes.
+- **Downloads blocked:** base the Dockerfile on an image in the internal registry, such as the platform's `felis/paper`, and put every file the build needs into the uploaded context.
+- **Context changed:** download and review the new upload, then approve again. When the review happened outside the panel (a command-line download or another browser), compare the `sha256sum` of the file you reviewed with the digest shown on the review page.
+- **Upload quota:** delete rejected submissions or raise `user_uploads_max_bytes`. A rejected submission's upload is deleted 7 days after the verdict.
+- **Push `401`:** re-run the installer, which recreates the push Secret. **Push `403`:** choose a repository outside `felis/` and `mirror/`.
+- **Evicted:** raise `build_disk_limit` and keep the node's free disk above it.
+- **NetworkPolicy not enforced:** restore NetworkPolicy enforcement in the cluster.
+
+To change a `[registry]` key, edit both configuration files and reload the API. felis-api reads its configuration from the `felis-config` Secret, so a restart alone does not pick up the edit.
+
+1. Edit the key in `/etc/felis/felis.host.toml` and in `/etc/felis/felis.pod.toml`.
+2. Render the Secret again and restart felis-api:
+
+   ```bash
+   sudo k3s kubectl -n felis create secret generic felis-config \
+     --from-file=felis.toml=/etc/felis/felis.pod.toml --dry-run=client -o yaml | sudo k3s kubectl apply -f -
+   sudo k3s kubectl -n felis rollout restart deployment/felis-api
+   ```
+
+::: tip
+A scan reflects the vulnerability database on the day of the build, and an admitted image is not scanned again later. To rescan an image, refresh the database with `sudo felis mirror-build-tools -only trivy-db` and start a new build of the same context.
+:::
+
+### Build pods do not start {#build-pods-not-starting}
+
+**Cause**
+
+Build pods run Kaniko and Trivy, and Trivy reads a vulnerability database and a Java database. The build namespace has no internet access, so all four come from copies in the internal registry:
+
+| Tool | Copy in the registry |
+| --- | --- |
+| Kaniko | `mirror/kaniko-executor:v1.24.0` |
+| Trivy | `mirror/trivy:0.74.0` |
+| Vulnerability database | `mirror/trivy-db:2` |
+| Java database | `mirror/trivy-java-db:1` |
+
+The installer makes these copies with `felis mirror-build-tools`, and `felis-build-tools.timer` refreshes them at 04:00 and 16:00. Copying needs access to gcr.io, ghcr.io and mirror.gcr.io.
+
+| Symptom | Cause |
+| --- | --- |
+| The build stays **Queued** | `[registry] max_concurrent_builds` builds (default 2, at most 6) are already running. Queued builds start oldest first. |
+| `ImagePullBackOff` on `mirror/kaniko-executor` or `mirror/trivy` | The first copy has not finished, or the host had no internet access during the install. |
+| The scan fails with `failed to download vulnerability DB` | `mirror/trivy-db:2` is missing. |
+| Watchdog: `the vulnerability DB was last refreshed … ago` | The timer's runs fail (network, registry down, full disk). The watchdog warns after three days without a clean run; scans keep gating, against old advisories. |
+| No build starts after setting `build_user_namespaces = "on"` | The node cannot run a pod with `hostUsers: false`. User namespaces need Kubernetes 1.33 or later, containerd 2.x and a kernel with idmapped mounts (5.19 or later; the RHEL and CentOS Stream 9 kernels carry the backport). |
+
+**Diagnosis**
+
+```bash
+sudo k3s kubectl -n felis-build get pods
+journalctl -u felis-build-tools -n 50
+sudo cat /var/lib/felis/build-tools/status.json
+sudo k3s kubectl -n felis logs deploy/felis-api | grep 'build pods run'
 ```
 
-### Optional: a Cloudflare rate limiting rule in front {#optional-a-cloudflare-rate-limiting-rule-in-front}
+The felis-api log states at startup whether build pods use a user namespace: `build pods run in a user namespace (hostUsers: false)` or `build pods run without a user namespace: …`.
 
-The limits above live in the API, so they hold on any edge. Behind Cloudflare
-you can also stop floods before they reach the tunnel: Security → WAF → Rate
-limiting rules, match URI Path starts with `/api/v1/auth/` on the console and
-op.console hostnames, count by IP, 30 requests per 10 seconds, action Block
-for 10 seconds (the Free plan's limits).
+**Resolution**
 
----
+1. Once the host can reach gcr.io, ghcr.io and mirror.gcr.io, copy the tools again:
 
-## 18. Server files: a change or an upload is refused {#_18-server-files-a-change-or-an-upload-is-refused}
+   ```bash
+   sudo felis mirror-build-tools                  # all four
+   sudo felis mirror-build-tools -only trivy-db   # one tool
+   ```
 
-The panel's Files page is for the server's owner or an admin, and only while
-the server is fully stopped. Reads reuse a read-only `felis files` Job for the
-same world, avoiding Pod startup for every folder and file. The worker pulls
-commands from the existing internal API with a random, world-scoped token;
-each request still passes the owner/admin and stopped gates. It exits after
-45 idle seconds or four minutes total; at most four workers exist per API
-process, with one-shot reads used at capacity. No file contents are cached.
-The panel caches directory listings for 30 seconds; Refresh, a write, upload
-or restore invalidates them. The text editor highlights common config formats
-and preserves CRLF; binary and oversized files offer download instead.
+2. On an air-gapped host, fetch the four images on a machine with internet access and push them into the registry under the names above, as the `platform` user, through a port-forward:
 
-Changes still run one-shot Jobs in the `minecraft` namespace, labelled
-`app.kubernetes.io/managed-by=felis-files` and
-`felis.lolicon.best/files-mode=<list|read|write|mkdir|delete|rename|upload|unzip>`.
-A listing or a read holds nothing. Every change (a save, a new file or folder,
-a rename, a delete, an upload, an unzip) holds the world for its Job (§3b), so a wake or a
-second change in the meantime gets `409 maintenance_in_progress`. The panel
-sends uploads one at a time and greys its other changes until they finish.
+   ```bash
+   sudo k3s kubectl -n felis port-forward svc/registry 5000:5000
+   # password of the platform user
+   sudo k3s kubectl -n felis get secret felis-registry-auth -o jsonpath='{.data.platform}' | base64 -d
+   ```
 
-| Status | Code | Meaning | What to do |
-|---|---|---|---|
-| `409` | `not_stopped` | The game pod is still there, usually finishing its shutdown save | Retry once `kubectl -n minecraft get pods -l felis.lolicon.best/server=<name>` shows nothing |
-| `409` | `maintenance_in_progress` | Another change, a backup, a restore or the reaper holds the world | §3b |
-| `409` | `file_exists` | A new file, new folder, rename, or upload sent without replace found something at the path | Pick another name or clear the path; the panel offers Replace for an upload |
-| `409` | `file_changed` | The file changed after the editor read it | The editor offers to load the latest or overwrite it |
-| `400` | `bad_path` | The path leaves the world volume (`..`, an absolute path, a link pointing out), or it would move `server.properties`, `config` or `config/paper-global.yml`, or read `config/paper-global.yml` | Those three keep their names: the read path withholds their secrets by name, and `paper-global.yml` holds the proxy forwarding secret every server shares |
-| `404` | `not_found` | The path, or a new folder's parent, is gone | Refresh the listing |
-| `413` | `too_large` | A read over 1 MiB, a save over 256 KiB, or a one-request upload over 64 MiB | Upload a large file whole instead of editing it; the panel sends a file over 64 MiB in parts on its own |
-| `411` | `length_required` | An upload without `Content-Length` (a chunked body) | Upload from the panel, or with `curl -T`, which sends the length |
-| `400` | `upload_incomplete` | The body ended before its declared length | Retry; nothing was changed |
-| `507` | `upload_staging_full` | Staging this upload would leave felis-api's staging filesystem under 10% free | Free space on the uploads volume |
-| `507` | `volume_full` | The world volume ran out of space; the old file is left as it was | Delete files the server no longer needs, or grow its volume |
-| `504` | `files_timeout` | felis-api stopped waiting after 90 s | See below: the Job may still finish |
-| `503` | `files_unavailable` | felis-api runs without the file Job runner, or (for an upload) without a staging directory or its internal address | Check felis-api's startup log |
-| `404` | `upload_not_found` | A large upload's session is gone: cancelled, already landed, idle for 6 hours, or felis-api restarted | Upload the file again |
-| `409` | `upload_offset_mismatch` | A part did not start where the session ends (a lost answer, a second tab) | The panel reads where it stands and continues; nothing to do |
-| `409` | `upload_busy` | Another part of the same upload is still arriving | Same |
-| `413` | `part_too_large` | A part over 32 MiB, or past the size the upload began with | A client bug; upload from the panel |
-| `409` | `upload_incomplete` | The commit came before every part had arrived | Same |
-| `429` | `too_many_uploads` | The account already has 4 large uploads in progress | Finish or cancel one |
+   Push to `localhost:5000/mirror/<name>:<tag>`. Repeat this for the two databases as often as current advisories matter to you. The watchdog warning stays until the timer can reach upstream.
+3. If builds stopped starting after setting `build_user_namespaces = "on"`, set it back to `"auto"` (the default, which turns user namespaces on only when the node supports them) or `"off"`, as described in [An image build fails](#build-failures).
 
-**An upload travels in two legs.** The browser sends the body to felis-api,
-which stages it under `/var/lib/felis/uploads/.file-staging` on the uploads
-volume (`felis-file-staging` in the pod's temp directory when that volume is not
-mounted). The Job then fetches it once from felis-api's internal face,
-`http://felis-api-internal.felis.svc.cluster.local:8081/api/v1/internal/file-uploads/<id>`,
-with a one-time token, checks the size and SHA-256, and lands it. The staged
-copy is deleted once the Job has answered, and a felis-api restart empties the
-directory. A Job that cannot fetch its upload, or fetches bytes that do not
-match, fails and leaves the target as it was; the panel shows a server error
-it can retry. The Job's log names the cause:
+::: info
+Kaniko v1.24.0 is the final upstream release and receives no security fixes. To run a maintained fork, copy its image under `mirror/` and set `[registry] kaniko_image` to it.
+:::
 
-```sh
-kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>,app.kubernetes.io/managed-by=felis-files
-kubectl -n minecraft logs job/<job>
+### Pushing to or pulling from the registry fails {#registry-errors}
+
+**Cause**
+
+The platform registry runs as the `registry` Deployment in the `felis` namespace, and images are addressed as `registry.felis.svc:5000/<repository>:<tag>`. The node pulls through the loopback port `127.0.0.1:5000`, which `/etc/rancher/k3s/registries.yaml` maps the registry name onto. Both the port and the file must be present for pulls to work. Reads are anonymous; every write needs a token from the `felis-registry-auth` Secret.
+
+| Symptom | Cause |
+| --- | --- |
+| The registry pod never starts and its volume stays `Pending` | The cluster has no default StorageClass. |
+| Writes answer `503` with `Retry-After` while pulls work | The daily garbage collection holds a read-only window. The installer and build pushes wait for it to end. |
+| A push of a very large layer is killed | The registry ran out of memory (its limit is 2Gi). |
+| Pulls fail after disk pressure or image garbage collection | `registries.yaml` is missing or changed, or the registry is down. |
+| A push answers `401` | The credential is missing or wrong. A missing `felis-registry-auth` Secret leaves the registry read-only. |
+| Platform and user images are gone | The registry volume was lost. |
+| The installer warns `could not pull …` on an air-gapped host | The registry and PostgreSQL images come from Docker Hub, pinned by digest. |
+
+**Diagnosis**
+
+```bash
+sudo k3s kubectl -n felis get pods -l app.kubernetes.io/component=registry
+sudo k3s kubectl -n felis get pvc registry
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5000/healthz   # expect 200
+sudo cat /etc/rancher/k3s/registries.yaml
+sudo k3s kubectl -n felis logs deploy/registry -c registry-gc
 ```
 
-**After `files_timeout`** the Job runs on to its own two-minute deadline and may
-still land the change. It keeps holding the world until it ends, so the next
-change waits on it with `maintenance_in_progress`; refresh the listing once it
-is gone to see whether the change landed. A Job is kept for two minutes after
-it ends, with its log.
+An anonymous `GET /v2/` answers `401`; that is expected.
 
-**A file over 64 MiB goes up in parts.** The panel begins an upload session
-(`POST …/files/uploads`), which reserves room for the whole file on the staging
-filesystem at once, so an upload that starts can finish (`507
-upload_staging_full` otherwise). It then sends 32 MiB parts, each under the
-Cloudflare edge's 100 MB body limit, retrying a part that fails and resuming
-from where the session ends; there is no size cap beyond the room. Starting the
-server midway costs only the commit, which needs it stopped again. The commit
-starts the Job and answers at once (`202`); the Job fetches the file the same
-way as above and runs up to 2 hours. A session belongs to the account and server
-it was begun for, and one untouched for 6 hours is dropped (felis-api logs
-`dropped N upload session(s) left idle`). A Job that fails before it has every
-byte leaves the session, so committing again does not mean sending it again.
-Folders cannot be uploaded: the panel asks for a `.zip` instead, because loose
-files cut off midway would leave half a world.
+**Resolution**
 
-**Unzip** (`POST …/files/unzip`, `.zip` only) extracts into a hidden
-`.felis-unzip-*` folder beside the archive and moves the result into place only
-once every entry has been written and checked, so a failure changes nothing and
-the working folder is removed. It checks, before writing a byte, that no entry
-leaves the folder or is a link (`archive_unsafe`, `archive_symlink`), that the
-archive does not put a file where the server has a folder or the reverse
-(`type_conflict`), and that the volume has room (`volume_full`); an entry whose
-size differs from what the archive declares ends `archive_invalid`. Names stored
-in GBK, as Windows zips in a Chinese locale have them, are read as such. Without
-replace, an archive that would overwrite files ends `file_exists` with the list,
-which the panel shows for confirmation before running it again with replace.
+- **Volume `Pending`:** mark a StorageClass as the cluster default.
+- **`503` during garbage collection:** wait for the window to end. To run the collection at once, remove its marker and restart the registry pod:
 
-Large uploads and unzips run in the background: they keep going when the page is
-closed, and `GET …/files/ops` lists the one running and those that ended in the
-last 30 minutes, with bytes done and, on failure, the code above or `job_failed`
-with the Job's condition (`DeadlineExceeded` after 2 hours). Their Jobs carry
-`felis.lolicon.best/files-async=true`. A Job that fails without a result keeps
-its log for 30 minutes:
+  ```bash
+  sudo k3s kubectl -n felis exec deploy/registry -c registry-gc -- rm -f /var/lib/registry/.felis-last-gc
+  sudo k3s kubectl -n felis rollout restart deploy/registry
+  ```
 
-```sh
-kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>,felis.lolicon.best/files-async=true
-```
+- **Pulls fail:** `registries.yaml` must map `registry.felis.svc:5000` to `http://127.0.0.1:5000`. If it is missing or changed, re-run the installer.
+- **Credentials:** `sudo felis rotate-token -yes registry` replaces the registry tokens and restarts the registry and felis-api. See [Rotating credentials](/en/operations/access#rotate-credentials).
+- **Volume lost:** re-run the installer, which pushes every platform image again. With the [off-site copy](/en/operations/backup#offsite) configured, `sudo felis offsite fetch-images` puts user images back at their old digests; it pushes only what is missing, so a second run after an interruption is cheap. Without it, rebuild user images from their approved submissions, whose uploaded contexts stay on the uploads volume. Servers pinned to a digest the registry no longer holds fail to pull until an administrator picks a current image (see [game images](#game-images)).
+- **Air-gapped `could not pull`:** install from release assets copied to the host ([Offline installation](/en/guide/deployment#offline-install)). Without assets, fetch the image by the same digest for the host's architecture on a connected machine, export it with containerd and import it on the host:
 
-**Downloading a file or folder** (`POST …/files/download`) is an export (§10,
-"Downloading a backup or the world"): a `felis-export` Job with
-`felis.lolicon.best/export-mode=files` reads the file, or zips the folder, from
-the world read-only and felis-api streams it to the browser. It needs the server
-stopped and holds the world until the download ends. `config/paper-global.yml`
-is refused as a file and left out of a folder, and `server.properties` goes out
-with `rcon.password` redacted, matched by the file itself so a link to either is
-guarded too; world and backup exports filter the same two files. Two per user at
-a time, four across the install, 30 per user per hour (`429 export_busy`).
+  ```bash
+  # on a machine with internet access; $ref is the full reference with digest from the warning
+  sudo ctr images pull --platform linux/amd64 "$ref"
+  sudo ctr images export --platform linux/amd64 image.tar "$ref"
+  # on the Felis host
+  sudo k3s ctr images import image.tar
+  ```
 
-Every change is audited as `file.write`, `file.mkdir`, `file.delete`,
-`file.rename` (with `to`), `file.upload` (with `size_bytes`, `sha256` and
-`overwrite`, in one request or in parts), `file.unzip` (with `overwrite`) or
-`file.download`, with `server_name` set to `<server>:<path>`:
+  Use `linux/arm64` on an ARM host. A `docker save` rewrites the manifest, and the copy then no longer matches the digest. Re-run the installer afterwards; it finds the image and pins it against image garbage collection.
 
-```sh
-sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c "
-  SELECT created_at, actor, action, server_name, payload
-  FROM audit_logs WHERE action LIKE 'file.%' ORDER BY created_at DESC LIMIT 20;"
-```
+### Creating a server or changing its image is refused {#game-images}
 
-[GO-TESTED: `internal/fileedit`, `handlers_files_test.go`, `handlers_fileops_test.go`,
-`cmd/felis/files_test.go`, `TestExpireFileSessions`, `internal/maintenance`.] [VM-TESTED: a pod labelled as a files Job in `minecraft`
-reaches `felis-api-internal:8081`; a 256 KiB save's content, split across six
-variables, lands byte for byte through the real binary, where one 140 KB variable
-fails with `argument list too long`. An upload through the API, both legs end to
-end, has not been run on a cluster.]
+**Cause**
 
----
+Game images live under tags that an installer run can move, such as `registry.felis.svc:5000/felis/paper:demo`. A server is pinned to the digest its tag named when it was created, so it keeps running exactly that build. Each installer run also pushes every game build under a versioned tag that no later run rewrites, `<Minecraft version>-<12 hex digits of the image id>` (for example `felis/paper:26.2-3f9c0a1b2c4d`). The registry deletes a build that no server and no whitelist entry has referenced for 24 hours, and always keeps the 5 newest builds of each `felis/` repository.
 
-## 19. Scheduled tasks: a run is skipped, missed or failed {#_19-scheduled-tasks-a-run-is-skipped-missed-or-failed}
-
-A server's owner (or an admin) keeps up to 20 scheduled tasks on it, on the
-panel's **Scheduled tasks** page (`/api/v1/servers/{name}/schedules`). Each one
-sends a console command, restarts, stops, starts or backs up the server, once a
-day at a set time or every 15 minutes to 12 hours, on the chosen weekdays, in an
-IANA time zone (the browser's by default). A restart, stop or backup may warn the
-players in game (`say`) 1 to 30 minutes ahead. felis-api runs the tasks itself: a
-loop every 15 seconds, so a task starts within about 15 seconds of its time, and
-the database hands each run to one felis-api only.
-
-What each action does:
-
-| Action | Server running | Server stopped |
+| Message | Cause | Resolution |
 | --- | --- | --- |
-| command | runs it over RCON (a leading `/` is dropped) | skipped |
-| restart | stops the pod, then starts it | skipped |
-| stop | stops it | skipped |
-| start | skipped (a start that `Failed` is started over) | starts it, as the panel's start does (running-server cap, retiring server, busy world) |
-| backup | takes a live backup (§10), with the players kept on and saving paused only while the world is copied; where that cannot be done (the game does not answer its console, the world is busy) it stops the server, takes the backup and starts it again | takes the backup |
+| `image_not_in_registry` | The whitelisted tag was never pushed to the internal registry, or was deleted. | Push or rebuild the image, then retry. |
+| `registry_unavailable` | felis-api could not reach `registry.felis.svc:5000`. | Check the registry pod, and check that the `felis-registry-ingress` NetworkPolicy still admits felis-api. |
+| `the registry no longer holds build …` | The image names a digest the registry pruned. | Pick a current tag. Whitelist the versioned tag of any build you want to keep. |
+| `409 image_change_unconfirmed` | An image change over the API without `"confirmImageChange": true`. | Back up the world, then send the change with the confirmation. |
+| Installer warns `could not pin every user server` | The registry was down, or a server names a tag the registry lost. | Fix the registry, then run `sudo felis pin-images` before starting those servers. A server whose tag is gone keeps its bare tag until an administrator picks a new image. |
+| Installer warns `could not pin the login system server` (or the lobby) | The registry did not answer right after the push. | Re-run the installer once the registry pod is Ready. |
+| A running server restarted once during an installer run | The installer pinned it to the build it already ran. | No action; this happens once per server. |
 
-The warning before a live backup says so (`A backup runs in <n> min; saving
-pauses for a few seconds`); the one before a backup that stops the server says
-it pauses and comes back after. Either backup is recorded as a scheduled
-restore point (`scheduled_keep`, `scheduled_retention`, §10).
+**Diagnosis**
 
-A step has a deadline: the pod must stop within 15 minutes, the backup Job must
-end within 45, and the start is given 15. A restart or backup that cannot finish
-still starts the server again when it was running before, so a failed backup never
-leaves a world offline.
+```bash
+sudo k3s kubectl -n felis get pods -l app.kubernetes.io/component=registry
+sudo k3s kubectl -n minecraft get minecraftserver <name> -o jsonpath='{.spec.image}'
+```
 
-The row's last result says how the latest run went:
+`spec.image` names the exact build a server runs (the digest after `@sha256:`).
 
-| `last_result` | `last_detail` | What to do |
+**Resolution**
+
+To move a world to a newer build or Minecraft version:
+
+1. Back up the world. Minecraft upgrades chunks as it loads them, and the older version cannot open them again.
+2. Open **Edit Server Config** and pick the image. Picking the current tag again moves the server to that tag's newest build.
+3. Tick **I've backed up the world — change the image** and save.
+
+To roll back, set the previous build again (the audit log records `image_from` and `image_to` for every change) and restore the pre-upgrade backup. This works while the registry still holds the old build. To create servers on a specific Minecraft version after the default tag has moved, whitelist its versioned tag ([Images](/en/guide/administration#images)).
+
+### The installer builds images on the host during a release install {#host-build-fallback}
+
+**Cause**
+
+A release install takes its images and the Velocity plugin from the release's assets and checks each against the release's `SHA256SUMS`. When an asset cannot be used, the installer names it and the reason, and builds that image on the host with Docker instead; the registry and PostgreSQL images are then pulled from Docker Hub. Each download is tried three times, five seconds apart, and a transfer that stays under 1 KiB/s for a minute is restarted.
+
+**Diagnosis**
+
+Read the installer messages printed before the build:
+
+| Message | Meaning | Resolution |
 | --- | --- | --- |
-| `ok` | empty, or the reply of a console command | nothing |
-| `skipped` | `the server has a new owner since this schedule was saved; save it again to use it` | the server changed owner (claim, account migration, admin). The task switched itself off; the new owner reviews it and saves it to turn it back on |
-| `skipped` | `the server was not running`, `the server was already stopped`, `the server was already running`, `the server has no world yet`, `the server is being given up or deleted`, `the server no longer exists`, and for a start `the cluster is at its running-server cap` or `the world is busy with …` | the run had nothing to act on; the next run tries again |
-| `missed` | `felis-api was not running at the scheduled time` | felis-api was down more than 10 minutes past the time. The run is dropped, so a restart never lands hours late; the next one runs as usual |
-| `failed` | `felis-api stopped in the middle of this run` | felis-api restarted during the run's first step (the claim was over 2 minutes old); check that the server is in the state you want |
-| `failed` | `the server did not stop within 15 minutes` | see §1 and §2 for a pod that hangs; the backup did not run |
-| `failed` | `another operation kept the world busy for 15 minutes` | a restore, file change or another backup held the world (§3b) |
-| `failed` | `the backup failed: …`, `the backup did not finish within 45 minutes`, `the backup store is full; ask an administrator to free space` | §10 for backup Jobs; the Backups page shows the Job |
-| `failed` | `could not start the server again: …` (after a restart or a backup) | the server stopped and could not be started again: the running-server cap, a server being given up, or a world still busy after 15 minutes of retries. Start it from the panel once the cause is gone (§1, §3b) |
-| `failed` | `the server console could not be reached`, `the command failed: …` | the server's RCON (§1c) |
+| `release vX publishes no SHA256SUMS … building them on this host instead` | The release has no assets, or they are still being uploaded. | For a new release, re-run once the release page lists `SHA256SUMS`. |
+| `SHA256SUMS lists no <file>` or `could not download <file> from release vX` | The release lacks that asset. | Re-run later. The host build is correct meanwhile. |
+| `downloaded <file> hashes to …, but release vX's SHA256SUMS says …` | The download was corrupted, or the asset was replaced. | Re-run. If the same mismatch repeats, the asset itself is bad; report it. |
+| `the release's image listing … is malformed` | `felis-images-linux-<arch>.txt` does not parse. | Report it. Every image is built on the host. |
+| `the release's registry image is …, but this installer runs …` | The installer and the release are from different versions. | Run the installer read at the release's tag; `felis update --panel` prints that command. |
+| `k3s containerd holds no <image> from <tar>` | The tar did not contain the image under the listed digest. | `sudo k3s ctr images ls \| grep felis` shows what was imported. Report it. |
+| `FELIS_ARTIFACT_DIR: …`, and the install stops | A file in the asset directory is missing or fails its checksum. Nothing is built from a directory install. | Copy the named file from the release again and re-run. |
 
-"Run now" starts a run at once, including on a switched-off task, and leaves the
-next planned run where it was. While a run is in progress (`run_state` is
-`claimed`, `stopping`, `backing_up` or `starting`) the task cannot be edited,
-deleted or run again (`409 schedule_running`).
+During plugin builds, `[felis] Downloading <file> (<host>)` lines identify each Gradle download, and an active download reports its progress every ten seconds. `no new data for …; waiting for the download` reports a download that has received nothing for thirty seconds; Gradle's own timeouts and retries still apply.
 
-A time the clock skips at a daylight-saving change runs an hour early (the offset
-before the jump applies); a time it repeats runs once, the first time. A time zone
-the host no longer knows runs in UTC. Deleting a server drops its tasks, and a new
-server of the same name starts with none. The audit actions are `schedule.create`,
-`schedule.update`, `schedule.delete`, `schedule.run_now` (by a person) and
-`schedule.run` (every finished run, with its result and detail).
+**Resolution**
 
-[GO-TESTED: `TestScheduleNextRun`, `TestScheduleInputValidation`,
-`TestScheduleRunnerBackup`, `TestScheduleRunnerRestart`, `TestScheduleRunnerStaleClaim`,
-`TestScheduleRunnerBacksUpARunningServerLive`, `TestScheduleWarningSaysTheServerStaysUp`;
-PG-TESTED: `TestScheduleStoreRunCAS`, `TestDueSchedules`, `TestSchedulesFollowTheServer`]
+A host build needs about 8 GiB under `/var/lib/containerd` (2 GiB when Docker already has a build cache there). Without that room the install stops before Docker is installed:
 
----
+```
+building here what the release did not supply takes about … MiB under /var/lib/containerd, and … has … MiB free; nothing has been built
+```
 
-## Quick reference: symptom → section {#quick-reference-symptom-→-section}
+Re-run once the asset can be downloaded, free the space, or set `FELIS_PREFLIGHT=warn` to build anyway. An interrupted install keeps the downloaded files in `/var/lib/felis/artifacts`, and the next run reuses those that still match `SHA256SUMS`.
 
-| Symptom | Section |
-|---|---|
-| Where to start: what is up, what is wrong, what to send when asking for help | §0 |
-| Stuck `Starting`, never `Running` | §1 |
-| `Starting` with `PodNotReady` (image? PVC? boot?) | §1a |
-| RCON secret/auth/port errors | §1b, §1c |
-| Phase `Failed` | §2 |
-| Players land in lobby / wrong place | §3, §4 |
-| Wake refused / rate-limited (403/409/429/503) | §3a |
-| `maintenance_in_progress`; server won't start after a restore | §3b |
-| Routing disabled, offline-mode | §4 |
-| Panel 401/403; fails-closed; audience error | §5 |
-| Local password login rejected | §5c |
-| Internal callers 401 (service token) | §6 |
-| Link/claim 400/409/412/403/404 | §7 |
-| Build push 400 / SA denied / egress hang / Failed / executor ImagePullBackOff | §8, §8e |
-| Registry push/pull unreachable | §9 |
-| World deleted unexpectedly / backup skipped | §10 |
-| Back up a running server; `live_backup_console`; players see saving paused | §10 |
-| Backup or audit retention set in the panel; which value is in force | §10, §17 |
-| Reaper `awaiting_stop` stays above 0; `corrupt=` / backup shown as damaged; `orphan_archives` | §10 |
-| Backup or world download refused or cut off (`export_busy`, `export_expired`, `export_unavailable`) | §10 |
-| Idle auto-stop not firing; player count 0; `PlayersCounted=False` | §11 |
-| A config field seems ignored | §12 |
-| PVC left behind after delete | §13 |
-| Node out of disk; pods evicted / ImagePullBackOff | §13b |
-| Which metric to scrape | §14 |
-| An alert mail from the watchdog; nothing is mailed when something breaks | §14 |
-| The host went down and nothing noticed; `NO HEARTBEAT` at install; heartbeat URL set in the panel; `felis-watchdog-failed` in the journal; `state.json.unreadable-*` | §14 |
-| `FelisOperatorDown` / `FelisAPIDown` / `FelisLoginGateDown` / `FelisReconcileStuck` | §14, §1, §2 |
-| Upgrade / roll back a bad control-plane image | §15 |
-| `image_change_unconfirmed` / `image_not_in_registry` / `registry_unavailable`; move a world to a newer Minecraft | §15b |
-| Database backup overdue / `FelisDBBackupStale` / panel shows Never backed up | §16 |
-| `pre-migration backup failed, nothing applied` during an upgrade | §16 |
-| Undo a mistaken change / restore the control-plane database | §16 |
-| Host lost: rebuild from a database bundle; `felis restore-host`, `FELIS_RESTORE_FROM_OFFSITE` | §16 |
-| A worker node is offline and its servers are down; controller high availability | [Multi-node deployment](/en/guide/distributed) |
-| `felis-postgres did not become ready`; `kubectl exec` finds no database pod | §16 |
-| `the off-site copy last completed ... ago` / `NO OFF-SITE COPY` / reaper `awaiting_offsite` stays above 0 | §16, §10 |
-| Sign-in 429 `rate_limited` for everyone at once | §17 |
-| 429 `mail_rate_limited` / `FelisMailBudgetExhausted` | §17 |
-| Mail relay saved in the panel; `smtp_unreachable`, `smtp_tls`, `smtp_auth`, `mail_settings_changed` | §17 |
-| Right code refused; `otp_account_locked` / `FelisOTPAccountLocked` | §17 |
-| `FelisSignInFailures` / who is guessing, from where | §17 |
-| `FelisAuditWriteFailing` | §17 |
-| `felis breakGlass` sends no code / shows `Root override`; `otp_skipped` in the audit | §17 |
-| How long sessions, codes and audit rows are kept; export audit rows | §17 |
-| Files page: a change, upload or unzip refused (`file_exists`, `bad_path`, `too_large`, `upload_staging_full`, `upload_not_found`, `volume_full`, `archive_unsafe`, `job_failed`, `files_timeout`) | §18 |
-| A scheduled task shows `skipped`, `missed` or `failed`; a task switched itself off after an owner change | §19 |
+## System servers and configuration {#configuration}
 
-### The panel cannot confirm a server's state, and the emergency stop {#panel-cannot-confirm-state-and-emergency-stop}
+These entries cover settings that do not take effect on existing servers, idle auto-stop and world volumes left behind by deleted servers.
 
-When the control API times out or is unreachable, the last state read is shown for
-reference only; a server shown as starting is no proof that its game process is
-healthy. The console keeps the logs it already has, marks the state as stale with the
-time it was last read, and retries on its own. A first read that fails also offers the
-Owner the host-side recovery steps.
+### A newer setting never reaches an existing server {#system-server-fields}
 
-An ordinary stop is carried out by the operator. The Owner can choose **More actions →
-Emergency stop** on the server's console, type the server's name and confirm their
-identity again. The emergency stop first saves `desiredState=Stopped`, then scales the
-StatefulSet that this MinecraftServer owns to zero through the Kubernetes scale
-subresource. It bypasses the game's RCON and the operator, keeps the normal Pod
-termination grace period, and deletes no world. When the scale-down fails, the saved
-stop intent is not withdrawn, and the panel states that the result is unconfirmed.
-An accepted request is not proof that the game has stopped: the state read checks the
-StatefulSet's replica target and the game Pod independently, and shows **Stopping**
-while the replica target is still above zero or the game Pod is still running or exiting.
+**Cause**
 
-When the control API itself is offline, the browser cannot act on the cluster. The Owner
-can expand the host-side recovery steps and run them on the host in order: save the
-stop intent, scale down, and check the Pod (replace the namespace when it is not
-`minecraft`). When the node is offline, also check the node and its container runtime;
-force-deleting a Pod is no evidence that the process has exited. Do not resolve a lost
-control connection by force-deleting worlds, Pods or PVCs. The emergency stop's
-Kubernetes permissions need the new RBAC, which a platform update applies.
+The installer creates the login space and lobby servers only when they are missing and leaves existing ones unchanged. A field that a newer release added to their definition therefore stays unset on an older install: the lobby may lack RCON (its console stays dead and its online count always shows 0), or the login space may lack its HTTP readiness check. User servers created before idle auto-stop became the default have no idle setting and never stop when empty. User servers created before RCON became the default have a dead console, always show 0 players, cannot be backed up live and never stop when idle.
+
+Some fields act only under conditions:
+
+| Field | Behaviour |
+| --- | --- |
+| `spec.startup.timeoutSeconds` | Time allowed for a start. `0` or unset means 300 s; afterwards the server becomes `Failed` with `StartupTimeout`. |
+| `spec.startup.readinessTimeoutSeconds` | Deadline for the whole start while waiting for the RCON probe, measured from the start request. `0` or unset means 300 s; afterwards the server becomes `Failed` with `ReadinessTimeout`. |
+| `spec.idle.autoStopEnabled`, `spec.idle.emptySecondsBeforeStop` | Act only with `spec.rcon.enabled`, because the player count comes from RCON. `emptySecondsBeforeStop: 0` turns idle stop off. |
+
+**Diagnosis**
+
+```bash
+sudo k3s kubectl -n minecraft get minecraftserver \
+  -o custom-columns=NAME:.metadata.name,RCON:.spec.rcon.enabled,IDLE:.spec.idle.autoStopEnabled
+```
+
+**Resolution**
+
+Run the following after the images are in place, that is after an installer run or update. Enabling RCON or the readiness check on a server whose image lacks the listener keeps that server in `Starting` until it is marked `Failed`.
+
+1. Fill the missing fields of the system servers and give older user servers the default idle auto-stop (stop after 600 s with nobody online):
+
+   ```bash
+   sudo felis converge
+   ```
+
+   Servers that are already current report `already converged`. Values that are set are never overwritten, so an idle stop an administrator turned off stays off. Without `-user-rcon`, the command lists the user servers that lack RCON and leaves them unchanged.
+2. Turn RCON on for older user servers whose RCON was never set:
+
+   ```bash
+   sudo felis converge -user-rcon
+   ```
+
+   Each server gets the RCON block of a newly created server, and the change applies at its next start. Felis's own Paper and lobby images open RCON; check that a user-built image does before running this. A server whose RCON someone set, on or off, is left unchanged.
+
+The same actions are available in the panel: **Platform settings → Access and security → System server completion**, with **Enable RCON on older user servers** for step 2, then **Run completion**.
+
+### A deleted server's world volume remains {#world-volume-kept}
+
+**Cause**
+
+A world volume outlives its MinecraftServer object. Deleting the object directly (for example with `kubectl`) keeps the volume, so a server that comes back under the same name mounts the same world. The world cleanup is the only process that deletes a world volume, and only after a verified backup. A server given up or deleted in the panel is archived and its volume removed by the next daily cleanup run, which needs a worlds root (`FELIS_WORLDS_HOST_PATH`, see [World cleanup](/en/operations/backup#world-cleanup)). While the volume exists it holds the name: creating a new server with that name answers `409 world_volume_exists`.
+
+**Diagnosis**
+
+List the world volumes whose server is gone:
+
+```bash
+comm -23 \
+  <(sudo k3s kubectl -n minecraft get pvc -l felis.lolicon.best/server -o jsonpath='{range .items[*]}{.metadata.labels.felis\.lolicon\.best/server}{"\n"}{end}' | sort) \
+  <(sudo k3s kubectl -n minecraft get minecraftservers -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)
+```
+
+**Resolution**
+
+Delete a volume only when its world is no longer needed:
+
+```bash
+sudo k3s kubectl -n minecraft delete pvc world-<name>-0
+```
+
+::: danger
+Deleting a world volume is irreversible. The world is gone unless an archive of it exists.
+:::
+
+## Host problems {#host-problems}
+
+These entries cover the disk, the host's address, the k3s certificates and the clock. The system journal is persistent, so `journalctl -b -1` shows the boot before the last restart.
+
+### Pods are evicted or images go missing when the disk fills {#disk-full-symptoms}
+
+**Cause**
+
+When the disk fills, the kubelet evicts game server pods first. The control-plane pods (felis-api, the operator, the world cleanup and the registry) run under the `system-cluster-critical` priority class and are not evicted; the kubelet logs `Eviction manager: cannot evict a critical pod` for them. The kubelet may then remove images that nothing runs. Backups stop as well: a backup that would leave less than 10% of the archive filesystem free fails with `not enough free disk for the archive`.
+
+Typical symptoms:
+
+- The login space or lobby is evicted, and players cannot join.
+- Pods stay in `ImagePullBackOff` after the eviction.
+- The watchdog mails `node … reports DiskPressure: the kubelet is evicting pods`, or `the filesystem holding … is …% free` (a warning below 15% free, critical below 5%).
+- After space is freed, the node keeps `DiskPressure: True` for up to about 5 minutes, and pods waiting to be scheduled wait with it.
+
+**Diagnosis**
+
+```bash
+df -h / /var/lib/rancher /var/lib/felis
+sudo k3s kubectl describe node | grep -A 8 Conditions
+sudo k3s kubectl get pods -A | grep -v Running
+```
+
+The largest consumers are usually k3s's images (`sudo k3s ctr images ls -q`) and the world and backup volumes under `/var/lib/rancher/k3s/storage`.
+
+**Resolution**
+
+1. Free space or grow the disk as described in [Recovering from a full disk](/en/operations/storage#disk-full).
+2. Images come back on their own: every platform image is also stored in the platform registry, and the node pulls a removed image from there on the next attempt. Delete a pod stuck in `ImagePullBackOff` to retry at once.
+3. If a pull still fails, check the registry pod, `http://127.0.0.1:5000/healthz` and `registries.yaml` as described in [Pushing to or pulling from the registry fails](#registry-errors).
+4. For an image that is in neither place, re-run the installer. It rebuilds or re-imports the images from the host's Docker store and pushes them to the registry, so keep that store as the recovery copy.
+
+### The host's address changed {#host-address-changed}
+
+**Cause**
+
+An install is bound to the IP address it was installed on. The k3s node, the network policies, the panel certificate and the default `<ip>.nip.io` root domain all use it. When the host loses that address (a DHCP lease that came back different, a moved virtual machine), the cluster and the game proxy keep using the old address and the panel stops answering on its old name. The installer warns at install time when the address is a DHCP lease.
+
+**Diagnosis**
+
+The watchdog reports the finding `host-address` (critical, after 5 minutes): `this host no longer holds <ip>, the address the install was made on (it has: …)`.
+
+```bash
+ip -brief address
+journalctl -u felis-watchdog -n 40
+```
+
+**Resolution**
+
+1. Give the host its old address back, either as a DHCP reservation on the router or as a static address. With NetworkManager (for example on Rocky Linux):
+
+   ```bash
+   sudo nmcli con mod <connection> ipv4.method manual ipv4.addresses <ip>/<prefix> ipv4.gateway <gateway> ipv4.dns <dns>
+   sudo nmcli con up <connection>
+   ```
+
+2. Restart felis-api and the game proxy:
+
+   ```bash
+   sudo k3s kubectl -n felis rollout restart deploy/felis-api
+   sudo systemctl restart felis-velocity
+   ```
+
+Moving an install to a new address means reinstalling onto a restored backup; see [Moving to another host](/en/operations/backup#move-host). With the default `<ip>.nip.io` root domain, run `sudo felis domain set <new-ip>.nip.io` once the install runs on its new address ([Changing the root domain](/en/operations/access#change-domain)).
+
+::: info
+A hostname change is harmless. The installer pins the k3s node name in `/etc/rancher/k3s/config.yaml.d/50-felis.yaml` (`node-name:`), and every local volume is bound to that name. Check the pin with `sudo k3s kubectl get node -o jsonpath='{.items[0].metadata.annotations.k3s\.io/node-args}'`.
+:::
+
+### k3s certificates are about to expire {#k3s-certificates}
+
+**Cause**
+
+k3s issues its client and serving certificates (API server, kubelet, admin kubeconfig, etcd) for 365 days and its CA certificates for ten years. It renews the client and serving certificates only when it starts, reissuing every one that has expired or expires within 120 days. A host that restarts k3s inside that window, through a reboot or a k3s upgrade, renews them automatically. A host that runs a year without restarting k3s loses its API server and node the day they lapse, and the panel can no longer start, stop or back up servers. A restart never renews a CA certificate.
+
+**Diagnosis**
+
+The watchdog reports the certificate that expires first as `k3s-certs`: a warning 30 days before expiry, critical in the last 7 days and after expiry. Its hint says whether a restart renews the certificate.
+
+```bash
+sudo k3s certificate check --output table
+```
+
+**Resolution**
+
+1. Restart k3s, then check again; renewed certificates show about a year of validity:
+
+   ```bash
+   sudo systemctl restart k3s
+   sudo k3s certificate check --output table
+   ```
+
+   The restart stops k3s alone: game servers, PostgreSQL and the control plane keep running, and the API server returns within a minute. `k3s-killall.sh` stops every container; do not use it for this.
+2. To renew every client and serving certificate ahead of the 120-day window, for example to align with a maintenance slot:
+
+   ```bash
+   sudo systemctl stop k3s && sudo k3s certificate rotate && sudo systemctl start k3s
+   ```
+
+3. A CA certificate needs `k3s certificate rotate-ca` and the procedure in the [k3s certificate documentation](https://docs.k3s.io/cli/certificate).
+
+The panel's own certificate (`/etc/felis/panel-tls.crt`) is separate from this check; see [Panel TLS certificate](/en/operations/access#tls). `felis watchdog -k3s-cert-dirs ""` turns the certificate check off.
+
+### The system clock is not synchronized {#clock}
+
+**Cause**
+
+Sign-in codes and sessions expire by the system clock, S3 refuses off-site uploads signed more than 15 minutes off, and certificate checks fail on a clock that is far off. The installer turns NTP on (`timedatectl set-ntp true`, installing chrony where no client exists) unless `FELIS_MANAGE_TIME_SYNC=0`. A firewall that drops outbound UDP port 123 keeps the clock unsynchronized.
+
+**Diagnosis**
+
+The watchdog reports the finding `clock` (warning, after 30 minutes).
+
+```bash
+timedatectl          # expect "System clock synchronized: yes" and "NTP service: active"
+chronyc sources
+```
+
+**Resolution**
+
+1. Turn NTP on:
+
+   ```bash
+   sudo timedatectl set-ntp true
+   ```
+
+2. Allow outbound UDP port 123 to the time servers.
+3. Check `chronyc sources` until a source is selected and `timedatectl` reports the clock as synchronized.
+
+## Backups and the database {#backups-database}
+
+These entries cover world backups, the world cleanup, downloads, the control-plane database and its backups, and the off-site copy. Restore and rebuild procedures are on [Backup and restore](/en/operations/backup).
+
+### A world backup is refused or fails {#backup-failures}
+
+**Cause**
+
+A backup runs as a Job that archives the server's whole data volume. A stopped server is archived as it is; a running server gets a live backup, during which saving pauses while the world is copied. Before a backup starts, felis-api checks the limits set in `[archive]` or on the **Backup and audit retention** card.
+
+| Answer or message | Cause | Resolution |
+| --- | --- | --- |
+| `429 backup_cooldown` | One owner-started backup per server per cooldown window (`manual_cooldown`, default 10 minutes). | Retry after the time in `Retry-After`. Administrators are exempt. |
+| `507 backup_store_full` | Present backups add up to the backup store cap (`max_local_bytes`). | Delete backups that are no longer needed, or raise the cap. Administrators are exempt. |
+| `not enough free disk for the archive` | The archive would leave less than 10% of the archive filesystem free. | Free disk space ([Recovering from a full disk](/en/operations/storage#disk-full)). |
+| `409 not_stopped`, `the server is starting or stopping; back it up once it is running or stopped` | The server is between states. | Retry once it is running or stopped. |
+| `503 live_backup_console` | The game did not answer `save-off` or `save-all flush` over RCON: RCON is off or unreachable. | Retry, back the server up while stopped, or turn RCON on with `sudo felis converge -user-rcon` ([A newer setting never reaches an existing server](#system-server-fields)). |
+| `409 maintenance_in_progress` | A restore, another backup, a file change, a world download or the world cleanup holds the world, or a restart is under way. | Retry once that operation ends. |
+| `409 not_stopped`, `stop the server before backing up its world` | This felis-api cannot back up a running server. | Stop the server first. |
+| `409 restore_in_progress` when deleting a backup | A restore may be reading the archive. | Wait for the restore to finish. |
+| A backup is marked **Corrupt** | Reading the archive back did not match its recorded checksum. | It cannot be restored. It is kept until it expires and can be deleted by hand. |
+
+Scheduled backups (daily restore points) follow the same limits. While the store is full, felis-api logs `scheduled backups paused` and starts none; a failed scheduled backup is retried after a quarter of `scheduled_every` (6 hours by default). felis-api logs `scheduled backups off (needs the backup executor)` at startup when it lacks `FELIS_IMAGE` or `FELIS_BACKUP_PVC`.
+
+**Diagnosis**
+
+1. Open the server's **Backups & restore** page. **Recent operations** shows each backup, restore, scheduled backup and download with the error its Job exited on.
+2. List the Jobs that act on the server's world and read the log of a failed one:
+
+   ```bash
+   sudo k3s kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>
+   sudo k3s kubectl -n minecraft logs job/<job>
+   ```
+
+**Resolution**
+
+Act on the cause in the table. A live backup also needs scratch space on the same node at least as large as the world; free space when the copy step refuses to start. To back up every world before maintenance, use `felis backup-now` ([Backing up all worlds](/en/operations/backup#backup-now)).
+
+### The world cleanup Job fails {#world-cleanup-failed}
+
+**Cause**
+
+The world cleanup runs once a day as a Job in the `minecraft` namespace. On every install it expires old backups and reads archives back to verify them. With a worlds root configured, it also archives and removes worlds idle for more than 15 days and carries out servers given up or deleted in the panel. A world is never removed without a confirmed backup, so a failed run keeps the worlds. The run fails (exits 1) when any of these counters in its summary line is above zero: `skipped` (servers the run failed on), `expire_failed` (expired backups it could not remove), `corrupt` (archives that failed verification and are now marked **Corrupt**) or `verify_failed` (archives that could not be read; retried next run). The Job retries twice.
+
+**Diagnosis**
+
+The watchdog mails `world reaper Job … failed`, and after 26 hours without a successful run `the world reaper has not succeeded for …`; the Prometheus alert is `FelisWorldJobFailed`. Read the log, especially the error above the summary line:
+
+```bash
+sudo k3s kubectl -n minecraft get jobs | grep felis-reaper
+sudo k3s kubectl -n minecraft logs job/<felis-reaper-job>
+```
+
+The summary line looks like this:
+
+```
+felis reaper: evaluated=12 reaped=1 released=0 deleted=0 awaiting_offsite=0 awaiting_stop=0 warned=2 skipped=0 store_full=0 evicted=0 expired=3 expire_failed=0 verified=6 corrupt=0 verify_failed=0 swept=0 orphan_archives=0
+```
+
+| Counter | Meaning |
+| --- | --- |
+| `store_full` | Worlds kept because the backup store is full. |
+| `awaiting_stop` | Idle servers left for the next run because they were not yet stopped. A server that stays here for days is being started again, or a Job keeps holding its world. |
+| `awaiting_offsite` | Worlds archived but kept until the archive's off-site copy is confirmed. Above zero for more than a day means the off-site copy is failing. |
+| `orphan_archives` | Archives no backup record points to. They are removed once older than the retention, and each run lists the first few by path. |
+| `evaluated=0` | No worlds root is configured (`FELIS_WORLDS_HOST_PATH`). The run only expires backups and verifies archives; idle worlds are neither archived nor released, and servers given up or deleted in the panel wait. |
+
+**Resolution**
+
+1. Fix the error named above the summary line. A server that fails every day keeps its world and fails the Job every day until the cause is fixed.
+2. `store_full`: free space in the backup store or raise its cap.
+3. `awaiting_offsite`: see [The off-site copy has stopped](#offsite-stopped).
+4. Idle worlds are tracked by player joins. If the game proxy cannot deliver join events, an actively played world can become eligible for cleanup after 15 days; see [Players cannot join](#players-cannot-join) and [Internal API errors](#internal-api-errors). Unowned servers get no warning mail before cleanup; claim servers you want to keep, or exempt them with `spec.reaperExempt: true`. Retention and warnings are described in [World cleanup](/en/operations/backup#world-cleanup).
+
+### A backup or world download fails {#download-failures}
+
+**Cause**
+
+A download runs a `felis-export` Job that streams the archive through felis-api to the browser. A world export needs the server stopped and holds the world until the download ends, so the server cannot start meanwhile.
+
+| Answer or message | Cause |
+| --- | --- |
+| `429 export_busy` | Limits reached: one export per user at a time, two across the platform, six per user per hour. |
+| `410 export_expired` | The Job did not reach felis-api within 10 minutes. |
+| `503 export_unavailable` | felis-api runs without `FELIS_IMAGE` or `FELIS_BACKUP_PVC` and logs `world export disabled` at startup. |
+| `409 not_stopped`, `409 no_world_volume` | A world export needs a stopped server with a world volume. |
+| `409 backup_corrupt` | The archive no longer matches its recorded checksum. The download is cut off short. |
+| `felis-api answered 410 Gone: this export has expired …` | The download was not opened within 90 seconds of being ready (the tab was closed, or the browser blocked the download). |
+| `felis-api answered 410 Gone: the download ended before the archive did …` | The browser cancelled or lost the connection. |
+| `felis-api answered 404 Not Found: no such export` | felis-api restarted since the export began, or the ticket had run out. |
+
+**Diagnosis**
+
+The reason appears under **Recent operations** on the server's **Backups & restore** page as the Job's last line.
+
+**Resolution**
+
+1. Start the export again once the cause is resolved; keep the tab open until the browser has saved the file.
+2. A world export whose Job never reaches felis-api holds the world until the Job's two-hour deadline. Release it at once:
+
+   ```bash
+   sudo k3s kubectl -n minecraft delete job -l app.kubernetes.io/managed-by=felis-export,felis.lolicon.best/server=<name>
+   ```
+
+### The database backup is overdue or incomplete {#database-backup-overdue}
+
+**Cause**
+
+`felis-db-backup.timer` runs `felis db backup` daily at `FELIS_DB_BACKUP_TIME` (default `*-*-* 03:30:00`, plus up to 15 minutes of random delay). Every check watches the newest daily bundle with a 26-hour limit; a newer manual, pre-upgrade or off-site bundle can be restored but leaves the alarm standing, because the daily timer is still broken. Common causes:
+
+- felis-postgres is not running: `kubectl exec` finds no running pod, or `pg_dump: … connection refused` ([The database is unavailable](#database-unavailable)).
+- `k3s: executable file not found`: `felis` ran with neither `/usr/local/bin` on `PATH` nor k3s elsewhere.
+- The backup directory's disk is full. The half-written file is removed and earlier bundles stay intact.
+- `pg_dump: server version mismatch`: an external database is newer than the host's client tools.
+
+A bundle is **Incomplete** when the cluster did not answer the export of the MinecraftServer objects three times running. The bundle still holds the database, but a restore from it brings back no servers; `felis db backup` then exits 1. An upgrade stops with `pre-migration backup failed, nothing applied` for the same causes and applies no migration.
+
+**Diagnosis**
+
+The **Control-plane database backup** card on **Maintenance & Backups → Backups** shows **Overdue**, **Never backed up** or **Incomplete** together with the commands to fix it. The watchdog mails the owners. On the host:
+
+```bash
+sudo felis db check                                   # exits 1 with the reason
+sudo felis db list                                    # every bundle with its age
+sudo systemctl status felis-db-backup.timer
+sudo journalctl -u felis-db-backup -n 50 --no-pager
+```
+
+The Prometheus alerts are `FelisDBBackupStale` and `FelisDBBackupMetricMissing`. The second fires when node-exporter's textfile collector does not read the directory of `FELIS_DB_BACKUP_METRICS` (default `/var/lib/node_exporter/textfile_collector/felis_db_backup.prom`).
+
+**Resolution**
+
+1. Fix the cause shown in the journal. For a version mismatch with an external database, install the matching `postgresql` client package.
+2. Run the daily backup now, which clears the alarm:
+
+   ```bash
+   sudo systemctl start felis-db-backup.service
+   ```
+
+3. For an **Incomplete** bundle, wait until `sudo k3s kubectl get minecraftservers -A` answers, then run `sudo felis db backup`.
+
+Schedule, retention and restore are described in [Database backups](/en/operations/backup#database-backups).
+
+### The off-site copy has stopped {#offsite-stopped}
+
+**Cause**
+
+`felis-offsite.timer` copies world archives, database bundles, user images and uploads to the bucket every hour. The watchdog and the **Off-site copy** tab (**Needs attention**) report these states:
+
+| Message | Cause |
+| --- | --- |
+| `the off-site copy last completed … ago` | No sync has completed for 12 hours (network, credentials, bucket, clock). The mail adds the last error. |
+| `the off-site copy has never completed; …` | The first sync has not succeeded. |
+| `the off-site copy has stopped: the bucket's objects are sealed with another key, …` | `/etc/felis/offsite.env` holds a different key than the one the bucket was written with, for example after a reinstall that generated a new key. The installer ends with `OFF-SITE COPY STOPPED`. |
+| `the off-site copy has stopped: <host> took the bucket over, …` | Another host ran `felis offsite take-over`. |
+| `this host was built from another host's backup and copies nothing into the off-site bucket: …` | This host was restored from a bundle and stands by while another host writes the bucket. |
+| The installer ends with `NO OFF-SITE COPY` | No bucket is configured. |
+
+One object that the uplink cannot send within 10 minutes plus its size at 512 KiB/s fails alone, stays pending and is retried on the next pass.
+
+**Diagnosis**
+
+```bash
+sudo felis offsite status        # last run, errors, bucket contents, pending items; exits 1 after 12 hours without a sync
+sudo felis offsite check-key     # whether offsite.env holds the bucket's key
+sudo journalctl -u felis-offsite -n 50 --no-pager
+systemctl list-timers felis-offsite.timer
+```
+
+`missing:` lines in `status` are archives removed from the volume by hand; nothing is left to copy for those. `not whole:` lists images the registry lost during a run.
+
+**Resolution**
+
+- **Transient failure:** fix the network, credentials or clock ([The system clock is not synchronized](#clock)), then run a sync with `sudo systemctl start felis-offsite.service` or **Copy now** on the card.
+- **Wrong key:** set `FELIS_OFFSITE_KEY` in `/etc/felis/offsite.env` to the bucket's key and run a sync, or point `[offsite]` at an empty bucket or prefix and re-run the installer ([Encryption key](/en/operations/backup#offsite-key)).
+- **Taken over by mistake** (for example by a rehearsal machine): run `sudo felis offsite take-over -yes` on the production host.
+- **Standing by after a rebuild:** once this host permanently replaces the old one, run `sudo felis offsite take-over -yes` ([Rebuilding a host](/en/operations/backup#rebuild-host)).
+- **Timer missing:** re-run the installer.
+
+### The database is unavailable {#database-unavailable}
+
+**Cause**
+
+The control-plane database runs as the `felis-postgres` Deployment, with its data in `/var/lib/felis/postgres` on the host. When it is unavailable, sign-in, the panel and server management fail.
+
+| Symptom | Cause | Resolution |
+| --- | --- | --- |
+| `ImagePullBackOff` or `ErrImagePull` on `postgres` | The node cannot reach Docker Hub and has no copy. | Import the image as described in [Pushing to or pulling from the registry fails](#registry-errors). |
+| `CreateContainerConfigError`, `secret "felis-postgres" not found` | The superuser Secret is gone. | Re-run the installer, which creates a new one. |
+| The log shows `Permission denied` on `/var/lib/postgresql/18/docker` | The data directory lost its owner (uid 999) or, with SELinux enforcing, its `container_file_t` label. | Re-run the installer, or run `sudo chown -R 999:999 /var/lib/felis/postgres` and `sudo restorecon -R /var/lib/felis/postgres`. |
+| The log shows `database files are incompatible with server` | The data was created by another PostgreSQL major version. | Follow [PostgreSQL major upgrades](/en/operations/upgrade#postgresql-major). |
+| `Pending`, `Insufficient memory` | The node has no room for the pod. | Free memory on the node. |
+| felis-api in `CrashLoopBackOff` with `database schema is newer than this felis build: …` | felis-api was rolled back across an upgrade that migrated the database. | Restore the `pre-migrate` bundle the upgrade took ([Rollback](/en/operations/upgrade#rollback)). |
+| `database schema is behind this felis build` | Migrations are missing. | Run `sudo felis migrate up -config /etc/felis/felis.host.toml`. |
+| `audit: lost …` in the felis-api log, alert `FelisAuditWriteFailing` | Audit rows cannot be written, almost always because PostgreSQL is failing. | Check the database as below. |
+| Requests slow down; `canceling statement due to statement timeout` | Requests queue for one of the 25 pool connections, or a statement exceeded 15 seconds. | Look for a slow query or a lock with `pg_stat_activity`. |
+
+The installer stops with `felis-postgres did not become ready` after 10 minutes and prints the pod's events. The watchdog mails `PostgreSQL is unreachable: …` after 3 minutes.
+
+**Diagnosis**
+
+```bash
+sudo k3s kubectl -n felis get pods -l app.kubernetes.io/component=postgres -o wide
+sudo k3s kubectl -n felis describe deploy/felis-postgres | tail -n 30
+sudo k3s kubectl -n felis logs deploy/felis-postgres --tail=60
+```
+
+To query the database by hand as the superuser:
+
+```bash
+sudo k3s kubectl -n felis exec -it deploy/felis-postgres -c postgres -- psql -U postgres felis
+```
+
+```sql
+SELECT pid, state, wait_event, query FROM pg_stat_activity;
+```
+
+**Resolution**
+
+Apply the fix in the table. To undo a mistaken change or recover damaged data, restore a database bundle as described in [Restoring the database](/en/operations/backup#restore-database).
+
+## Mail and alerts {#mail-alerts}
+
+### Mail is not delivered {#mail-problems}
+
+**Cause**
+
+One mail relay delivers sign-in codes, email verification and identity confirmations, world cleanup warnings, watchdog alerts and break-glass codes. A relay saved on the panel's **Mail delivery** card overrides the `[smtp]` relay that `felis setup` wrote into `felis.toml`.
+
+| Symptom | Cause | Resolution |
+| --- | --- | --- |
+| `503 mail_unavailable` | No relay is configured. Sign-in works by passkey only. | Configure a relay (below). |
+| `429 mail_rate_limited`, alert `FelisMailBudgetExhausted` | The hourly mail cap is spent (`[smtp] max_per_hour` or **Hourly mail cap**, default 120, of which a quarter may go at once). | Check `felis_rate_limited_total` for a flood. If the sign-ins are genuine, raise the cap to what the relay allows. |
+| `502 mail_undeliverable`, alert `FelisMailDeliveryFailing` | The relay refused the mail. | Read the relay's reason in the felis-api log. |
+| `smtp: <host>:<port> does not offer STARTTLS`, or `smtp_tls` on the card | The relay is on a port other than 465 and does not offer STARTTLS. | Use port 465 or a relay with STARTTLS (below). |
+| `smtp_unreachable` | The relay cannot be reached, its port is not 25, 465, 587 or 2525, or it resolves to a link-local, unspecified or multicast address. | Correct the host and port. |
+| `smtp_auth` | The relay rejected the credentials. | Correct the user name and password. |
+| `smtp_sender_refused`, `smtp_recipient_refused` | The relay refused the sender or the recipient. | Use a sender address the provider has authorized, and check the recipient address. |
+| `409 mail_settings_changed` | The relay changed since the card was loaded. | Reload and save again. |
+| The install ends with `NO ALERT MAIL`; alerts appear only in the journal | No relay, or no Owner with a verified email address. | Configure a relay and verify the Owner's address. |
+| `reaper: warning suppressed — no warner wired` in the world cleanup log | No relay, or the owner has no verified address. | Configure a relay. The pending warning is sent on the next daily run while the warning window lasts. |
+
+**Diagnosis**
+
+1. Open **Platform settings → Notifications and retention**. The **Mail delivery** card shows which relay is in force: **Panel settings**, **Install-time settings** or **Not configured**.
+2. Select **Send test message**. It sends one message through the relay as typed to the Owner's verified address and names the failing stage. Each test counts against the hourly cap.
+3. Read the relay's own error text, which the panel does not show:
+
+   ```bash
+   sudo k3s kubectl -n felis logs deploy/felis-api | grep -i smtp
+   journalctl -u felis-watchdog -n 40
+   sudo felis doctor
+   ```
+
+**Resolution**
+
+1. On the **Mail delivery** card, enter the relay and select **Check and save**. Felis delivers one self-test message to the sender address and saves only once the relay has accepted it. The sender must be a plain address without a display name.
+2. Alternatively, run `sudo felis setup` and configure email. Saving there writes `[smtp]` and also clears a relay saved in the panel, so the relay typed in setup is the one in force. Change the relay password through `felis setup`; a hand edit of the `felis-smtp` Secret lasts only until the next installer run.
+3. For a relay without STARTTLS reached over a trusted network, turn off **Require an encrypted connection** on the card, or set `require_tls = false` under `[smtp]` in `/etc/felis/felis.toml` and `/etc/felis/felis.pod.toml`.
+4. For alert mail, verify the Owner's email address under **Account → Email Verification**.
+
+Sign-in limits and locked accounts are covered in [Sign-in problems](#sign-in-problems). The relay, the watchdog and the heartbeat are described in [Mail relay](/en/operations/monitoring#mail-relay), [Watchdog](/en/operations/monitoring#watchdog) and [Heartbeat](/en/operations/monitoring#heartbeat).
+
+## Files and scheduled tasks {#files-schedules}
+
+### The file manager refuses a change or an upload {#file-manager-errors}
+
+**Cause**
+
+The **Server Files** page is available to the server's owner and administrators, and only while the server is fully stopped. Listings and reads hold nothing. Every change (save, new file or folder, rename, delete, upload, extract) runs a Job and holds the world until it ends, so a wake or a second change meanwhile answers `409 maintenance_in_progress`.
+
+| Status | Code | Meaning | Resolution |
+| --- | --- | --- | --- |
+| `409` | `not_stopped` | The game pod still exists, usually finishing its shutdown save. | Retry once `sudo k3s kubectl -n minecraft get pods -l felis.lolicon.best/server=<name>` shows nothing. |
+| `409` | `maintenance_in_progress` | Another change, a backup, a restore or the world cleanup holds the world. | Retry once that operation ends. |
+| `409` | `file_exists` | Something exists at the path of a new file, folder, rename or upload. | Choose another name, or select **Replace** for an upload. |
+| `409` | `file_changed` | The file changed after the editor read it. | Select **Load latest** or **Overwrite anyway**. |
+| `400` | `bad_path` | The path leaves the world volume, or it would move `server.properties`, `config` or `config/paper-global.yml`, or read `config/paper-global.yml`. | These three keep their names; `paper-global.yml` holds the forwarding secret shared by every server. |
+| `404` | `not_found` | The path, or a new folder's parent, no longer exists. | Select **Refresh**. |
+| `413` | `too_large` | A read over 1 MiB, a save over 256 KiB, or a single-request upload over 64 MiB. | Upload a large file whole instead of editing it. The panel sends files over 64 MiB in parts automatically. |
+| `411` | `length_required` | An upload without `Content-Length`. | Upload from the panel, or with `curl -T`. |
+| `400` | `upload_incomplete` | The body ended before its declared length. Nothing changed. | Retry. |
+| `507` | `upload_staging_full` | Staging the upload would leave felis-api's staging filesystem under 10% free. | Free space on the uploads volume. |
+| `507` | `volume_full` | The world volume is full. The old file is unchanged. | Delete files the server no longer needs, or grow the volume. |
+| `504` | `files_timeout` | felis-api stopped waiting after 90 seconds. | The Job may still finish (below). |
+| `503` | `files_unavailable` | felis-api runs without the file Job runner, or without upload staging. | Check felis-api's startup log. |
+| `404` | `upload_not_found` | A large upload's session is gone: cancelled, finished, idle for 6 hours, or felis-api restarted. | Upload the file again. |
+| `429` | `too_many_uploads` | The account already has 4 large uploads in progress. | Finish or cancel one. |
+| `429` | `export_busy` | Download limits: two per user at a time, four across the install, 30 per user per hour. | Retry later. |
+
+`upload_offset_mismatch`, `upload_busy` and `409 upload_incomplete` during a multi-part upload are handled by the panel, which resumes on its own. Extracting a `.zip` checks every entry before writing anything and changes nothing on failure: `archive_unsafe` (an entry leaves the folder), `archive_symlink` (an entry is a link), `type_conflict` (a file where the server has a folder, or the reverse), `archive_invalid` (an entry's size differs from the archive's declaration) and `volume_full`. Without replace, an archive that would overwrite files ends `file_exists` with the list, which the panel shows for confirmation. Folders cannot be uploaded; upload them as a `.zip` and extract it.
+
+**Diagnosis**
+
+```bash
+sudo k3s kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>,app.kubernetes.io/managed-by=felis-files
+sudo k3s kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>,felis.lolicon.best/files-async=true
+sudo k3s kubectl -n minecraft logs job/<job>
+```
+
+A finished Job and its log are kept for two minutes; a large upload or extraction that failed without a result keeps its log for 30 minutes. The Job's log names the cause when it could not fetch the staged upload or the bytes did not match.
+
+**Resolution**
+
+Act on the code in the table. After `files_timeout`, the Job runs on to its own two-minute deadline and may still apply the change; it holds the world until it ends. Select **Refresh** once the Job is gone to see whether the change landed. Large uploads and extractions run up to 2 hours in the background and continue when the page is closed; a failure there shows the code above, or `job_failed` with the Job's condition (`DeadlineExceeded` after 2 hours).
+
+### A scheduled task is skipped, missed or failed {#schedule-errors}
+
+**Cause**
+
+felis-api checks scheduled tasks every 15 seconds and records the result of each run on the **Scheduled tasks** page. A command, restart or stop runs only while the server is running, and a start only while it is stopped. A backup of a running server is taken live; when that is not possible, the server is stopped, backed up and started again. A step has a deadline: the pod must stop within 15 minutes, the backup Job must end within 45, and the start gets 15. A restart or backup that cannot finish still starts the server again if it was running before.
+
+| Result | Detail | Resolution |
+| --- | --- | --- |
+| Skipped | `the server has a new owner since this schedule was saved; save it again to use it` | Ownership changed and the task switched itself off. The new owner reviews the task and saves it to turn it back on. |
+| Skipped | `the server was not running`, `the server was already stopped`, `the server was already running`, `the server has no world yet`, `the server is being given up or deleted`, `the server no longer exists`; for a start also `the cluster is at its running-server cap` or `the world is busy with …` | The run had nothing to act on. The next run tries again. |
+| Missed | `felis-api was not running at the scheduled time` | felis-api was down for more than 10 minutes past the time. The run is dropped; the next one runs as usual. |
+| Failed | `felis-api stopped in the middle of this run` | felis-api restarted during the run. Check that the server is in the state you want. |
+| Failed | `the server did not stop within 15 minutes` | See [A server does not stop](#server-wont-stop). The backup did not run. |
+| Failed | `another operation kept the world busy for 15 minutes` | A restore, file change or another backup held the world. |
+| Failed | `the backup failed: …`, `the backup did not finish within 45 minutes`, `the backup store is full; ask an administrator to free space` | See [A world backup is refused or fails](#backup-failures). The **Backups & restore** page shows the Job. |
+| Failed | `could not start the server again: …` | The server stopped and could not start again (running-server cap, a server being given up, or a world still busy after 15 minutes). Start it from the panel once the cause is gone. |
+| Failed | `the server console could not be reached`, `the console is not configured`, `the command failed: …` | RCON is unreachable or off. See [A server is stuck starting](#server-stuck-starting) and [A newer setting never reaches an existing server](#system-server-fields). |
+
+While a run is in progress the task cannot be edited, deleted or run again (`409 schedule_running`).
+
+**Diagnosis**
+
+Each task row shows its last result and detail. The audit log records every finished run as `schedule.run` with its result and detail ([Audit log](/en/guide/administration#audit-log)).
+
+**Resolution**
+
+Act on the detail in the table. Timing rules that explain unexpected run times:
+
+- A time that the clock skips at a daylight-saving change runs an hour early; a time it repeats runs once, the first time.
+- A time zone the host no longer knows runs in UTC.
+- **Run now** starts a run at once, also on a task that is off, and leaves the next planned run unchanged.
+- Deleting a server deletes its tasks; a new server with the same name starts with none.
+
+## Quick reference {#quick-reference}
+
+| Symptom | See |
+| --- | --- |
+| Where to start: status, health check, support bundle, logs | [First steps](#first-steps) |
+| Server stuck in `Starting`; `PodNotReady`, `RconNotReachable` | [A server is stuck starting](#server-stuck-starting) |
+| Server in `Failed`; `StartupTimeout`, `ReadinessTimeout` | [A server is in Failed](#server-failed), [A newer setting never reaches an existing server](#system-server-fields) |
+| A server does not stop | [A server does not stop](#server-wont-stop) |
+| Server never stops when empty; player count always 0; `PlayersCounted` is `False` | [A server never stops when empty](#idle-stop) |
+| Players cannot join or land in the wrong place; wake refused | [Players cannot join](#players-cannot-join) |
+| Routing disabled | [Routing is disabled](#routing-disabled) |
+| Panel answers 401 or 403 | [Panel errors](#panel-errors) |
+| Sign-in refused: `rate_limited`, `otp_account_locked` | [Sign-in problems](#sign-in-problems) |
+| Game proxy or plugins get 401 from the internal API | [Internal API errors](#internal-api-errors) |
+| Account linking or claim errors | [Account linking errors](#account-link-errors) |
+| Build failed; scan blocked; `context_changed`; `uploads_full` | [An image build fails](#build-failures) |
+| Build stays **Queued**; `ImagePullBackOff` on `mirror/kaniko-executor`; `failed to download vulnerability DB` | [Build pods do not start](#build-pods-not-starting) |
+| Registry push or pull fails; writes answer `503`; `could not pull …` on an air-gapped host | [Pushing to or pulling from the registry fails](#registry-errors) |
+| `image_not_in_registry`, `registry_unavailable`, `image_change_unconfirmed`; moving a world to a newer Minecraft | [Creating a server or changing its image is refused](#game-images) |
+| The installer builds images on the host during a release install | [The installer builds images on the host](#host-build-fallback) |
+| Lobby console dead; older servers lack RCON or idle stop; `felis converge` | [A newer setting never reaches an existing server](#system-server-fields) |
+| `409 world_volume_exists`; volume left after deleting a server | [A deleted server's world volume remains](#world-volume-kept) |
+| Pods evicted; `DiskPressure`; filesystem alerts | [Pods are evicted when the disk fills](#disk-full-symptoms), [Recovering from a full disk](/en/operations/storage#disk-full) |
+| Watchdog `host-address`; panel unreachable after an address change | [The host's address changed](#host-address-changed) |
+| Watchdog `k3s-certs` | [k3s certificates are about to expire](#k3s-certificates) |
+| Watchdog `clock`; S3 refuses off-site uploads | [The system clock is not synchronized](#clock) |
+| `backup_cooldown`, `backup_store_full`, `live_backup_console`, `not enough free disk for the archive` | [A world backup is refused or fails](#backup-failures) |
+| World cleanup Job failed; `awaiting_stop`; a backup marked **Corrupt** | [The world cleanup Job fails](#world-cleanup-failed) |
+| Download refused or cut off: `export_busy`, `export_expired`, `export_unavailable` | [A backup or world download fails](#download-failures) |
+| Database backup **Overdue**, **Never backed up** or **Incomplete**; `FelisDBBackupStale`; `pre-migration backup failed, nothing applied` | [The database backup is overdue or incomplete](#database-backup-overdue) |
+| `the off-site copy last completed … ago`; `OFF-SITE COPY STOPPED`; `awaiting_offsite` stays above 0 | [The off-site copy has stopped](#offsite-stopped) |
+| `felis-postgres did not become ready`; `database schema is newer than this felis build` | [The database is unavailable](#database-unavailable) |
+| Undo a mistaken change; restore the database | [Restoring the database](/en/operations/backup#restore-database) |
+| The host is lost | [Rebuilding a host](/en/operations/backup#rebuild-host) |
+| An upgrade went wrong | [Rollback](/en/operations/upgrade#rollback) |
+| `mail_unavailable`, `mail_rate_limited`, `smtp_tls`; `NO ALERT MAIL` | [Mail is not delivered](#mail-problems) |
+| Alert mail from the watchdog; `NO HEARTBEAT` | [Watchdog](/en/operations/monitoring#watchdog), [Heartbeat](/en/operations/monitoring#heartbeat) |
+| No administrator can sign in | [Emergency access](/en/operations/access#break-glass) |
+| Server Files: a change, upload or extraction refused | [The file manager refuses a change or an upload](#file-manager-errors) |
+| A scheduled task shows Skipped, Missed or Failed | [A scheduled task is skipped, missed or failed](#schedule-errors) |
+| A worker node is offline and its servers are down | [Failover](/en/guide/distributed#failover) |

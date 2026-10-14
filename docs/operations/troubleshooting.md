@@ -1,39 +1,39 @@
 ---
 title: 故障排查
+description: 根据观察到的现象定位 Felis 故障原因，确认原因并加以解决。
 ---
 
-# 故障排查 {#felis-troubleshooting-checklist}
+# 故障排查 {#troubleshooting}
 
-本文对应规范 §28 #23，覆盖平台实际产生的故障。每个症状都对应明确的 `status.conditions` 原因、HTTP 错误码、日志或清单名称，便于从现象找到发出信号的代码路径。
+本文帮助运维人员诊断并解决 Felis 主机上的故障。先执行「首先检查」中的步骤，了解整台主机的状态，再转到与所观察现象相符的条目。每个条目说明现象、原因、确认方法和解决办法。条目按领域分组：服务器、玩家与路由、面板与登录、内部 API、账号关联、构建与镜像、主机、备份与数据库、邮件，以及文件与计划任务。文末的[快速索引](#quick-reference)将常见现象对应到相应条目。
 
-## 如何阅读本文 {#how-to-read-this-document}
+::: info
+本文中的命令均在 Felis 主机上以 root 身份执行。`kubectl` 命令使用 k3s 自带的版本（`sudo k3s kubectl …`），因为集群管理员凭据 `/etc/rancher/k3s/k3s.yaml` 仅 root 可读。游戏服务器运行在 `minecraft` 命名空间，控制面运行在 `felis` 命名空间。
+:::
 
-每项按「症状 → 可能原因 → 检查位置 → 修复」编排。`kubectl` 须在节点上以 root 运行（`sudo -i` 或 `sudo k3s kubectl …`），因为管理员 kubeconfig `/etc/rancher/k3s/k3s.yaml` 仅 root 可读，见 §13c。
+## 首先检查 {#first-steps}
 
-- **[GO-TESTED]**：隔离的 `*_test.go` 覆盖该具体路径，CI 断言对应字符串或错误码。
-- **[PG-TESTED]**：`internal/pgint` 的 `-tags pgint` 测试针对真实 Postgres 及随附迁移执行，命令见贡献指南。
-- **[CODE-ONLY]**：路径和信号确实存在，但无对应单元测试；例如未由本仓库 Go 测试编译验证的 Velocity Java 插件。
-- **[INTEGRATION-ONLY]**：症状来自 kubelet、Kaniko、containerd、Postgres 或网络，可在 `kubectl describe` / Pod 日志看到，未必写入 `MinecraftServer.status`。
-- **[INERT]**：CRD 字段存在但无控制器读取，调整无效。**当前没有此类 CRD 字段**；最后的 `spec.storage.retainOnDelete` 已移除，原因见 §13。配置似乎无效时，通常是不满足生效条件，见 §12。
+排查具体现象之前，先检查整台主机的状态。本节命令均为只读操作：不修改任何内容，也不发送邮件，可随时执行。Owner 也可在面板中执行相同的检查。
 
-operator 不会自行生成父域名；路由身份为部署域名下的 `spec.subdomain`。示例使用 `<root-domain>`、`registry.<ns>.svc:<port>` 占位符。
+### 查看平台状态 {#check-status}
 
-本文中的多数 `felis` 命令也可由 Owner 在面板中执行：主机状态、看门狗告警及其邮件暂缓、数据库备份包、世界备份、异地副本、重建、`felis doctor`、诊断包、审计导出、访问方式、根域名、上传存储、凭据轮换和系统服务器补全。各项在面板中的位置见[运维手册第 9 节](/operations/#_9-running-the-host-from-the-panel-go-tested-sh-tested)。下文命令仍是权威参考，也是面板或 `felis-node-control` 停止运行时的唯一途径。
+```bash
+sudo felis status
+```
 
----
+`felis status` 汇总输出平台状态：发布版本、节点及其 kubelet、各控制面 Deployment（就绪副本、镜像、重启次数）、游戏代理（`felis-velocity` 单元及游戏端口能否接受连接）、每台服务器的目标状态、阶段、玩家数和最新世界备份、最新数据库备份包、异地副本、磁盘与内存，以及看门狗尚未关闭的告警。
 
-## 0. 首先检查：`felis status`、`felis doctor`、`felis support-bundle` {#_0-first-look-felis-status-felis-doctor-felis-support-bundle}
+某个组件停止时，输出会标明该组件不可用，其余部分照常输出。k3s 停止时，集群一行显示 `unreachable (...)`，服务器显示 `unknown while the cluster is unreachable`。PostgreSQL 停止时，备份列显示 `?`，表格下方说明原因。
 
-以下三个命令在节点以 root 运行，只读，不修改状态，也不发送邮件，可随时执行。
+### 运行健康检查 {#run-doctor}
 
-**`sudo felis status`** 汇总发布版、节点/kubelet、各控制平面 Deployment 的就绪副本、镜像和重启次数、`felis-velocity` 及游戏端口、每服目标状态/阶段/玩家数/最新世界备份、数据库备份包、异地副本、磁盘/内存，以及看门狗未关闭的告警。某部分不可用时仍打印其余内容：k3s 停止时显示 `unreachable (...)`、服务器显示 `unknown while the cluster is unreachable`；PostgreSQL 停止时备份列为 `?`，表下说明原因。[GO-TESTED: `TestStatusReport`, `TestStatusWithPartsDown`, `TestStatusClusterEdges`, `TestStatusBackups`, `TestStatusWatchdog`]
+```bash
+sudo felis doctor
+```
 
-**`sudo felis doctor`** 使用 `felis-watchdog.service` 配置运行全部看门狗检查，另检查主机上的失败 unit、停止的长期服务（`k3s`、`felis-velocity`）、不再触发的定时器、无法送达的告警（无 SMTP 或无已验证邮箱的所有者）、不可用的心跳 URL。按领域逐行输出：`✓` 正常、`!` 警告、`✗` 严重、`-` 未检查并说明原因，例如未配置异地副本；每项给出下一检查位置：
+`felis doctor` 使用看门狗自身的配置执行看门狗的全部检查，并补充只有主机才能发现的问题：失败的 Felis 单元、已停止的 `k3s` 或 `felis-velocity`、不再触发的定时器、无人接收的告警（未配置邮件中继，或没有已验证邮箱的 Owner）以及不可用的心跳 URL。命令按领域逐行输出：`✓` 正常、`!` 警告、`✗` 严重、`-` 未检查并附原因。每项发现都指明下一步的检查位置：
 
 ```text
-felis doctor on felis-1 at 2026-09-27 12:00 UTC
-checks run as /etc/systemd/system/felis-watchdog.service runs them (config /etc/felis/felis.host.toml)
-
 ✓  configuration
 ✓  Kubernetes cluster
 ✗  PostgreSQL
@@ -44,1522 +44,534 @@ checks run as /etc/systemd/system/felis-watchdog.service runs them (config /etc/
 1 problem(s): 1 critical, 0 warning(s)
 ```
 
-发现问题时退出 1，否则 0，可用于脚本。它不发邮件、不发送心跳、不改变看门狗状态；告警由下次正式巡检按 §14 的延迟发送。缺少或无法读取 unit 本身就是严重问题，随后使用默认配置检查。[GO-TESTED: `TestDoctorReportsByArea`, `TestDoctorMailsPingsAndSavesNothing`, `TestDoctorWithoutUnitOrConfig`, `TestUnitFindings`, `TestPrintDoctorReport`]
+发现问题时命令以状态码 1 退出，否则以 0 退出，可用于脚本。该命令不发送邮件，也不改变看门狗的状态；看门狗按自身的周期发送未关闭的告警。各项检查的说明见[监控与告警](/operations/monitoring#diagnostics)。
 
-**`sudo felis support-bundle`** 创建 `/var/lib/felis/support/felis-support-<host>-<time>.tar.gz`，权限 0600，`-o DIR` 可改目录。内容包括 `status.txt`、`doctor.txt`、发布版、无凭证的配置摘要、unit/定时器、`df`、地址/内存、`/etc/felis` 文件名（无内容）、Felis/k3s 日志（默认 `-since 48h`、`-log-lines 2000`）、节点/卷/服务器，以及控制平面、构建、服务器命名空间的 Pod、Deployment、StatefulSet、Job、CronJob、Service、PVC、网络策略和事件。收集控制平面及构建容器日志尾部，重启过的也收集前次日志。游戏服默认仅收集 initContainer 日志；其主日志含玩家名、IP、聊天，须显式 `-server-logs` 才加入。
+### 生成支持包 {#create-support-bundle}
 
-诊断包排除全部 Secret、ConfigMap、配置文件内容、数据库和世界。收集内容会脱敏主机机密文件中的值（`secrets.env`、`offsite.env`、邮件/上传密钥、心跳 URL、转发密钥、代理及 k3s 令牌）、数据库密码、Pod/服务器环境变量、URL 密码、私钥、`Bearer`/`Basic` 凭证，以及 `password=`、`token=`、`secret=` 等日志值。`MANIFEST.txt` 列出已收集、已脱敏及未能收集的内容。**发送前务必检查诊断包**：规则不认识的日志格式可能仍含机密。[GO-TESTED: `TestSupportBundle` 在各来源植入 25 个机密并确认全部移除，`TestSupportBundleWithTheClusterDown`, `TestSupportBundleServerLogs`, `TestScrubber`]
+向他人求助时，请附上支持包：
 
----
-
-## 1. 服务器卡在 `Starting`，无法进入 `Running` {#_1-server-is-stuck-in-starting-and-never-becomes-running}
-
-启动未成功时，每 2 秒重新协调，直到启动或就绪时限耗尽并进入 `Failed`。Pod 未通过 TCP 就绪为 `StartupTimeout`，RCON 探测未成功为 `ReadinessTimeout`。`spec.startup.timeoutSeconds`、`spec.startup.readinessTimeoutSeconds` 未设置或为 0 时默认均为 **300 秒**，且都从 `status.startRequestedAt` 计算。[GO-TESTED: `TestReconcileRunning_StartupTimeoutConvertsToFailed`, `TestReconcileRunning_ReadinessTimeoutConvertsToFailed`]
-
-偶尔看到 `Starting` 正常，单次探测失败不能让阶段反复变化（`TestReconcileRunning_RconProbeFailureStaysStarting`）。持续超过时限则可能根本未运行协调循环，先查看 operator 日志。底层原因应从 Pod 状态诊断。
-
-先读取条件原因：
-
-```
-kubectl get minecraftserver <name> -o jsonpath='{.status.conditions}'
+```bash
+sudo felis support-bundle
 ```
 
-`markStarting` 向 `Ready=False`、`RconReached=False` 写入相同原因：
+支持包写入 `/var/lib/felis/support/felis-support-<host>-<time>.tar.gz`，权限为 0600；`-o DIR` 可写入其他目录。支持包包含 `felis status` 和 `felis doctor` 的输出、不含凭据的配置摘要、Felis 单元及其日志（默认 `-since 48h`、`-log-lines 2000`），以及控制面、构建和服务器命名空间的状态、事件和近期日志。游戏服务器日志包含玩家名称、IP 地址和聊天内容，仅在指定 `-server-logs` 时收集。
 
-| 原因 | 含义 | 重试间隔 |
+支持包从不收集 Secret、ConfigMap、配置文件内容、数据库和世界，并从收集的全部内容中移除凭据。包内的 `MANIFEST.txt` 列出已收集的内容、已移除的内容以及未能收集的内容。
+
+::: warning
+发送支持包之前务必通读其内容。脱敏规则无法识别的格式中写出的机密会保留在支持包中。
+:::
+
+完整内容见[支持包](/operations/monitoring#support-bundle)。
+
+### 查看日志 {#logs}
+
+| 组件 | 命令 |
+| --- | --- |
+| 面板与 API（`felis-api`） | `sudo k3s kubectl -n felis logs deploy/felis-api` |
+| operator（服务器生命周期） | `sudo k3s kubectl -n felis logs deploy/felis-operator` |
+| 数据库 | `sudo k3s kubectl -n felis logs deploy/felis-postgres` |
+| 单台游戏服务器 | `sudo k3s kubectl -n minecraft logs <server>-0`，或面板中该服务器的控制台 |
+| 登录空间与大厅 | `sudo k3s kubectl -n minecraft logs login-0`、`sudo k3s kubectl -n minecraft logs lobby-0` |
+| 游戏代理（Velocity） | `sudo journalctl -u felis-velocity` |
+| 看门狗 | `sudo journalctl -u felis-watchdog` |
+| 从面板发起的主机操作 | `sudo journalctl -u felis-node-control` |
+| k3s | `sudo journalctl -u k3s` |
+
+为 `kubectl logs` 添加 `--tail=200`，或为 `journalctl` 添加 `-n 200`，即可只查看最近的日志。
+
+### 使用面板 {#panel-diagnostics}
+
+Owner 无需登录主机终端即可执行相同的检查：
+
+- 「维护与备份 → 状态」显示主机状态（`felis status`）和看门狗尚未关闭的告警。
+- 「维护与备份 → 诊断」包含「健康检查」卡片（`felis doctor`，选择「执行健康检查」）和「支持包」卡片（`felis support-bundle`，选择「生成支持包」；仅在问题涉及服务器时勾选「包含游戏服务器日志」）。支持包通过浏览器下载。
+
+每项主机任务都需要重新验证身份，并记入审计日志；同一时间只运行一项主机任务。面板无法连接主机时（例如 `felis-node-control` 已停止），请使用上述命令。全部操作及其命令行对应方式见[从面板执行主机操作](/operations/#panel-host-operations)。
+
+## 服务器 {#server-problems}
+
+### 服务器一直处于「启动中」 {#server-stuck-starting}
+
+面板长时间显示「启动中」，或玩家在大厅等待，始终未被传送到目标服务器。
+
+短时间处于「启动中」属于正常情况。启动未成功时，每 2 秒重新检查一次，直到两项时限之一耗尽，随后服务器进入「启动失败」（见[服务器显示「启动失败」](#server-failed)）。原本处于「运行中」的服务器连续三次就绪检查失败后，会回到「启动中」。
+
+**原因**
+
+就绪检查即一次 RCON 连接与登录：RCON 接受密码时，服务器即视为就绪。operator 将服务器尚未就绪的原因记录在其状态条件中：
+
+| 原因 | 含义 | 重新检查间隔 |
 | --- | --- | --- |
-| `PodNotReady` | `status.readyReplicas < 1`，Pod 尚未 TCP 就绪 | 2 秒 |
-| `SpecChanged` | 未就绪时 spec 改变，operator 按新模板重建 Pod（§1a） | 2 秒 |
-| `AutoRestart` / `StartRetried` | 自动或面板重试超时启动，重建 Pod | 2 秒 |
-| `ServiceAddressPending` | 客户端 Service 尚无 ClusterIP | 2 秒 |
-| `RconSecretUnavailable` | RCON 密钥缺失或格式错误 | 10 秒 |
-| `RconNotReachable` | RCON 连接或认证失败 | 2 秒 |
+| `PodNotReady` | 游戏 Pod 尚未开放游戏端口 | 2 秒 |
+| `SpecChanged` | Pod 未就绪期间服务器配置发生变化，operator 已按新配置重建 Pod | 2 秒 |
+| `AutoRestart` / `StartRetried` | 超时的启动已通过重建 Pod 重试，由系统自动发起或由「重试启动」发起 | 2 秒 |
+| `ServiceAddressPending` | 服务器的 Service 尚未分配集群地址 | 2 秒 |
+| `RconSecretUnavailable` | 存放 RCON 密码的 Secret 不存在，或缺少引用的键 | 10 秒 |
+| `RconNotReachable` | RCON 检查无法连接或无法登录 | 2 秒 |
 
-上述原因集合为 [GO-TESTED]。
+**排查**
 
-### 1a. `PodNotReady`：Pod 无法就绪 {#_1a-podnotready-—-pod-never-goes-ready}
+1. 在面板中打开该服务器的控制台。启动期间，控制台显示当前阶段（「正在等待资源与调度」「正在准备文件与拉取镜像」「正在启动 Minecraft 并检查就绪状态」）；启动受阻时显示原因：可调度内存不足、镜像拉取失败或容器退出。
+2. 读取条件原因及消息：
 
-operator 无法仅凭此原因区分**镜像损坏、PVC 未绑定、后端尚在启动**。[GO-TESTED] 覆盖信号发出；底层 Pod 原因属于 [INTEGRATION-ONLY]。进一步检查：
+   ```bash
+   sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.status.conditions}'
+   ```
 
-```
-kubectl get pod -l app.kubernetes.io/name=<name>
-kubectl describe pod <pod>     # look at Events + container State
-```
+3. 原因为 `PodNotReady` 时，检查 Pod 及其日志：
 
-- **`ImagePullBackOff` / `ErrImagePull`**：镜像引用错误、标签不存在或仓库不可达。operator 不校验 `spec.image`，直接写入容器。修正引用，或检查仓库和构建目标。即使已进入 `Failed` 且重试耗尽，修改 spec 仍可恢复：OrderedReady 不会滚动未就绪 Pod，因此 operator 自行删除旧模板的 `<name>-0`，StatefulSet 按新模板重建；阶段回到 `Starting`，原因 `SpecChanged`，重新计时并将重启预算归零，生成 `PodReplaced` 事件。[GO-TESTED: `TestSpecChangeReplacesAPodThatGaveUp`, `TestStalePodReplacement`]
-- **PVC `Pending`**：`kubectl get pvc -l app.kubernetes.io/name=<name>`。不存在的 `spec.storage.storageClassName` 或无法满足的容量使 PVC 无法绑定。operator 不直接报 spec 错误，除非容量字符串格式无效（§2）；应修正存储类或容量。[INTEGRATION-ONLY]
-- **就绪端口开放前反复崩溃**：检查容器日志，这是后端或入口脚本问题。
-- **卡在 `Init:`，或出现 `AccessDeniedException` / `Permission denied`**：无论镜像声明何种 `USER`，游戏 Pod 均以 uid/gid **1000**（`naming.GameUID`）运行并移除全部 capability。`prepare-data` initContainer 使用 root 和仅 `CHOWN`、`DAC_OVERRIDE` 执行 `felis init-volume`，将旧 root 版本或恢复 Job 创建的世界条目交给 1000:1000。`kubectl logs <pod> -c prepare-data` 显示修改数及最多 20 个失败项。若镜像向 `/data`、`/tmp` 之外、预置为 root 所有的目录写状态，须重构镜像，将状态放在 `/data`。[GO-TESTED: `TestBuildStatefulSetRunsGameAsNonRoot`, `TestChownTreeHandsOverMismatchedEntries`；真实卷遍历为 INTEGRATION-ONLY]
-- **每次启动最后一个 `Init:` 等约 30 秒**：`egress-gate`（`felis egress-gate`）等待 `felis-server-egress` 生效。kube-router 会在 Pod 启动后稍晚编程策略；无网关时，带服务器标签的 Pod 第一个请求曾能到达 API 内部接口。网关探测所有服务器都无权访问的 Kubernetes API Service，通常一秒内通过。检查 `kubectl logs <pod> -c egress-gate`：
+   ```bash
+   sudo k3s kubectl -n minecraft describe pod <server>-0
+   sudo k3s kubectl -n minecraft logs <server>-0
+   ```
 
-  ```
-  felis egress-gate: 10.43.0.1:443 is unreachable after 201ms (...); the egress lock is in effect
-  felis egress-gate: 10.43.0.1:443 still answers after 30s; starting anyway. ...
-  ```
+4. 服务器停留在「启动中」的时间超过时限，却始终未进入「启动失败」时，说明 operator 未在处理该服务器。查看 operator 日志：
 
-  第二行表示整个等待期间探测都成功，可能 CNI 不执行 NetworkPolicy、k3s 使用 `--disable-network-policy`，或 `--server-egress-allow-cidr` 覆盖了 API Service 后面的节点，从而同时允许节点 PostgreSQL、Kubernetes API。缩窄 CIDR。游戏网关超时后警告并放行，而构建网关会拒绝。[GO-TESTED: `TestBuildStatefulSetGatesEgress`, `TestEgressGateFailOpenWaitsThenWarns`；k3s 实测：无网关时首请求到达 `felis-api-internal:8081`，有网关的三个 Pod 经约 200 ms 等待后首请求被拒；无策略选择的 Pod 在设定的 5 秒后警告并启动。]
-- **StatefulSet/Job 出现 `FailedCreate … violates PodSecurity "baseline"`**：安装清单令 minecraft 命名空间强制 baseline（`pod-security.kubernetes.io/enforce=baseline`）。Felis 渲染的资源满足它；被拒的 Pod 通常由外部修改或创建，包含 hostPath、hostPort、privileged、额外 capability。`kubectl get events -n minecraft --field-selector reason=FailedCreate` 显示字段。[GO-TESTED: `TestObjects_MinecraftNamespaceEnforcesBaseline`]
+   ```bash
+   sudo k3s kubectl -n felis logs deploy/felis-operator --tail=200
+   ```
 
-### 1b. `RconSecretUnavailable`：RCON 密钥缺失或格式错误 {#_1b-rconsecretunavailable-—-rcon-secret-missing-or-malformed}
+**解决**
 
-探测从 `spec.rcon.secretRef` 读取密码，消息直接显示原错误。这些分支为 [CODE-ONLY]：
+原因为 `PodNotReady` 时，根据 `describe pod` 的输出处理：
 
-- `rcon.secretRef.name and .key are required when rcon is enabled`：启用 RCON 但未填写 Secret 名或键。
-- `secret "<name>" has no key "<key>"`：Secret 存在但没有对应键。
+| 现象 | 原因 | 解决办法 |
+| --- | --- | --- |
+| Pod 为 `Pending`，事件显示 `Unschedulable` 或内存不足 | 节点可用内存不足 | 降低该服务器的内存配置、停止其他服务器或增加容量 |
+| `ImagePullBackOff` 或 `ErrImagePull` | 镜像引用错误、标签不存在或镜像仓库不可达 | 修正镜像，见[游戏镜像](#game-images)和[镜像仓库错误](#registry-errors)。即使服务器已启动失败，修改服务器配置即可恢复：operator 会替换卡住的 Pod，服务器回到「启动中」，原因为 `SpecChanged`，时限重新计算，重试次数归零 |
+| 存储卷声明为 `Pending`（`sudo k3s kubectl -n minecraft get pvc`） | 存储类不存在，或没有存储类能提供所请求的容量 | 修正存储类或容量 |
+| 游戏端口开放前容器反复重启 | 服务端程序、插件或启动脚本出错 | 查看容器日志，修正服务器配置、插件或镜像 |
+| 卡在某个 `Init:` 步骤，或日志中出现 `AccessDeniedException` / `Permission denied` | 游戏服务器以 uid/gid 1000 运行，并移除全部 capability。每次启动前，`prepare-data` 初始化容器将世界文件交给 1000:1000 | 查看 `sudo k3s kubectl -n minecraft logs <server>-0 -c prepare-data`：输出修改的条目数，并列出最多 20 个未能修改的条目。在 `/data`、`/tmp` 之外写入数据的镜像须重新构建，将状态保存在 `/data` 下 |
+| 每次启动都在最后一个 `Init:` 步骤等待约 30 秒 | `egress-gate` 初始化容器等待服务器的网络隔离生效 | 查看 `sudo k3s kubectl -n minecraft logs <server>-0 -c egress-gate`。`is unreachable after …; the egress lock is in effect` 为正常结果。`still answers after 30s; starting anyway` 表示网络策略未生效（CNI 不支持 NetworkPolicy，或 k3s 以 `--disable-network-policy` 启动），或者允许游戏服务器访问的私网范围（`--server-egress-allow-cidr`）覆盖了节点。请将该范围缩小到服务器实际需要访问的主机 |
+| `FailedCreate … violates PodSecurity "baseline"` | `minecraft` 命名空间强制执行 `baseline` Pod 安全标准，被拒绝的 Pod 是在 Felis 之外创建或修改的 | 执行 `sudo k3s kubectl get events -n minecraft --field-selector reason=FailedCreate` 查看违规字段，并撤销该修改 |
 
-创建具有引用键的 Secret，或修正 `secretRef`，再验证：
+原因为 `RconSecretUnavailable` 时，消息会指明问题：
 
-```
-kubectl get secret <secretRef.name> -o jsonpath='{.data.<key>}' | base64 -d | wc -c
-```
+- `rcon.secretRef.name and .key are required when rcon is enabled`：已启用 RCON，但 `spec.rcon.secretRef` 中的 Secret 名称或键为空。
+- `secret "<name>" has no key "<key>"`：Secret 存在，但缺少该键。
 
-### 1c. `RconNotReachable`：RCON 连接或认证失败 {#_1c-rconnotreachable-—-rcon-dial-or-auth-failed}
+创建包含所引用键的 Secret，或修正 `spec.rcon.secretRef`。对于 Felis 创建且启用 RCON 的服务器，operator 会创建名为 `<server>-rcon` 的 Secret。确认该键有值：
 
-探测仅建立 TCP、完成 RCON 认证并立即关闭，**不会执行命令；认证成功就是就绪判定**。
-
-- `rcon: authentication failed`：Secret 与后端 `rcon.password` 不一致，应同步。[GO-TESTED] 覆盖映射。
-- `connection refused` / `i/o timeout`：端口尚未开放、`server.properties` 未启用 RCON，或镜像监听的不是 25575。CRD 的 `spec.rcon.port` 只允许该端口，见运维手册 §4。[INTEGRATION-ONLY]
-
-单次探测超时在 `prober.go:45` 固定为 5 秒；协调上下文更早截止时会缩短。它不是 `spec.startup.readinessTimeoutSeconds`，后者是整个启动的期限，见 §12。
-
----
-
-## 2. 服务器进入 `Failed` {#_2-server-is-in-failed}
-
-先检查条件原因。`InvalidSpec` 表示无法构建 StatefulSet，常见原因是 **`spec.storage.size` 不是有效资源容量**：
-
-```
-invalid storage size "<value>": <parse error>
+```bash
+sudo k3s kubectl -n minecraft get secret <secret> -o jsonpath='{.data.<key>}' | base64 -d | wc -c
 ```
 
-此时 `Ready=False`、`Provisioned=False` 均为 `InvalidSpec`。修正为 `10Gi` 等有效值，不能写 `10 GB`，下次协调即可离开此失败状态。[CODE-ONLY：该具体分支存在，协调测试通常使用有效容量。]
+原因为 `RconNotReachable` 时，消息为连接错误：
 
-启动和 RCON 就绪超时也会产生 `StartupTimeout`、`ReadinessTimeout`，见 §1；不能将所有 `Failed` 都当作 spec 错误。失败时 `markFailed` 不清除 `status.endpoint`，曾运行的服务器可能保留旧 `endpoint.mode=direct`。代理必须同时确认 `phase=Running` 才能直连，见 §4。
+- `rcon: authentication failed`：Secret 中的密码与服务器的 `rcon.password` 不一致，请使两者一致。
+- `connection refused` 或 `i/o timeout`：服务器尚未开放 RCON 端口、`server.properties` 中未启用 RCON，或镜像监听的端口不是 25575（`spec.rcon.port` 只接受该端口）。
 
----
+每次 RCON 检查的超时固定为 5 秒。整个启动过程的时限是另一项设置（见[服务器显示「启动失败」](#server-failed)）。
 
-## 3. 玩家无法进服或被传送到错误位置 {#_3-players-can-t-join-get-sent-to-the-wrong-place}
+operator 未在处理服务器时，先恢复 operator；相关告警见[监控与告警](/operations/monitoring#alerts)。
 
-路由来自 `status.endpoint`：只有 `markRunningReady` 在 `Running` 且 RCON 就绪时写入 `mode=direct`、游戏地址；`markStarting`、`markStopping`、`markStopped` 均写 `mode=fallback`、`address=spec.fallbackServer`。因此只有 `Running` 才能直连。[GO-TESTED] 覆盖 direct/fallback 切换。
+### 服务器显示「启动失败」 {#server-failed}
 
-1. `spec.fallbackServer` 为空时，启动、停止期间没有回退目的地，须设为已注册的 Velocity 服务器名称。
-2. `Failed` 后可能残留 direct，代理不能只看 endpoint，见 §2。
+面板显示「启动超时·重试中」或「启动失败」。尝试加入的玩家看到 `「<server>」启动失败，自动重试也已用完。服主可以在面板查看日志后重新启动。`。看门狗会报告启动失败的用户服务器。
 
-### 3a. 进服唤醒被拒绝、缓慢或受到限流 {#_3a-wake-on-join-is-refused-slow-or-rate-limited}
+**原因**
 
-加入已停止服务器时，代理将玩家放在回退服并调用内部唤醒 API。检查顺序是 **autostartPolicy → 每服冷却 → 全局运行上限**。
+| 原因 | 含义 |
+| --- | --- |
+| `StartupTimeout` | Pod 未在 `spec.startup.timeoutSeconds`（默认 300 秒）内开放游戏端口 |
+| `ReadinessTimeout` | RCON 未在 `spec.startup.readinessTimeoutSeconds`（默认 300 秒）内接受密码 |
+| `InvalidSpec` | 无法构建服务器的工作负载，通常因为 `spec.storage.size` 不是有效的容量值：`invalid storage size "<value>": <parse error>` |
 
-| HTTP | 错误码 | 原因 | 处理 |
+两项时限都从发起启动的时刻开始计算，未设置或设为 0 时均为 300 秒。
+
+超时后，operator 通过重建 Pod 重试启动，最多 3 次，每次分别在时限届满后等待 1、2、4 分钟再尝试。在此期间，面板显示「启动超时·重试中」及已使用的重试次数，加入的玩家会排队等待下一次尝试。重试次数用完后，或原因为 `InvalidSpec` 时，服务器保持「启动失败」，直到有人处理；玩家加入不会触发新的尝试。
+
+**排查**
+
+1. 在面板中打开该服务器的控制台，查看启动日志和报告的错误。
+2. 读取状态条件：
+
+   ```bash
+   sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.status.conditions}'
+   ```
+
+3. 原因为超时时，按[服务器一直处于「启动中」](#server-stuck-starting)排查：原因相同，只是问题修复前时限已经耗尽。
+
+**解决**
+
+1. 修复原因：镜像、内存、配置或 RCON。
+2. 在服务器控制台选择「重试启动」。该操作将重试次数归零，并立即重新启动服务器。修改服务器配置同样会替换卡住的 Pod。
+3. 原因为 `InvalidSpec` 时，将 `spec.storage.size` 设为 `10Gi` 等有效值（`10 GB` 无效）。下次协调时服务器即离开失败状态。
+4. 服务器能够正常启动、但需要超过 300 秒时（例如大型整合包），在服务器资源上调大 `spec.startup.timeoutSeconds` 和 `spec.startup.readinessTimeoutSeconds`。
+
+### 服务器无法停止 {#server-wont-stop}
+
+选择「停止」后，服务器仍为「运行中」或「停止中」，或面板显示「状态已过期」。
+
+**原因**
+
+- **有玩家在线。** 停止有玩家的服务器之前，operator 向所有在线玩家发送一条黄色聊天提示，等待 30 秒，发送最后一条提示，然后停止服务器并保存世界。30 秒内再次启动服务器会取消停止，并通知玩家。空服、未启用 RCON 的服务器，以及玩家数读取或提示发送失败的服务器会立即停止。
+- **不停服备份正在复制世界。** operator 等待复制结束后再关闭服务器，最长约六分钟。
+- **游戏正在保存。** Pod 退出前，服务器显示「停止中」；世界越大，耗时越长。
+- **面板无法连接控制 API。** 控制台将状态标记为「状态已过期」，显示最后一次读取的时间，并自动重试。此时显示的状态仅供参考；显示为启动中或运行中，不能证明游戏进程仍然健康。
+- **游戏进程或 operator 无响应**，普通停止无法完成。
+
+**排查**
+
+```bash
+sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.spec.desiredState} {.status.phase}{"\n"}'
+sudo k3s kubectl -n minecraft get pods -l felis.lolicon.best/server=<server>,felis.lolicon.best/component=server -o wide
+sudo k3s kubectl -n minecraft get events --field-selector involvedObject.name=<server>
+```
+
+出现 `StopNotice` 事件表示 30 秒提示期正在进行。
+
+**解决**
+
+1. 等待提示期和关闭时的保存完成。Pod 退出后，「停止中」变为「已停止」。
+2. 普通停止无响应时，Owner 在服务器控制台选择「更多操作 → 应急停止」，输入服务器名称并重新验证身份。应急停止先保存停止意图（`desiredState=Stopped`），再将服务器的 StatefulSet 缩容至零，绕过游戏的 RCON 和 operator。正常的终止宽限期照常适用，不删除任何世界，但游戏尚未保存的更改可能丢失。副本目标仍大于零，或游戏 Pod 仍在运行或退出时，面板显示「停止中」。缩容失败时，停止意图保持已保存状态，面板提示结果未确认。
+3. 控制 API 本身离线时，在控制台页面展开「主机侧应急停止步骤」，在主机上依次执行其中的命令。部署使用其他命名空间时，替换其中的 `minecraft`：
+
+   ```bash
+   sudo k3s kubectl patch minecraftserver <server> -n minecraft --type=merge -p '{"spec":{"desiredState":"Stopped"}}'
+   sudo k3s kubectl scale statefulset <server> -n minecraft --replicas=0
+   sudo k3s kubectl get pods -n minecraft -l felis.lolicon.best/server=<server>,felis.lolicon.best/component=server -o wide
+   ```
+
+4. 节点离线时，检查该节点及其容器运行时。Pod 仍在终止或所在节点不可达时，游戏进程可能仍在运行。
+5. 应急停止因权限错误失败时，应用当前的平台更新，更新会安装应急停止所需的权限（见[升级](/operations/upgrade#update)）。
+
+::: danger
+不要通过强制删除世界、Pod 或存储卷声明来解决控制连接丢失的问题。强制删除 Pod 不能证明游戏进程已经退出。
+:::
+
+### 服务器无人时不自动停止 {#idle-stop}
+
+从面板创建的服务器在无人在线 600 秒后停止，下次有玩家加入时唤醒。登录空间和大厅从不因空闲而停止。服务器无人在线却持续运行，或玩家数始终显示为 0，原因如下。
+
+**原因**
+
+- 「编辑服务器配置 → 空闲自动停服」设为「从不」。
+- 服务器创建于空闲自动停服成为默认设置之前，没有空闲设置。
+- 服务器未启用 RCON。玩家数来自 RCON 就绪检查执行的 `list` 命令；没有 RCON 时玩家数从未读取，始终为 0，空闲自动停服也不会执行。
+- 服务器的 `list` 回复格式无法识别，例如插件改写了 `/list`，或回复经过翻译。无法读取的玩家数视为未知，不会当作零：服务器继续运行，面板显示「在线人数读取失败，空闲停服已暂停。读取恢复后将继续判断。」，`PlayersCounted` 条件为 `False`，原因为 `ListUnreadable`。
+- 服务器就绪不足 3 分钟。在此期间玩家数为零不会开始倒计时，以免仍在进入的玩家被停服。
+- 不停服备份正在复制世界。复制期间 operator 不会因空闲停止服务器。
+
+**排查**
+
+```bash
+sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.spec.idle}{"\n"}{.spec.rcon.enabled}{"\n"}'
+sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.status.conditions[?(@.type=="PlayersCounted")]}'
+```
+
+在面板中该服务器的控制台执行 `list`，查看服务器的回复。Felis 可读取以下格式：
+
+- `There are 3 of a max of 20 players online`（原版、Paper、Fabric、Forge）
+- `There are 3/20 players online`（1.12 及 Bukkit）
+- `There are 3 out of maximum 20 players online`（EssentialsX）
+
+**解决**
+
+1. 在「编辑服务器配置」中将「空闲自动停服」设为 1 分钟到 24 小时之间的时长。
+2. 对于在空闲自动停服或 RCON 成为默认设置之前创建的服务器，执行系统服务器补全：`sudo felis converge` 为没有空闲设置的服务器设定默认值 600 秒，`sudo felis converge -user-rcon` 为旧用户服务器启用 RCON。启用 RCON 之前请阅读[系统服务器字段](#system-server-fields)：镜像没有 RCON 监听器的服务器启用后将无法启动。
+3. 恢复受支持的 `list` 回复，例如移除插件对该消息的改写或翻译。
+
+### 操作提示世界正被占用 {#world-busy}
+
+唤醒、恢复、备份、下载或文件修改返回 `409 maintenance_in_progress`，面板显示「世界正在执行恢复、备份、导出、文件下载、文件修改或回收操作。请等待操作结束后重试。导出和下载需等待浏览器完成传输。」；或面板显示「此操作需要修改世界卷，运行中的服务器独占挂载该卷。请先完全停止服务器。」（`409 not_stopped`）。
+
+**原因**
+
+同一时间只有一项操作可以占用服务器的世界。恢复、备份、世界下载或文件修改会占用世界，直到对应的 Job 完成；读取和列出文件不占用世界。世界被占用期间，该服务器的所有唤醒（来自面板或玩家加入）及其他世界操作都会被拒绝。operator 遵循同样的规则：不启动该服务器，`Ready` 条件显示 `MaintenanceInProgress`，直到 Job 结束。
+
+占用世界的可能是：
+
+1. 该服务器尚未完成的 Job：恢复、备份、文件修改，或在下载结束前的世界下载。
+2. 服务器上的准入锁 `felis.lolicon.best/maintenance=<kind>@<time>`，覆盖从准入操作到创建 Job 之间的间隙。felis-api 在此间隙中停止时，该锁最多两分钟后失效，下次唤醒会将其清除。
+3. 正在归档空闲世界的世界清理。它以 `reap@<time>` 写入同一把锁并每 30 秒刷新一次；拒绝消息中注明 `the idle-world reaper`，玩家加入触发的唤醒返回 `409 world_reclaiming`。
+
+面板已显示「已停止」却返回 `409 not_stopped`，说明游戏 Pod 仍在关闭并保存。
+
+**排查**
+
+```bash
+sudo k3s kubectl -n minecraft get jobs -l felis.lolicon.best/server=<server>
+sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.metadata.annotations}'
+sudo k3s kubectl -n minecraft get pods -l felis.lolicon.best/server=<server>
+```
+
+服务器的「备份与恢复」页面也会列出近期的备份、恢复和导出任务及其结果。
+
+**解决**
+
+1. 等待 Job 完成。确实卡住的 Job 会被其自身的时限（`activeDeadlineSeconds`）终止。
+2. 如需立即释放世界，删除该 Job：
+
+   ```bash
+   sudo k3s kubectl -n minecraft delete job <job>
+   ```
+
+   ::: warning
+   删除 Job 会丢弃其正在写入的内容。
+   :::
+
+3. 移除过期的准入锁：
+
+   ```bash
+   sudo k3s kubectl -n minecraft annotate minecraftserver <server> felis.lolicon.best/maintenance-
+   ```
+
+   移除 `reap@` 锁也会取消本次世界清理：世界清理保留该世界，次日再试（见[世界清理](/operations/backup#world-cleanup)）。
+4. 对于 `not_stopped`，待该服务器的 Pod 列表为空后重试。
+
+## 玩家与路由 {#player-problems}
+
+### 玩家无法进入服务器 {#players-cannot-join}
+
+每个新连接都先经过游戏代理（Velocity）和登录空间，再按玩家进入策略进入大厅或目标服务器。其中任何一步出错，玩家都无法进入。
+
+**原因**
+
+| 玩家看到的现象 | 原因 |
+| --- | --- |
+| 连接失败或超时 | 游戏代理未运行，或游戏端口不可达 |
+| `请先完成登录，再加入服务器。` | 玩家尚未在登录空间完成登录 |
+| `登录验证暂时不可用，请稍后重试。` | 代理无法连接 felis-api |
+| `大厅暂时不可用，请稍后再试。` | 大厅未运行，或未在代理中注册 |
+| `正在启动「<server>」——就绪后会自动把你传送过去。`，但始终没有传送 | 服务器未能就绪，见[服务器一直处于「启动中」](#server-stuck-starting) |
+| 提示服务器无法启动 | 唤醒被拒绝，见[进服唤醒被拒绝](#wake-refused) |
+| 玩家进入大厅而非目标服务器，或连接被拒绝 | 路由已禁用，或玩家进入策略将连接引向其他位置 |
+
+玩家看到的提示随游戏语言显示为中文或英文。等待服务器启动的玩家每分钟收到一条进度提示。felis-api 连续 120 秒无响应时，代理将等待中的玩家移出队列；无论如何，等待最长一小时。
+
+**排查**
+
+1. 执行 `sudo felis status`，查看游戏代理一行（`felis-velocity` 单元及游戏端口能否接受连接）以及登录空间和大厅的状态。
+2. 查看代理的状态和日志：
+
+   ```bash
+   sudo systemctl status felis-velocity
+   sudo journalctl -u felis-velocity -n 200
+   ```
+
+3. 查找 `Felis routing ready: rootDomain=…, login=…, lobby=…` 一行。出现以 `Felis routing DISABLED` 开头的行时，见[路由已禁用](#routing-disabled)。
+4. 代理日志中出现 `server list refresh failed` 或 `server list refresh still failing`，说明代理无法连接 felis-api，见[内部 API 错误](#internal-api-errors)。
+5. 检查登录空间和大厅：
+
+   ```bash
+   sudo k3s kubectl -n minecraft get minecraftserver login lobby
+   ```
+
+6. 在「平台设置 → 玩家进入」中检查玩家进入策略。
+
+**解决**
+
+1. 代理未运行时，执行 `sudo systemctl restart felis-velocity` 启动代理。持续失败时查看其日志。日志中出现较长的垃圾回收停顿或 `OutOfMemoryError` 时，需要更大的堆内存：在「平台设置 → 访问与安全」的「游戏代理」卡片中调大「内存上限」。代理随即重启，所有玩家断开连接。
+2. 玩家尚未完成登录时，按[玩家接入](/guide/players#joining)中的步骤操作并关联账号。
+3. 代理无法连接 felis-api 时，恢复 felis-api（见[面板操作报错](#panel-errors)）和内部 API（见[内部 API 错误](#internal-api-errors)）。
+4. 登录空间或大厅未运行时，按普通服务器处理：见[服务器一直处于「启动中」](#server-stuck-starting)和[服务器显示「启动失败」](#server-failed)。
+5. 检查玩家进入策略（见[玩家进入策略](/guide/players#entry-policy)）。进入方式为「按域名进入」且未设置默认目标时，要求网页登录的连接进入大厅，其余连接被拒绝。保存的更改在 15 秒内到达代理，并作用于新连接。
+
+### 进服唤醒被拒绝 {#wake-refused}
+
+玩家加入已停止的服务器时，代理让玩家等待，并请求 felis-api 唤醒服务器。felis-api 依次检查服务器的自动启动策略、每台服务器的唤醒冷却时间和运行服务器上限。只有 operator 的 RCON 检查成功后，服务器才视为就绪；代理每 2 秒查询一次服务器状态，就绪后将玩家传送过去。
+
+**原因与解决**
+
+| 返回 | 玩家看到的提示 | 原因 | 解决办法 |
 | --- | --- | --- | --- |
-| `403` | `forbidden` | allowlist 未包含 UUID，或 ownerOnly 且非所有者 | 加入 UUID、认领服务器，或设为 public |
-| `409` | `maintenance_in_progress` | 恢复、备份、文件修改占用世界卷（§3b） | 等待 Job 完成 |
-| `409` | `world_reclaiming` | 空闲回收器正在归档；之后释放服务器并清空世界 | 旧世界保留在归档，不会排队等待加入 |
-| `429` | 冷却限制 | 在配置的每服冷却时间内重复唤醒 | 等待冷却 |
-| `503` | `at_capacity` | 达到 `MaxRunningServers` | 停止其他服务器或提高上限 |
+| `403 forbidden` | `你无权启动「<server>」。` | 自动启动策略为「仅所有者」且玩家不是所有者，或为「唤醒名单」且玩家没有唤醒权限 | 在服务器的「唤醒名单」中授予该玩家唤醒权限、由所有者启动服务器，或在「编辑服务器配置」中修改策略（见[自动启动](/guide/servers#autostart)） |
+| `409 maintenance_in_progress` | `「<server>」正在维护（回档、备份或改文件），请稍后再试。` | 其他操作正在占用世界 | 等待操作完成，见[操作提示世界正被占用](#world-busy) |
+| `409 world_reclaiming` | `「<server>」闲置太久，世界正在归档回收，现在不能启动。` | 世界清理正在归档空闲世界，完成后服务器以空世界释放 | 旧世界保留在归档中，见[世界清理](/operations/backup#world-cleanup) |
+| `409 server_retiring` | `「<server>」已被放弃或正在删除，不能启动。` | 所有者已放弃该服务器，或管理员正在删除它；在下一次每日清理之前保持停止 | 在面板中撤销该请求，服务器即可再次启动 |
+| `409 start_failed` | `「<server>」启动失败，自动重试也已用完。` | 上一次启动失败，自动重试已用完 | 见[服务器显示「启动失败」](#server-failed) |
+| `429 cooldown` | 无提示，玩家继续等待 | 该服务器的唤醒已在进行中 | 无需处理 |
+| `503 at_capacity` | `集群当前已满——「<server>」暂时无法启动。请稍后再试。` | 已达到运行服务器上限 | 停止其他服务器，或提高上限 |
+| 其他返回 | `现在无法启动「<server>」。请稍后再试。` | 代理日志记录 `Felis: wake <server> failed (status=…)` | 查看代理日志，见[内部 API 错误](#internal-api-errors) |
 
-Owner 可在「平台设置」中修改运行服务器上限和唤醒冷却。保存的值无需重启即对全部 API 副本生效；运行上限同样作用于计划任务的启动。设为 0 即关闭对应控制。运行上限仅在准入时检查，不做原子预留：并发请求可能短暂超出上限，调低上限也不会停止已在运行的服务器。
+Owner 在「平台设置 → 玩家进入」的「启动与唤醒策略」卡片中设置运行服务器上限和唤醒冷却时间：
 
-标记为 Starting 的服务器未必已启动 Java。控制台现在读取 Pod 调度和容器状态：`Unschedulable` / 内存不足表示正在等待资源，镜像拉取失败和容器退出会显示各自的原因。容器能够产生日志后才接入日志。状态请求 12 秒内未完成时，最后一次视图标记为过期，显示最后成功读取的时间，并在轮询互不重叠的前提下重试。不要根据过时的 Starting 标签或已断开的日志流判断游戏是否就绪。
+- 「同时运行的服务器上限（0–10000）」：0 表示不限制。该上限适用于面板启动、游戏内唤醒和计划任务启动；系统服务始终可以启动。上限在准入时检查，因此并发请求可能短暂超出上限；降低上限不会停止正在运行的服务器。能否实际调度服务器仍取决于可用内存。
+- 「唤醒冷却时间（0–3600 秒）」：同一服务器两次被接受的唤醒请求之间的最短间隔；0 表示关闭冷却。
 
-[GO-TESTED: `handlers_internal_wake_test.go`、冷却及运行上限。] 就绪以 operator 的 RCON 探测为准，唤醒调用不代表已就绪；代理约每 2 秒轮询 `GET /api/v1/internal/servers/{name}/status`，`ready=true` 才传送。
+保存的值无需重启即对所有 API 副本生效。
 
-Java 插件对 403 提示无权启动；对维护和回收的 409 提示原因且不入队；429 重新排队；其他错误提示稍后再试。此消费端为 **[CODE-ONLY]**，Go 的 `authorizeWakeByUUID` 和冷却错误码经过测试，两部分应分别判断。
+### 路由已禁用 {#routing-disabled}
 
-### 3b. 唤醒、恢复、备份或文件修改返回 `maintenance_in_progress` {#_3b-wake-restore-backup-or-file-change-refused-with-maintenance-in-progress}
+玩家可以连接，但无法通过域名进入服务器，玩家加入时也不会唤醒任何服务器。代理日志中出现以下任一行：
 
-ReadWriteOnce 在单节点仍允许游戏 Pod 和恢复 Job 同时挂载，所以 API 按服务器串行化世界操作。恢复、备份、世界下载、文件修改占用卷，直到 Job 完成；期间唤醒和其他世界操作返回 `409 maintenance_in_progress`。文件读取和列表不占用。即使绕过 API 将 `desiredState` 改为 `Running`，operator 也不扩容 StatefulSet，`Ready` 显示 `MaintenanceInProgress`。
+```text
+Felis routing DISABLED: the proxy is in offline mode (online-mode=false). Domain autostart and the allowlist trust Mojang-verified UUIDs; refusing to route on spoofable identities. /link remains available. Set online-mode=true to enable routing.
+```
 
-依次检查：
+```text
+Felis routing DISABLED: no root-domain configured. Add 'root-domain=' to felis-link.properties (or set FELIS_ROOT_DOMAIN) to enable host-based routing. /link remains available.
+```
 
-1. 未完成 Job：带 `felis.lolicon.best/server=<name>`，managed-by 为 `felis-restore`、`felis-backup`；或 `felis-files` 且 files-mode 不是 list/read（§18）；或 `felis-export` 且 export-mode 不是 backup（世界下载，占用至下载结束，§10）：
+**原因**
 
-   ```sh
-   kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>
+- 唤醒、认领和唤醒名单信任经 Mojang 验证的 Minecraft 身份。离线模式的代理会接受伪造的身份，因此 Felis 插件拒绝路由。自动启动策略等服务器端设置无法使离线代理变得安全，这一检查由代理执行。
+- 插件没有根域名，因此没有可供路由的域名。
+
+两种情况下 `/link` 均可继续使用。
+
+**排查**
+
+```bash
+sudo journalctl -u felis-velocity | grep 'Felis routing'
+sudo grep -n 'online-mode' /opt/felis/velocity/velocity.toml
+sudo grep -n 'root-domain' /opt/felis/velocity/plugins/felis-link/felis-link.properties
+```
+
+**解决**
+
+1. 重新运行安装器（见[安装与部署](/guide/deployment#install)）。安装器管理这两个文件：在 `velocity.toml` 中写入 `online-mode = true`，在 `felis-link.properties` 中写入根域名，文件变化时重启代理。重启代理会断开所有玩家。
+2. 对于其他主机上的代理，在其 `velocity.toml` 中设置 `online-mode = true`，在其 `felis-link.properties` 中设置 `root-domain=<根域名>`（或设置环境变量 `FELIS_ROOT_DOMAIN`），然后重启代理。
+3. 确认代理日志中出现 `Felis routing ready`。
+
+根域名本身发生变化时，按[更改根域名](/operations/access#change-domain)操作。
+
+## 面板与登录 {#panel-problems}
+
+### 面板操作报错 {#panel-errors}
+
+API 以错误码和消息返回错误（`{"error":{"code","message","request_id"}}`），面板为常见错误码显示翻译后的提示。
+
+**原因**
+
+| 面板提示 | 返回 | 原因 |
+| --- | --- | --- |
+| 「会话已过期——请重新登录。」 | `401 unauthorized` | 没有有效会话。会话有效期为 12 小时；工作人员会话无操作 30 分钟后也会结束。在其他设备退出登录或撤销会话同样会结束会话 |
+| 「当前账户无权执行此操作。」 | `403 forbidden` | 账户角色不允许该操作，或在运维控制台以外请求了管理操作（见[管理页面返回 403](#admin-console-forbidden)） |
+| 「此操作需要近期身份验证。请使用 Passkey 或邮箱验证码重新验证身份。」 | `403 reauth_required` | 敏感操作要求在最近 5 分钟内验证过身份 |
+| 「登录服务当前不可用。」 | `503 auth_unavailable` | 会话存储 PostgreSQL 不可达 |
+| 「服务暂时不可用，请稍后重试。」 | `5xx` | felis-api 或其依赖的组件已停止或正在重启 |
+| 「操作失败，服务器出现内部错误。请联系管理员查看日志。请求编号：…」 | `500 internal` | 意外错误，详情仅记录在 felis-api 日志中 |
+| 「无法连接 Felis，可能由于网络中断或 Cloudflare Access 会话过期。…」 | 无响应 | 浏览器无法连接面板，或 Cloudflare Access 会话已过期 |
+| 「主机节点执行服务不可用。请检查主控上的 felis-node-control.service。」 | `503 node_control_unavailable` | 执行主机操作的服务已停止 |
+| 「节点维护正在执行，暂不允许启动服务器或创建另一项节点任务。」 | `409 node_operation_busy` | 有主机或节点任务正在运行。同一时间只运行一项任务；使控制面暂时不可用的任务（数据库恢复、整机重建、凭据轮换、域名迁移）运行期间，启动服务器的请求会被拒绝 |
+
+**排查**
+
+1. 内部错误：在 felis-api 日志中搜索面板显示的请求编号。日志行格式为 `api: <METHOD> <path>: unmapped error (request_id=<id>): <error>`：
+
+   ```bash
+   sudo k3s kubectl -n felis logs deploy/felis-api | grep '<request-id>'
    ```
 
-   真正卡住的 Job 由 `activeDeadlineSeconds` 终止。手动 `kubectl -n minecraft delete job <job>` 立即释放世界，但可能破坏正在写入的数据。
+2. 服务不可用：检查控制面：
 
-2. MinecraftServer 的准入注解 `felis.lolicon.best/maintenance=<kind>@<RFC3339>`，覆盖准入到创建 Job 的几毫秒间隙。API 此时崩溃，最多保留两分钟；下次唤醒清除过期锁。手动移除：
-
-   ```sh
-   kubectl -n minecraft annotate minecraftserver <name> felis.lolicon.best/maintenance-
+   ```bash
+   sudo felis status
+   sudo k3s kubectl -n felis get pods
    ```
 
-3. 空闲回收器（§10）无独立 Job，以 `reap@<RFC3339>` 注解占用世界，每 30 秒刷新。拒绝消息注明 `the idle-world reaper`。进程归档中崩溃后，锁在最后刷新两分钟后过期。手动去锁也会中止回收：删除世界前回收器检查锁，失去锁则保留世界，次日重试。
+3. 主机操作：检查主机服务：
 
-面板显示 `Stopped` 却返回 `409 not_stopped`，通常游戏 Pod 仍在终止并保存。等待 `kubectl -n minecraft get pods -l felis.lolicon.best/server=<name>` 无结果后重试。
+   ```bash
+   sudo systemctl status felis-node-control
+   sudo journalctl -u felis-node-control -n 100
+   ```
 
-停服后仍 `Running` 约 30 秒是玩家提醒窗口。目标状态改为 Stopped、RCON 未确认无人时，operator 通过 `tellraw @a` 发黄色提示，记录 `status.stopNoticeAt` 和 `StopNotice` 事件；30 秒 `StopNoticeWindow` 后发最后提示并缩容保存。窗口内再次启动会取消停服并通知玩家。空服、RCON 关闭、探测或广播失败时立即停止；无人自动停服不等待。
+**解决**
 
-[GO-TESTED: `internal/maintenance`, `k8scluster_maintenance_test.go`, `handlers_maintenance_test.go`, operator `maintenance_test.go`, `stopnotice_test.go`]
+- **会话已过期**：重新登录。会话只属于一个域名，在运维控制台登录不会同时登录玩家控制台。
+- **无权执行**：使用具有所需角色的账户（见[角色](/guide/administration#roles)），或按[管理页面返回 403](#admin-console-forbidden)打开运维控制台。
+- **需要身份验证**：使用 Passkey 或邮箱验证码确认身份后重新操作。
+- **登录服务不可用**：恢复数据库，见[数据库不可用](#database-unavailable)。
+- **服务不可用或内部错误**：查看 felis-api 日志，并执行 `sudo felis doctor` 查看各组件的状态。
+- **无法连接**：刷新页面；使用 Cloudflare Access 时重新登录 Access。面板的访问方式见[访问方式](/operations/access#access-methods)。
+- **主机节点执行服务不可用**：执行 `sudo systemctl restart felis-node-control` 重启该服务。
+- **节点维护正在执行**：等待当前任务完成。任务的阶段和日志显示在发起它的面板位置。
 
----
+### 管理页面返回 403 {#admin-console-forbidden}
 
-## 4. 服务器已启动但路由未启用（online-mode 联动） {#_4-routing-is-disabled-even-though-servers-are-up-online-mode-coupling}
+工作人员账户已登录，但管理页面和操作提示「当前账户无权执行此操作。」。
 
-唤醒、认领、白名单信任 **Mojang 验证的 online-mode UUID**。代理 `online-mode=false` 时身份可伪造，Velocity 插件拒绝启用路由：
+**原因**
 
-```
-Felis routing DISABLED: the proxy is in offline mode (online-mode=false).
-Domain autostart and the allowlist trust Mojang-verified UUIDs; refusing to
-route on spoofable identities. /link remains available. Set online-mode=true to
-enable routing.
-```
+Felis 根据请求的域名识别运维控制台：`admin_hostname`，默认为 `op.console.<根域名>`。裸 IP 地址只有在安装时明确指定的情况下才视为运维控制台：`<ip>.nip.io` 或 `<ip>.sslip.io` 根域名中内嵌的地址（`felis setup` 输出的本地面板地址），或设置为该地址的 `admin_hostname`。其他地址（包括回环地址）均按玩家控制台处理。因此，工作人员账户通过 SSH 隧道访问 `https://127.0.0.1:30443` 时，管理接口返回 403。
 
-[CODE-ONLY: `FelisVelocityPlugin.onProxyInitialize`。] `/link` 仍可绑定，但不会按域名自动启动。摘要显示 `routing: disabled (offline mode)` 或 `(no root-domain set)`。启用代理 online-mode，或按日志配置根域名。
+在运维控制台上，没有工作人员角色的账户发出的所有请求都会被拒绝，返回 403。
 
-`spec.autostartPolicy`、`spec.onlineMode` 只有在代理执行 `online-mode=true` 时才有相应身份保证；单独设置服务器字段不能使离线代理安全。
+**排查**
 
----
+将浏览器地址栏中的域名与「平台设置 → 访问与安全」中「访问方式与域名」卡片的「管理控制台域名」字段进行比较。
 
-## 5. Web 面板返回 401 / 403（零信任 / Cloudflare Access） {#_5-web-panel-returns-401-403-zero-trust-cloudflare-access}
+**解决**
 
-外部接口以登录生成的 `felis_session` Cookie 为凭证。Cloudflare Access 仅在边缘执行，API 不读取 `Cf-Access-Jwt-Assertion`；经其他方式到达源站的请求仍需登录，账号及角色始终来自 `users` 表。边缘设置通过 `felis_edge` nftables 将面板 NodePort 限于回环，流量经 cloudflared 到达，Access 位于管理控制台前方；可检查 `nft list table inet felis_edge`。错误结构为 `{"error":{"code","message","request_id"}}`。[GO-TESTED]
+1. 通过域名打开运维控制台。使用 SSH 隧道时，在本机 `/etc/hosts` 中添加一条记录，将该域名指向隧道的本地地址；脚本调用可使用 `curl --resolve`。
+2. 或者，在配置的 `[auth]` 段中将 `admin_hostname` 设为实际使用的 IP 地址（见[配置参考](/reference/configuration#felis-toml)）。
 
-- `401 unauthorized`：无有效会话 Cookie。
-- `403 forbidden`：已认证但无权限。例如 `IsAdmin()` 同时要求工作人员角色及访问管理控制台域名。
+### 无法登录 {#sign-in-problems}
 
-### 5a. 使用本地 IP 访问工作人员路由时返回 403 {#_5a-staff-routes-403-on-a-local-ip-url}
+**原因与解决**
 
-管理控制台按请求 host 识别，默认 `admin_hostname=op.console.<root_domain>`。裸 IP 仅在安装明确指定时算管理控制台：如 `<ip>.nip.io` / `<ip>.sslip.io` 内嵌的地址，或 admin_hostname 直接设置该 IP。其他地址包括回环均按玩家控制台处理，因此 SSH 隧道的 `https://127.0.0.1:30443` 即使登录工作人员也返回 403。应按域名访问，以 `/etc/hosts` 或 `curl --resolve` 指向隧道，或将 `[auth] admin_hostname` 设为实际使用 IP。[GO-TESTED]
-
-### 5c. 本地密码登录失败或被静默拒绝 {#_5c-local-password-login-fails-or-is-silently-rejected}
-
-本地会话使用 HttpOnly、Secure、SameSite=Lax、12 小时 TTL、仅当前主机的 `felis_session`。每请求实时读取 `platform_settings.local_auth_enabled`，缺失或不可解析均视为关闭。
-
-- `local auth disabled`：设置为 false 或缺失；即使已有 Cookie 也直接拒绝。
-- `invalid session: …`：会话哈希无效或伪造。
-
-确实需要本地密码认证时，设 `local_auth_enabled=true`。[GO-TESTED：会话及二维码登录逻辑。]
-
----
-
-## 6. 内部 API 拒绝 Velocity / 代理调用（服务令牌） {#_6-internal-api-rejects-velocity-proxy-callers-service-token}
-
-内部接口 `--internal-addr :8081`、`/api/v1/internal/...` 不使用零信任认证，而以 `Authorization: Bearer <token>` 恒定时间比较。各调用方独立持有令牌；每路由只允许 `docs/openapi.yaml` 的 `x-felis-callers` 列出的调用方。
-
-| 调用方 | Secret（键 `token`） | API 环境变量 | 调用方读取位置 | 路由 |
-| --- | --- | --- | --- | --- |
-| `velocity` | `felis/felis-service-token` | `FELIS_SERVICE_TOKEN` | 主机 `felis-link.properties` 的 `service-token` | 服务器列表、唤醒/认领/就绪/状态、加入事件、菜单、管理登录、迁移、重新认领、绑定码、黑名单 |
-| `limbo` | `felis/felis-limbo-token`，minecraft 有副本 | `FELIS_LIMBO_TOKEN` | 登录 Pod 的 `FELIS_SERVICE_TOKEN` | 绑定码、绑定状态、黑名单 |
-| `build` | `felis/felis-build-token`，felis-build 有副本 | `FELIS_BUILD_TOKEN` | 下载 initContainer 环境变量 | 投稿构建上下文 |
-| `ops` | `felis/felis-ops-token` | `FELIS_OPS_TOKEN` | 每次从 Secret 读取 | 应急备份 |
-
-安装器生成四项到 `/etc/felis/secrets.env`（`SERVICE_TOKEN`、`LIMBO_TOKEN`、`BUILD_TOKEN`、`OPS_TOKEN`），每次重跑应用。内部审计来源为 `internal:<caller>`。[GO-TESTED]
-
-内部 ClusterIP Service `felis-api-internal:8081` 与外部 NodePort `felis-api:443` 独立，防止内部接口暴露到节点。控制节点的应急控制台解析该 ClusterIP 并连接 8081。
-
-内部接口使用明文 HTTP。单节点时代理、登录 Pod、构建 Job 均在同节点，流量不离开主机；读取流量需要节点 root，root 本身也能读取磁盘令牌。网络策略只向登录 Pod（`felis-login-to-internal-api`）和构建 Job（`felis-build-egress`）开放；`felis-server-egress` 排除其他游戏服（含大厅）对私网及 8081 的访问。远程 Velocity 会将令牌放到网络上，所以代理应位于节点；跨主机内部调用需先建立相应传输保护。
-
-- **无法连接，非 401**：检查 `kubectl -n felis get svc felis-api-internal` 的 ClusterIP、8081、selector。普通 `felis-api` 仅提供 443。
-- **某调用方全部 401**：令牌缺失或与 API 不一致。启动日志按未设置项输出：
-
-  ```
-  felis api: warning: FELIS_LIMBO_TOKEN unset — the internal face turns the limbo caller away
-  ```
-
-  未设置令牌不会匹配任何值，也不会绕过认证。以代理为例检查：
-
-  ```
-  kubectl -n felis get secret felis-service-token -o jsonpath='{.data.token}' | base64 -d
-  ```
-
-- **`403 wrong_caller`**：令牌有效但属于其他调用方，例如构建令牌访问代理路由。按上表配置自己的令牌。
-- **API Pod `CreateContainerConfigError`**：felis 中缺少四个 Secret 之一。重跑安装器，它在部署清单前应用 Secret。
-- **两个令牌相同**：API 拒绝启动，提示 `the X and Y tokens are the same value; each caller needs its own`，应轮换其中一个。
-
-### 轮换令牌 {#rotating-a-token}
-
-`sudo felis rotate-token <kind>` 仅打印计划及中断影响；加 `-yes` 才轮换。始终先写 `/etc/felis/secrets.env`，后续失败时重跑安装器可将新值同步到各处。[GO-TESTED]
-
-| 类型 | 替换内容 | 中断影响 |
-| --- | --- | --- |
-| `velocity` | `felis-service-token`、主机代理文件的 `service-token` | API 重启数秒；代理重新读取文件，保留玩家 |
-| `limbo` | `felis-limbo-token` 及 minecraft 副本 | API 后登录 Pod 重启 |
-| `build` | `felis-build-token` 及构建命名空间副本 | API 重启；正在获取上下文的构建失败，可重新投稿 |
-| `ops` | `felis-ops-token` | API 重启 |
-| `registry` | platform/build/prune 写令牌，`felis-registry-auth`、`felis-registry-push` | 仓库后 API 重启；当时推送失败，拉取会重试 |
-| `forwarding` | `/opt/felis/velocity/forwarding.secret`、两命名空间的 `felis-forwarding-secret` | 运行中服务器保存并重启，代理重启，全部玩家断开 |
-| `db` | PostgreSQL 角色密码、两个主机/Pod 配置 URL、两命名空间的 `felis-config` | API 重启；此时连接的备份/恢复/文件 Job 可能失败，可重试 |
-
-- **velocity**：等待代理日志 `Felis: service-token reloaded from … (fingerprint <12 hex digits>)`。API 重启后 60 秒未出现时（旧插件），重启代理并断开玩家。保留文件修改时间，避免 domain check 误报过期。远程代理须手动将 `felis/felis-service-token` 值写入文件，数秒后读取。
-- **forwarding**：被备份、恢复或文件修改占用的服务器不会重启，计划及输出注明；玩家在其重启前不能加入，维护后手动停启。下次安装器还会重启代理一次，因为记录早于轮换；升级本来也因新 jar 重启。远程代理须更新 forwarding secret 并重启。
-- **db**：以 SCRAM-SHA-256 校验值传给 PostgreSQL，避免失败 SQL 记录明文。仅新密码连接成功后更新配置副本；失败则停止，重跑安装器按 secrets.env 恢复角色及副本一致。`[database] deployment` 未设置的外部数据库拒绝自动修改，须自行更改数据库及各 URL。`felis.pod.toml` 必须为独立文件，因为 Pod 使用不同地址。
-- API 或仓库重启后旧值失效；未更新的调用方会被拒绝。
-
----
-
-## 7. 账号绑定与认领 API 错误 {#_7-account-link-and-claim-api-errors}
-
-来自 `handlers_account.go`、`handlers_internal.go`。[GO-TESTED]
-
-| HTTP | 错误码 | 条件 |
-| --- | --- | --- |
-| `400` | `bad_request` | 缺少 mc_uuid、码为空，或 auth_source 不是 mojang/thirdparty |
-| `400` | `invalid_code` | 绑定码未知或超过十分钟有效期，码长 8 位 |
-| `409` | `already_linked` | MC UUID 已绑定**其他**用户 |
-| `412` | `not_linked` | 未验证绑定的调用方执行认领/所有者操作 |
-| `403` | `quota_exceeded` | 超过用户服务器配额 |
-| `409` | `already_claimed` | `UPDATE … WHERE owner_id IS NULL` 未影响行 |
-| `404` | `not_found` | 服务器或资源不存在 |
-
-绑定码在游戏内通过 `POST /api/v1/internal/account/link/code` 生成，证明 UUID；在 Web 外部接口 `POST /api/v1/account/link/verify` 验证，证明用户。`409 already_linked` 回滚事务并**保留绑定码**，其他用户仍可使用。认领在 READ COMMITTED 下用条件 UPDATE 保证竞争安全：影响 1 行为 200，0 行为 409。处理器通过内存替身测试；真实数据库边界的验证范围另见 [集成边界](/reference/deferred-seams)。
-
----
-
-## 8. 镜像构建失败（Kaniko，规范 §14/§16） {#_8-image-build-fails-kaniko-spec-§14-§16}
-
-### 8a. 提交构建推送时返回 `400` {#_8a-build-push-rejected-at-submission-with-400}
-
-构建前校验拒绝非内部仓库的推送目标：
-
-```
-must target the internal registry "<registry.<ns>.svc:<port>>", not "<your-target>"
-```
-
-修正镜像引用，指向 `cfg.Registry.URL`，见 §9。[GO-TESTED：validate 准入检查。]
-
-### 8b. 构建 Job 的 ServiceAccount 无操作权限（按设计拒绝 RBAC 访问） {#_8b-build-job-s-serviceaccount-can-do-nothing-rbac-denial-by-design}
-
-构建/恢复 Job 的 SA（felis-build 命名空间的 `felis-build`、`felis-restore`）在任何位置都**没有 Role 或 RoleBinding**。隔离依靠没有权限（规范 §16/§21）。命名空间 API 操作被拒是预期行为，不要为其授权。[GO-TESTED：渲染清单没有 Role。]
-
-### 8c. 构建卡住，随后拉取基础镜像或软件包失败 {#_8c-build-hangs-then-fails-fetching-base-image-packages}
-
-`felis-build-egress` 默认拒绝出站访问；包镜像 CIDR 通过 `--package-cidr` 显式放行，默认不配置互联网出口。[GO-TESTED] 覆盖策略结构。Kaniko 拉取未允许主机时卡住或失败是策略生效，具体日志来自 Kaniko/containerd，属于 [INTEGRATION-ONLY]。添加所需镜像 CIDR，或将基础镜像预存内部仓库。
-
-### 8d. 构建进入 `Failed` 阶段 {#_8d-build-reaches-failed-phase}
-
-`reconcileBuilds` 轮询 Job，并经 `writeBuildError` 将失败映射为构建 Failed。[GO-TESTED] 错误会指出失败步骤的末尾输出、期限或扫描结论。initContainer 顺序为 `egress-gate`、`context-fetch`、`kaniko`（仅构建 tar，不推送）、`trivy`（完整 JSON 报告）、`sbom`（转为 CycloneDX）、`scan-gate`（判断策略），最后运行 `push`。被扫描拦截的镜像不会进入仓库。检查各步骤：
-
-```
-kubectl logs -n felis-build job/<build-job> --all-containers --prefix
-```
-
-`push` 的 403 表示推送至平台保留的 `felis/`、`mirror/`（§9）；401 表示 felis-build 的 `felis-registry-push` 缺失或过期，应重跑安装器。
-
-**扫描准入**：漏洞或泄露机密的严重度包含于 `[registry] scan_fail_on` 时拦截，默认 `CRITICAL`。无修复版本的漏洞默认只列出；`scan_fail_unfixed=true` 才拦截，避免因无法升级清除的漏洞阻断。错误示例：
-
-```
-the scan blocked the image: 1 CRITICAL, 1 HIGH (CVE-2026-12345, CVE-2025-24813)
-```
-
-`HIGH` 需主动开启：平台 `felis/paper` 镜像的上游 paper.jar 含五项可修复 HIGH（内嵌 commons-compress 1.5、plexus-utils 3.5.1）。开启后，所有以它为基础的构建都会被阻止，除非在 `scan_accept` 中接受相关已知风险：
-
-```toml
-scan_fail_on = ["CRITICAL", "HIGH"]
-scan_accept = ["CVE-2021-35515", "CVE-2021-35516", "CVE-2021-35517", "CVE-2021-36090", "CVE-2025-67030"]
-```
-
-接受的 CVE、GHSA、其他公告 ID，或 `aws-access-key-id` 等机密规则 ID 不再阻断，但仍统计、列出，面板标为「已接受」，日志注明 ID。升级基础镜像时应重新审查此列表。
-
-API 保存已完成构建的结论、最多 100 个发现（拦截项优先）、完整 Trivy 报告和 SBOM。面板「构建流水线 → 扫描与日志」提供查看及下载；管理员 API：
-
-| 端点 | 返回 |
-| --- | --- |
-| `GET /api/v1/images/build/{id}/scan` | 结论和发现；扫描前停止或旧版未保存扫描时为 `404 scan_not_found` |
-| `GET /api/v1/images/build/{id}/scan/report` | `<id>-trivy.json` |
-| `GET /api/v1/images/build/{id}/sbom` | `<id>.cdx.json` |
-
-报告/SBOM 经 scan-gate 容器日志送达 API，每镜像压缩后合计最多 6 MiB。超过时先丢 SBOM，再丢报告，日志说明；下载返回 `404 scan_document_not_kept`，结论及发现始终保留。scan-gate 退出 2 表示报告缺失或不可读，构建按失败关闭并说明原因。
-
-扫描只反映构建当日漏洞库。已准入镜像不会因新 CVE 自动重扫；需用相同上下文发起新构建 `POST /api/v1/images/build`。数据库过旧时先 `felis mirror-build-tools -only trivy-db`，见 §8e。
-
-### 8e. 构建 Pod 无法启动：执行器镜像与扫描数据库 {#_8e-build-pods-never-start-executor-images-and-the-scan-dbs}
-
-构建运行 Kaniko、Trivy。Trivy 需要漏洞库，扫描 Java 产物（实际模组包均包含）还需 Java 库。构建命名空间无公网出口，因此四项都来自内部仓库 `mirror/`：
-
-| 工具 | 上游 | 副本 |
-| --- | --- | --- |
-| kaniko | `gcr.io/kaniko-project/executor:v1.24.0@sha256:4e7a52dd…` | `mirror/kaniko-executor:v1.24.0` |
-| trivy | `ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e…` | `mirror/trivy:0.74.0` |
-| 漏洞库 | `mirror.gcr.io/aquasec/trivy-db:2` | `mirror/trivy-db:2` |
-| Java 库 | `mirror.gcr.io/aquasec/trivy-java-db:1` | `mirror/trivy-java-db:1` |
-
-执行器按摘要固定（`internal/build/tools.go`），上游移动标签不会改变构建；数据库跟随标签。安装器执行 `felis mirror-build-tools` 复制四项，`felis-build-tools.timer` 每天 04:00、16:00 更新。三天无成功执行时看门狗警告；扫描仍然准入，但依据旧公告。
-
-| 症状 | 原因 | 处理 |
-| --- | --- | --- |
-| `mirror/kaniko-executor`、`mirror/trivy` 的 `ImagePullBackOff` | 首次复制未完成或安装时无外网 | 查看 `journalctl -u felis-build-tools -n 50`；可访问 gcr.io、ghcr.io、mirror.gcr.io 后执行 `sudo felis mirror-build-tools` |
-| `failed to download vulnerability DB` | 缺少 `mirror/trivy-db:2` | 同上 |
-| `the vulnerability DB was last refreshed … ago` | 定时任务因网络、仓库或磁盘失败 | 查邮件及 `/var/lib/felis/build-tools/status.json`，手动重试 |
-
-`-only trivy-db` 可只更新一项。复制仅包含节点架构，通过回环 hostPort，以 secrets.env 的 `platform` 令牌写入。
-
-**隔离网络节点**无法下载：在有网机器获取上述四项，通过 `kubectl -n felis port-forward svc/registry 5000:5000` 以 platform 推至 `localhost:5000/mirror/...`；密码来自 `kubectl -n felis get secret felis-registry-auth -o jsonpath='{.data.platform}' | base64 -d`。数据库须定期重复同步。定时器仍不可达上游时警告会保留，这是准确状态。
-
-**隔离网络中的平台镜像**：registry 和 PostgreSQL 按 `bootstrap.sh` 的 `REGISTRY_IMAGE`、`POSTGRES_IMAGE` 摘要运行。安装器从发布版 `felis-image-base-linux-<arch>.tar` 导入，缺少时拉取，再固定于 containerd，防止镜像 GC。最简方式是预拷发布版附件并用 `FELIS_ARTIFACT_DIR`（运维 §1）。无附件且提示 `could not pull …` 时，在有网机器按节点架构获取同一摘要，保留清单后导入：
-
-```sh
-# elsewhere: the reference as bootstrap.sh names it, e.g. docker.io/library/postgres:18.6-trixie@sha256:…
-sudo ctr images pull --platform linux/arm64 "$ref"
-sudo ctr images export --platform linux/arm64 image.tar "$ref"
-# on the node:
-sudo k3s ctr images import image.tar
-```
-
-`docker save` 会重写清单，不能匹配 Deployment 的摘要。导入后重跑安装器，它会识别并固定镜像。[CODE-ONLY]
-
-**Kaniko 上游已于 2025 年 6 月归档**，最后版本 v1.24.0 不再获得安全修复。使用维护中的 fork 时，先复制到 mirror，再设置覆盖。其他 `[registry]` 键：
-
-```toml
-[registry]
-url = "registry.felis.svc:5000"
-build_namespace = "felis-build"
-kaniko_image = ""                  # empty: the mirror/ copy above
-trivy_image = ""
-trivy_db_repository = ""
-trivy_java_db_repository = ""
-scan_fail_on = ["CRITICAL"]        # §8d: severities that block; any case; empty = CRITICAL
-scan_fail_unfixed = false          # §8d: true blocks on vulnerabilities with no fixed release too
-scan_accept = []                   # §8d: vulnerability or secret rule ids accepted as known risks; never block
-build_cpu_limit = "2"
-build_mem_limit = "4Gi"
-build_disk_limit = "12Gi"          # §8f
-build_user_namespaces = "auto"     # §8f: auto | on | off
-build_runtime_class = ""           # §8f: e.g. "gvisor"
-max_concurrent_builds = 2          # §8f: 1-6; later builds queue
-user_uploads_max_bytes = "4Gi"     # every user's uploaded contexts together; 507 uploads_full past it
-context_max_bytes = "1Gi"          # one uploaded context; empty = 1Gi (sent in 32 MiB parts, so the Cloudflare edge's 100 MB body cap does not bind)
-```
-
-修改必须同时写 `/etc/felis/felis.host.toml`（主机 CLI）和 `/etc/felis/felis.pod.toml`（API Secret 的来源），两者仅数据库 URL 不同。向导从 Pod 文件重新渲染 Secret，仅用 kubectl 修改现有 Secret 会在重新配置时丢失。单独重启 Deployment 不够，Pod 挂载 Secret 而非主机文件。先重新渲染，再滚动 API：
-
-```sh
-kubectl -n felis create secret generic felis-config \
-  --from-file=felis.toml=/etc/felis/felis.pod.toml --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n felis rollout restart deployment/felis-api
-```
-
-未设置字段使用默认。Trivy 用 `--insecure` 访问内部 HTTP 仓库，读取不需凭证。仓库清理保留 API 解析的全部工具引用（§9）。
-
-### 8f. 构建隔离模型与残余风险 {#_8f-build-isolation-model-and-residual-risk}
-
-Dockerfile 的 RUN 在 Kaniko 容器中以 root 执行。Kaniko 是无守护进程构建器，**不是沙箱**；隔离来自外围 Pod：
-
-| 层级 | 作用 | 位置 |
-| --- | --- | --- |
-| 管理员审批 | 审批前不构建 | 投稿流程 |
-| 审阅字节绑定 | 绑定上下文 sha256；重传后审批失败，构建拒绝其他字节 | 投稿流程、fetch-context |
-| 弱权限身份 | felis-build SA，无 Role、不挂载令牌 | §8b |
-| 出站限制 | 仅集群 DNS、仓库、API 内部接口 | §8c |
-| 出站网关 | 首个 initContainer 等待策略生效 | egress-gate |
-| capability | 全部移除；Kaniko 仅取回 CHOWN、DAC_OVERRIDE、FOWNER 解包镜像 | jobspec |
-| seccomp | Pod 使用运行时默认策略，不允许 unshare、mount、keyctl、bpf 等 | jobspec |
-| 用户命名空间 | 开启后 Pod root 映射为节点无特权 UID | 下文 |
-| 沙箱运行时 | 可选 gVisor、Kata RuntimeClass | 下文 |
-| 凭证 | 仓库凭证仅在 push，服务令牌仅在 context-fetch | jobspec |
-| 扫描准入 | push 前按 scan_fail_on 判断；拦截或不可读报告不入库 | §8d |
-| 资源 | 各容器 CPU、内存、临时存储上限及执行期限；上下文最多 4 GiB 或 200000 条目 | jobspec、fetch-context |
-| 命名空间兜底 | felis-build-limits 为无上限容器设 1 CPU / 1 GiB 内存 / 1 GiB 磁盘；quota 允许 8 个运行 Pod、禁止 PVC | 部署清单 |
-| 并发 | max_concurrent_builds 默认 2、最高 6；其余 pending，按最早提交启动 | build.Builder |
-
-**审阅字节**：每次上传记录归档 sha256，审阅页显示。下载携带 `X-Felis-Context-Sha256`，存储字节不匹配则 API 中断。审批提交 `expected_digest`；审阅后重传返回 `409 context_changed`，须下载并重新审阅。构建固定已审批摘要，`felis fetch-context --sha256` 校验接收字节，不一致则在 Kaniko 前失败：
-
-```
-felis fetch-context: the context's sha256 is 3f…, the approved digest is 9a…: it changed after approval; refusing to build
-```
-
-面板使用同会话下载文件的摘要审批。若在 CLI 或其他浏览器审阅，则使用列表摘要，须与实际审阅文件的 `sha256sum` 比较。摘要记录机制前上传的投稿须重新上传才能审批。
-
-**出站网关**：CNI 在新 Pod 启动后稍晚编程策略。k3s/kube-router 的构建 Pod 最初约 0.7 秒曾可访问公网和 Kubernetes API。网关探测构建策略不允许的 Kubernetes API，拒绝连接后才结束，日志显示等待：
-
-```
-felis egress-gate: 10.43.0.1:443 is unreachable after 612ms (...); the egress lock is in effect
-```
-
-两分钟后仍成功则退出 1，构建失败，提示 `the build namespace's NetworkPolicy is not enforced`。应修复不支持策略的 CNI 或 `--disable-network-policy` 设置，不能关闭网关。
-
-**用户命名空间**：`hostUsers:false` 将 Pod UID 0 映射为节点非特权 UID 范围。需要 Kubernetes ≥1.33、containerd 2.x、支持节点文件系统 idmapped mount 的内核（上游 5.19+；RHEL/CentOS Stream 9 有回移）。默认 `auto` 让 API 启动时运行 `userns-probe-*` Job，仅成功运行后开启，日志：
-
-```
-felis api: build pods run in a user namespace (hostUsers: false)
-felis api: build pods run without a user namespace: this node cannot start a pod with hostUsers: false
-```
-
-`on` 强制开启，不支持的节点构建无法启动；`off` 始终关闭。
-
-**沙箱运行时**：`build_runtime_class` 可指定 gVisor（runsc）、Kata。RuntimeClass 必须已安装（`kubectl get runtimeclass`）且实测 Kaniko 可运行。gVisor 需要默认 overlay2 rootfs，虚拟机上 Kata 需要嵌套虚拟化；未安装验证时留空。
-
-**磁盘**：`build_disk_limit` 默认 `12Gi`，限制 Kaniko 可写层，并作为最大容器限制约束 Pod 总磁盘：上下文、解包基础镜像、镜像 tar。kubelet 在巡检中通过驱逐执行，越限后数秒内终止，describe 显示 Evicted。大模组包可提高，但节点空闲空间须超过上限。
-
-**残余风险**：没有用户命名空间或沙箱时，构建以容器 root 共用游戏服/控制平面的内核。seccomp 与 capability 限制移除常见逃逸方式，但剩余系统调用可达的内核漏洞仍可能影响整台单节点平台。管理员须审批前阅读 Dockerfile 并下载上下文。探测不支持用户命名空间的节点，可优先升级至支持 idmapped mount 的内核。
-
----
-
-## 9. 镜像仓库推送或拉取失败（规范 §15） {#_9-registry-push-pull-failures-spec-§15}
-
-仓库在控制命名空间或 `--registry-namespace` 下，Deployment、Service、PVC 均名为 `registry`。
-
-- **精确目标**：`registry.<ns>.svc:<port>`，端口来自 `--registry-port`，默认 5000，例如 `--felis-image registry.felis.svc:5000/felis:v1`。错误推送 URL 在构建准入返回 400（§8a）；运行时不可达（DNS/端口错误、PVC 未绑定、无默认 StorageClass）则产生推送或 kubelet 拉取错误，属于 [INTEGRATION-ONLY]。
-- **存储**：RWO PVC 默认 10Gi，首次安装用 `FELIS_REGISTRY_STORAGE`，清单生成用 `--registry-storage`，挂载 `/var/lib/registry`，不指定 storageClassName，使用集群默认类。无默认类则 Pending。k3s local-path 只是节点目录，不强制容量，实际通过下文清理限制。上传卷默认 `FELIS_UPLOADS_STORAGE=5Gi`，归档卷默认 `FELIS_BACKUP_STORAGE=10Gi`，行为相同；重跑保留现有 PVC 大小，变量不同则警告。
-- **上传上限**：单上下文 `context_max_bytes` 默认 1Gi，面板上传前检查。面板分片最多 32 MiB，暂存上传卷 `.parts/`，避开 Cloudflare 对超过 100 MB 请求体的 413；断线可从暂存长度恢复，24 小时未触碰则删除。暂存字节也计入预算。脚本整包 POST 仍受边缘 100 MB 限制。`s3:// user_uploads_context` 用 8 MiB 分片转发，任意大小上传只占 8 MiB 内存；S3 最多 10000 分片，约 78 GiB。
-- **总预算**：`user_uploads_max_bytes` 默认全用户合计 4Gi、每用户 2 GiB，卷须保留 10% 空闲；越限返回 `507 uploads_full` 或 `403 submission_quota_exceeded`。拒绝投稿的文件在判决后七天删除，已批准的保留供重建。
-- **未用镜像清理分两步**：API 每六小时删除无引用清单，日志 `registry prune finished … deleted=N`。保留白名单的标签/`:*`/摘要、服务器固定镜像、运行构建、控制平面、Kaniko/Trivy/数据库、最近 24 小时推送，以及各 felis/、mirror/ 仓库最新五个带标签构建。旧游戏构建须将版本标签加入白名单（§15b）。registry-gc sidecar 每日申请只读窗口，等待两分钟无写入，再运行 `registry garbage-collect` 清理无引用层。日志见 `kubectl -n felis logs deploy/registry -c registry-gc`。窗口内拉取正常，写入返回 503 和 Retry-After，安装器/构建推送等待；中途 gate 重启也保持只读至租约结束。立即清理可执行 `kubectl -n felis exec deploy/registry -c registry-gc -- rm -f /var/lib/registry/.felis-last-gc` 并重启 Pod。
-- **仓库卷丢失**：重跑安装器恢复平台镜像。异地复制开启时，`sudo felis offsite fetch-images` 按原摘要恢复缺失用户镜像，可中断重跑。没有镜像副本时，可从批准投稿的上下文重建；GET submissions/{id}/context 提供内容，列表保留 context_ref/image_ref，管理员调用 `POST /api/v1/images/build`。固定旧摘要的服务器在仓库缺少它时仍拉取失败，需选择新镜像（§15b）。
-- **节点拉取**：实测 containerd 直接访问 Service VIP 返回 Empty reply。Deployment 绑定 `127.0.0.1:<port>` hostPort，`/etc/rancher/k3s/registries.yaml` 将服务域名镜像到它。两部分必须同时保留，否则镜像 GC 后不能重新拉取。
-- **内存**：仓库上限 2Gi，高于其他控制 Pod 的 256Mi；实测 475MB 层推送曾使 256Mi 模板 OOM（审计 #46）。巨大层需要内存余量。
-- **写授权**：registry:2 只监听 Pod 回环；`registry-gate`（felis 镜像）持有端口和 hostPort。读取匿名，匿名 GET /v2/ 返回 401 Basic，以提示 Docker 推送时携带凭证。写入须 Basic 认证到 `felis-registry-auth`：platform 可写全部；build 通过 felis-build 中的 `felis-registry-push` 仅可写 felis/、mirror/ 之外，不能删除。Secret 缺失时仓库只读。令牌保存于 secrets.env；`sudo felis rotate-token -yes registry` 替换三个令牌并重启仓库及使用 prune 令牌的 API（§6）。
-- **连接范围**：`felis-registry-ingress` 仅允许 felis-build 命名空间；Kubernetes 始终允许节点本机的 containerd 拉取、hostPort 推送。游戏服无法访问（felis-server-egress）。
-- **GC 固定**：仓库自身的 registry:2 与 gate 的 felis 镜像不能依靠自己提供拉取。安装器在 containerd 标记 `io.cri-containerd.pinned=pinned`，防止 kubelet GC，检查 `k3s ctr images ls | grep pinned`。
-- **摘要固定**：仓库使用 `docker.io/library/registry:2.8.3@sha256:a3d8aaa6…`，安装器通过 `k3s crictl pull` 缓存。隔离节点须用 containerd export 保留摘要：有网机器以 identities.go 的完整摘要 R 执行 `ctr images pull --all-platforms $R && ctr images export --all-platforms registry.tar $R`；节点 `k3s ctr images import --all-platforms registry.tar` 后重跑固定。docker save 重写清单，不能匹配摘要。
-- **selector**：Service 仅选择 name + component=registry，有意不加 part-of=felis-control-plane，使 RCON peer 策略看不到仓库。不要增加该标签。
-
-仓库清单渲染为 [GO-TESTED]，真实服务为 [CODE-ONLY/INTEGRATION-ONLY]。
-
----
-
-## 10. 世界回收：误删与跳过备份（规范 §18） {#_10-world-reaper-false-deletes-and-skipped-backups-spec-§18}
-
-回收器是**每日执行一次的 CronJob 批处理**，不是 operator 控制器。有归档存储的安装都会创建它。未设置 `FELIS_WORLDS_HOST_PATH` 时，执行 `felis reaper --retention-only`，只删除过期备份、回读校验和清理归档，不检查服务器，摘要 `evaluated=0`；安装器提示 `idle-world retention is off`。重跑时设置世界根目录才启用世界回收。[GO-TESTED: `TestRunRetentionTouchesNoWorld`, `TestReaperCronJob_Gating`, `TestReaperCronJob_RetentionOnlyShape`]
-
-启用后，仅当 `now-last_active_at >15d` 才以 `inactive_15d` 回收。15 天在代码中固定，不能配置。`felis.toml [archive]` 可配置 `warn_before`、`retention`、`max_local_bytes`，手动备份的 manual_retention/keep/cooldown，以及定时备份的 scheduled_every/keep/retention。Owner 可在面板中覆盖其中除 `warn_before` 外的全部键（见下文「面板中设置的保留策略」）。
-
-### 备份包含哪些数据 {#what-a-backup-contains}
-
-备份打包服务器**整个 `/data` 卷**，包括世界、server.properties、插件/模组、配置、jar、库、日志、缓存，不只是 world 目录。恢复替换卷内容并移除备份后新增文件，因此也回滚配置和插件。默认 Paper 的库和缓存占主要大小，全新实例在世界增长前就约 170MB；不能只按世界文件规划归档 PVC。
-
-### 删除之前必须先备份 {#the-backup-before-delete-invariant}
-
-只有存在**已确认并写入数据库的备份**才删除世界，完整顺序有隔离 [GO-TESTED]：
-
-0. 归档前世界必须静止。目标仍为 Running 的服务器先改 Stopped，留待下次执行；仍在停止、游戏 Pod 仍存在、或被其他维护操作占用时也延后，计入 awaiting_stop，不算失败。停服后持有 §3b 的维护锁，贯穿归档和删卷。失去锁或无法刷新时在 DeletePVC 前中止。[GO-TESTED: `TestHoldWorldStopsARunningServer`, `TestHoldWorldWaitsUntilQuiet`, `TestReapLostHoldKeepsWorld`；实测首次执行停服，第二次在 reap 锁下归档删除。]
-1. `max_local_bytes>0` 时 ensureCapacity 优先按最旧顺序淘汰所有者手动备份，再淘汰已有确认异地副本的回收归档。已回收世界的唯一副本不会淘汰，直至 retention 到期。仍满则**保留世界**，计入 store_full。[GO-TESTED: `TestCapacityEvictionOrderSparesSoleCopies`；PG-TESTED: `TestManualBackupRationing`]
-2. `Archiver.Archive` 失败：保留世界及 PVC。
-3. 数据库 `InsertBackup` 失败：删除孤立归档，保留 PVC。
-4. 配置 offsite 桶时，还须 `felis offsite sync` 上传并设置 world_backups.offsite_at。否则记录 `world archived, kept until the archive's off-site copy is confirmed`，计入 awaiting_offsite，保留 PVC；复制后的每日执行复用归档再删除。[GO-TESTED: `TestReapWaitsForOffsiteCopy`]
-5. 锁仍持有时才执行 DeletePVC → ReleaseWorld → 审计 → 增加删除指标，再释放锁。
-
-复用归档（异地复制后的下一次，或归档后中断重试）前必须完整回读并核对写入时 sha256。摘要不匹配则标记损坏、禁止恢复、创建新归档；无法读取则保留世界待下次。[GO-TESTED: `TestReapReadsBackReusedArchive`, `TestReapReplacesCorruptArchive`, `TestReapKeepsWorldWhenReadBackFails`]
-
-缺少备份绝不会删除世界；配置桶后，仅有本地备份也不能删除。[GO-TESTED: `TestReapArchiveFailurePreservesWorld`, `TestReapInsertBackupFailurePreservesWorld`, `TestReapIdleWorldFullSequence`] awaiting_offsite 超过一天仍非零，检查 `sudo felis offsite status`（§16）。
-
-### 回收 Job 失败 {#a-failed-reaper-job}
-
-每次最后输出摘要：
-
-```
-felis reaper: evaluated=12 reaped=1 released=0 deleted=0 awaiting_offsite=0 awaiting_stop=0 warned=2 skipped=0 store_full=0 evicted=0 expired=3 expire_failed=0 verified=6 corrupt=0 verify_failed=0 swept=0 orphan_archives=0
-```
-
-released/deleted 分别计所有者或管理员释放、管理员删除的服务器，均先以 released 原因归档。skipped 计容量、归档、数据库或集群错误；豁免服、CRD 不存在的记录通常不计，待删除 CR 已消失但卷仍在则例外。store_full 是因存储满而保留的子集，expire_failed 是未能删除的过期备份。awaiting_stop 是尚未停妥留待下次的服务器，不使任务失败；持续数天可能有其他程序反复启动，或 Job 占用卷。
-
-每次还维护归档存储：
-
-- verified：回读匹配 sha256。每次最多校验十个过去一周未检查的归档，最早检查者优先。摘要不同或文件丢失计 corrupt，标记损坏并禁止恢复；无法读取计 verify_failed，下次重试。
-- swept：清除超过六小时的 `*.partial`。orphan_archives：无数据库记录指向的已完成归档，保留至 retention 到期；输出列出前几个路径。
-
-skipped、expire_failed、corrupt、verify_failed 非零，或清扫未完成，退出 1，Job 失败，世界仍安全。看门狗邮件提示 `world reaper Job … failed`，FelisWorldJobFailed 告警触发。Job backoffLimit 重试两次，重跑整个幂等批次。查看摘要前的错误：
-
-```sh
-kubectl -n minecraft logs job/<the failed felis-reaper-… Job>
-```
-
-反复失败的服每天保留并重试，因此 Job 每天失败直到修复；26 小时后还有 `the world reaper has not succeeded for …`。[GO-TESTED: `TestReportReaperRunFailsTheJob`, `TestExpiryFailureFailsTheRun`, `TestCapacityStillFullSkipsReap`]
-
-### 按需备份（立即备份） {#on-demand-backups-back-up-now}
-
-所有者的立即备份生成 manual，与世界和数据库位于同一存储和同一磁盘。已停止的服务器由 Job 直接归档世界卷；运行中的服务器执行不停服备份（下一节）。两种方式均受以下 `[archive]` 键或 Owner 在面板保存的值限制（见下文「面板中设置的保留策略」）：
-
-| 键 | 默认值 | 作用 |
-| --- | --- | --- |
-| `manual_retention` | `30d` | 手动备份到期时间；回收归档使用 retention |
-| `manual_keep` | `5` | 每服保留数量，每次完成删除旧备份，日志 removed older backup |
-| `manual_cooldown` | `10m` | 所有者每服每窗口一次；再次调用返回 `429 backup_cooldown` 和 Retry-After，0s 关闭 |
-
-已有备份达到 max_local_bytes 时，所有者收到 `507 backup_store_full`。管理员和应急控制台不受冷却及该总量上限，但任何调用方的 Job 都不能使归档文件系统空闲低于 10%，否则 `not enough free disk for the archive`。备份/恢复失败原因显示在备份页「最近操作」。[GO-TESTED: `TestBackupNow`, `TestCheckRoom`, `TestReaperConfigManualKeys`, `TestLatestJobsExplainsFailures`]
-
-### 不停服备份：备份运行中的服务器 {#live-backups-backing-up-a-running-server}
-
-备份运行中的服务器时，服务器保持运行。对运行中服务器的立即备份、运行中世界的定时恢复点（下文）、计划任务的备份（§19）以及 `felis backup-now` 均执行不停服备份。该方式参照 Proxmox VE 的 snapshot 模式，以游戏自身的存档机制代替文件系统快照：
-
-1. felis-api 仅对运行且就绪、世界未被其他操作占用（§3b）的服务器受理备份。它将冻结状态与世界锁一并记录在 MinecraftServer 上（注解 `felis.lolicon.best/live-backup`，记录备份 Job 及被冻结的游戏 Pod），因此备份中途重启的 felis-api 仍会完成该备份。
-2. 通过 RCON 关闭存档（`save-off`），并将内存中的全部数据写入磁盘（`save-all flush`，大型世界最多允许 2 分钟）。此后磁盘上的世界完整且保持不变。
-3. 备份 Job 的 initContainer（`felis stage-world`）将只读挂载的世界复制到同一节点上的暂存卷。文件系统支持时（XFS、Btrfs），每个文件以 reflink 克隆，无论世界大小，复制几乎瞬间完成。暂存卷的空闲空间小于世界占用空间时，复制拒绝开始。
-4. felis-api 每 2 秒检查一次，复制步骤退出后立即重新开启存档（`save-on`）。归档、sha256 计算和回读随后基于副本执行，游戏继续运行。
-
-玩家只在复制期间看到存档暂停，数 GB 的世界只需数秒。存档最多关闭 5 分钟：届时仍未完成的复制会被丢弃，存档重新开启。备份前已关闭存档的服务器，备份后仍保持关闭。冻结有以下代价：
-
-- 冻结期间崩溃会丢失刷写之后的变化，与两次自动存档之间发生崩溃的情况相同；冻结期间区块保持加载。operator 不会对被冻结的服务器执行无人自动停服；缩容前会在有限时间内等待冻结结束，避免停服时的存档落在复制过程中。
-- 复制途中重启的游戏会在停止时存档，其副本可能不完整，因此被丢弃。
-- 在存档机制之外写入的插件数据库（SQLite、H2）按复制时刻的状态复制，该时刻可能晚于刷写。
-
-除此之外，不停服备份与普通备份相同：相同的 Job，与上文相同的冷却、总量上限和保留数量，相同的 10% 空闲磁盘检查，审计操作为 `backup.create`（或 `backup.scheduled`），payload 含 `{"live":true}`。拒绝时说明原因：
-
-| 返回 | 原因 | 处理 |
-| --- | --- | --- |
-| `409 not_stopped`, `the server is starting or stopping; back it up once it is running or stopped` | 服务器处于状态切换中，既非运行且就绪，也非已停止 | 状态稳定后重试 |
-| `503 live_backup_console` | 游戏未通过控制台响应 `save-off` 或 `save-all flush`：RCON 关闭（RCON 成为默认值之前创建的用户服，§12b）或不可达（§1c） | 重试；或停服后再备份；或用 `sudo felis converge -user-rcon` 开启其 RCON（§12b） |
-| `409 maintenance_in_progress` | 其他操作占用世界、正在重启，或另一项不停服备份仍在复制 | 结束后重试（§3b） |
-| `409 not_stopped`, `stop the server before backing up its world` | 当前 felis-api 无法备份运行中的服务器（无控制台，或备份执行器不支持不停服备份） | 先停服 |
-
-[GO-TESTED: `TestLiveBackupFreezesCopiesAndThaws`, `TestLiveBackupLeavesSavingOffWhenItWasOff`, `TestLiveBackupUndoesAFailedStart`, `TestSettleLiveBackupDropsATornCopy`, `TestSettleLiveBackupKeepsTryingSaveOn`, `TestSettleLiveBackupRecoversAnUnrecordedJob`, `TestLiveBackupRefusesAServerInTransit`, `TestAcquireLiveBackupAdmitsOnlyARunningFreeServer`, `TestLiveBackupRecordLifecycle`, `TestLiveBackupProgressReadsTheCopyStep`, `TestBackupJobLiveCopiesBeforeArchiving`, `TestBackupLiveReturnsTheJobItCreated`, `TestStageWorldCopiesTheFrozenWorld`, `TestStageWorldRefusesWhatItCannotHold`]
-
-### 删除单个备份 {#deleting-one-backup}
-
-`DELETE /api/v1/backups/{id}` 立即使记录 expired、expires_at 设为当前时间，退出列表、恢复候选及 max_local_bytes 统计。管理员可删除任何备份；普通用户只能删除曾拥有世界的备份，否则 `404 no_backup`。仍有恢复 Job 读取或安全快照后尚待开始的恢复时，返回 `409 restore_in_progress`。审计 backup.delete 记录 ID、原所有者、大小。
-
-物理归档在下次每日 retention 执行删除，expired 无论 expires_at 均删除；异地副本在删除后的同步移除。此前管理员可从审计取 ID 撤销；清 offsite_at 可使已删异地副本重新上传：
-
-```sh
-sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c \
-  "UPDATE world_backups SET status = 'present', expires_at = now() + interval '30 days', offsite_at = NULL
-   WHERE id = '<backup id>' AND status = 'expired'"
-```
-
-[GO-TESTED: `TestDeleteBackup`, `TestExpiredBackupsDeleted`, `TestSyncExpiresOnlyPastRetention`；PG-TESTED: `TestOwnerDeletedBackup`]
-
-### 下载备份或导出世界 {#downloading-a-backup-or-the-world-export}
-
-备份行的 `POST /api/v1/servers/{name}/backups/{id}/export`、页首 `POST /api/v1/servers/{name}/world/export` 提供 tar.gz。备份权限与删除/恢复一致：管理员任意、用户只可下载曾拥有世界的备份，否则 404 no_backup；其他服务器备份为 403，损坏备份为 409 backup_corrupt。世界导出要求停服（409 not_stopped）、有卷（409 no_world_volume），下载结束前持维护锁。审计为 backup.export/world.export。
-
-没有额外暂存。服务器命名空间的 felis-export Job，以 export-mode world/backup 标签只读挂载世界或备份卷，用一次性令牌 PUT 至 API 内部接口，API 直接流式送浏览器。面板轮询 `GET /api/v1/exports/{ticket}`，ready 后打开 download URL。票据仅属于申请用户、只可下载一次：
-
-| 限制 | 时长 | 超时结果 |
-| --- | --- | --- |
-| Job 到达 API | 10 分钟 | `410 export_expired` |
-| ready 后浏览器开启下载 | 90 秒 | Job 上传收到 410，票据消耗 |
-| 传输中任一端无数据 | 2 分钟 | 切断下载 |
-| Job 总期限 | 2 小时 | Kubernetes 终止 |
-
-每用户最多一个、全平台两个并行导出，每用户每小时六次；越限为 `429 export_busy` 和 Retry-After。缺少 FELIS_IMAGE、FELIS_BACKUP_PVC 时为 503 export_unavailable，启动日志 world export disabled。
-
-备份下载携带长度并验证原 sha256。最后一块在校验前保留，不匹配则截断，浏览器显示失败，Job 返回 409 backup_corrupt；不会即时标记备份损坏，由回收器下次回读标记。世界导出无长度和摘要，读取失败同样截断。
-
-最近操作显示 Job 最后一行。到 API 前失败（如归档缺失）会结束面板等待；浏览器接管后可能出现：
-
-- `410 Gone: this export has expired …`：90 秒内未开启下载，可能关页或浏览器拦截。
-- `410 Gone: the download ended before the archive did …`：浏览器取消或中途断线。
-- `404 Not Found: no such export`：API 重启或票据到期。票据只在内存，重新发起。
-
-世界导出 Job 未到 API 时占用世界直至期限；`kubectl -n minecraft delete job -l app.kubernetes.io/managed-by=felis-export,felis.lolicon.best/server=<name>` 可立即释放。[GO-TESTED: `TestExportBackupGate`, `TestExportWorldGate`, `TestExportLimits`, `TestExportRendezvous`, `TestExportExpiry`, `TestExportStatusReportsFailedJob`, `TestExportRegistryRaces`, `TestExportBackupDigest`, `TestExportUploadPace`, `TestK8sExportJobs`, `TestExportJobIsolation`, `TestExportJobDefaults`, `TestCmdExportWorld`, `TestCmdExportBackup`, `TestCmdExportWiring`]
-
-### 同时备份所有世界：`felis backup-now` {#every-world-at-once-felis-backup-now}
-
-世界只存在卷中，异地存储仅保存归档。扩盘、独立盘迁移、主机迁移前（运维 §2、§5），先在节点归档全部世界：
-
-```bash
-sudo felis backup-now                    # the plan; nothing changes
-sudo felis backup-now -yes               # archive every world, one at a time; running servers live
-sudo felis backup-now -yes -stop         # stop the running servers first and leave them stopped
-sudo felis backup-now -yes alpha bravo   # only these servers
-```
-
-命令以 root 读取 ops 令牌（§6），逐服调用内部 API。每份仍是普通 manual 备份，相同 Job 和 10% 空闲检查，审计 backup.create 来源 internal:ops、执行 sudo 用户为 actor；免所有者冷却和 max_local_bytes 上限。
-
-- **计划**列出每台用户服务器的阶段及本次处理方式：`back up`（已停止）、`back up while it runs (saving pauses for the copy)`（运行且就绪）、`stop, then back up`（运行中且指定 `-stop`）、`skip: starting or stopping (run again later, or pass -stop)`、`skip: no world volume (never started, nothing to save)`。没有可归档项时以 `Nothing to back up.` 结束。
-- **运行中的服务器以不停服方式备份**（见上文「不停服备份」）：玩家保持在线，游戏仅在复制世界期间暂停存档。每个请求在游戏刷写世界且 Job 已创建后返回，大型世界最多需要 2 分钟。控制台无响应（RCON 关闭，§12b）的运行中服务器备份失败；可改用 `-stop` 备份，或先开启其 RCON。
-- **计入 manual_keep**：已到数量上限会删除最旧备份，计划提示；需要保留时先增加此值（或下文面板中的对应值）。
-- **先处理停服项**，确认 API 能备份后才停其他服，等待每 Job 完成再下一个。
-- **`-stop` 在备份前停止每台运行中的服务器**，即出现不停服备份之前每次运行的行为。玩家会断开，服务器保持停止（输出 `Left stopped: …`，须从面板启动）；正在启动或停止的服务器也一并处理。需要保证世界归档后不再变化时使用，例如迁移到另一主机前（运维 §5）。每次停服在审计日志写入 `break_glass.halt`。十分钟后仍未停止则计为失败，继续处理下一台。
-- **API 不可达即终止**，提示暂不能继续。Ctrl-C 在当前步骤后停止，已开始的 Job 继续完成。
-- 归档暂留节点，等待每小时异地同步；成功归档后打印 `sudo systemctl start felis-offsite.service`，可立即发送，status 查看待传内容。
-
-运行结束时输出统计（`3 backed up, 1 skipped (starting or stopping).`）。全部有卷世界均已归档时退出 0；备份失败、跳过正在启动或停止的服务器（未加 `-stop`）或运行被中断时退出 1；指定的名称不是用户服务器时退出 2。[GO-TESTED: `TestBackupNowPlanChangesNothing`, `TestBackupNowPlanWithNothingToSave`, `TestBackupNowBacksUpEachWorldInTurn`, `TestBackupNowBacksUpRunningServersLive`, `TestListBackupNowWorlds`, `TestBackupNowStopsAtAnUnreachableAPI`, `TestBackupNowStopsWhenInterrupted`, `TestBackupNowNamedServers`]
-
-### 定时备份（每日恢复点） {#scheduled-backups-daily-restore-points}
-
-每天游玩的世界不会空闲 15 天，因此 API 另生成 scheduled：自所有者最后一个完好定时备份以来有人进入，且已达到 scheduled_every，就生成备份。无需 worlds root，使用与手动相同的 Job，只需 `FELIS_IMAGE`、`FELIS_BACKUP_PVC`；缺少任一项时启动日志 `scheduled backups off (needs the backup executor)`。在 felis.toml 或面板中将 `scheduled_every` 设为 `0s` 即关闭恢复点；API 每次检查都重新读取该值，因此面板中的修改无需重启。
-
-| 键 | 默认值 | 作用 |
-| --- | --- | --- |
-| `scheduled_every` | `1d` | 最新定时备份的最小年龄，0s 关闭 |
-| `scheduled_keep` | `7` | 按服务器和所有者保留数量 |
-| `scheduled_retention` | `90d` | 到期时间 |
-
-- **运行中的世界以不停服方式备份**。已停止的世界直接归档；运行中的世界执行不停服备份（见上文），仅在复制世界期间暂停存档，因此全天运行的服务器同样获得每日恢复点。正在启动或停止、或世界被其他操作占用的服务器等待后续检查。游戏未响应控制台（上文 `live_backup_console`）的服务器在 `scheduled_every` 的四分之一后重试。
-- **集群同时一个**。每两分钟检查，无备份/恢复 Job 时启动，尚无恢复点者优先。期间世界被占用，玩家唤醒已停止的服务器时收到维护提示，完成后重试。
-- **存储满暂停**。达到 max_local_bytes 不启动，日志 scheduled backups paused/resumed 各一次；10% 空闲检查仍生效。
-- **失败重试**间隔为 scheduled_every 的四分之一，默认六小时，最近操作显示定时备份。
-- **按所有者计数**。前所有者的归档不算新所有者恢复点，新所有者也不清理它。所有原因的保留数量均按备份所有者限制。
-- 审计 backup.scheduled，actor scheduler，不启动 manual_cooldown；与 manual 一样异地复制、受 max_local_bytes 淘汰。
-
-[GO-TESTED: `TestBackupScheduler`, `TestK8sScheduledBackupJobs`, `TestBackupJobRecordsAScheduledBackup`, `TestBackupPolicyPerReason`, `TestReaperConfigScheduledKeys`, `TestBackupSchedulerTakesARunningWorldLive`, `TestScheduledBackupsFollowThePolicy`；PG-TESTED: `TestScheduledBackupCandidates`, `TestExcessBackupsPerOwner`]
-
-### 面板中设置的保留策略 {#retention-set-in-the-panel}
-
-Owner 可在面板「平台设置 → 备份与审计保留」卡片设置备份和审计的保留策略，代替 `felis.toml` 中的设置。这些值存于 `platform_settings` 的一行（`archive_policy`），每项覆盖 `[archive]` 或 `[audit]` 的对应键：
-
-| 面板字段（API 键） | 覆盖 | 取值范围 |
-| --- | --- | --- |
-| 手动备份：每台服务器保留份数（`manualKeep`） | `manual_keep` | 1–100 |
-| 手动备份：保留天数（`manualRetentionDays`） | `manual_retention` | 1–3650 天 |
-| 两次备份的最短间隔（分钟）（`manualCooldownMinutes`） | `manual_cooldown` | 0–1440（0：不限制） |
-| 定时还原点：间隔（小时）（`scheduledEveryHours`） | `scheduled_every` | 0–720 小时（0：关闭） |
-| 定时还原点：每台服务器保留份数（`scheduledKeep`） | `scheduled_keep` | 1–100 |
-| 定时还原点：保留天数（`scheduledRetentionDays`） | `scheduled_retention` | 1–3650 天 |
-| 已移除世界的归档保留天数（`releasedRetentionDays`） | `retention`，涵盖回收器写入的全部归档：闲置、释放和删除的世界 | 1–3650 天 |
-| 备份存储上限（GiB）（`maxStoreGiB`） | `max_local_bytes` | 0–1048576 GiB（0：不限制） |
-| 审计记录保留天数（`auditRetentionDays`） | `[audit] retention`（§17） | 0（保留全部记录），或 30–3650 天 |
-
-保存策略之前，卡片显示 felis.toml 的等效值，并按卡片单位取整（存储上限向上取整为整数 GiB）。felis-api 保存后立即应用，所有副本在 15 秒内生效；备份 Job 在启动时读取策略，回收器在下次每日运行时读取。`warn_before` 仍保留在 felis.toml 中。「恢复为安装时设置」清除该行，felis.toml 重新生效。该行无法读取时 felis.toml 继续生效：felis-api 日志 `felis.toml stands`，备份 Job 和回收器日志 `the panel's retention policy is unreadable, [archive] stands`。异地副本清理桶中无备份记录的对象（§16）时，等待当前生效的三项保留期中最长者；面板保存了策略时以面板中的值为准。
-
-保存和清除与其他敏感变更一样需要重新确认身份；卡片加载后策略已被修改时，保存返回 `409 conflict`。审计操作为 `platform.archive_policy` 和 `platform.archive_policy.clear`。API：`GET`、`PUT`、`DELETE /api/v1/settings/archive-policy`（Owner）。[GO-TESTED: `TestValidateBounds`, `TestFromConfigAndApplyRoundTrip`, `TestArchivePolicyRoutesAreOwnerOnly`, `TestArchivePolicyOverridesTheHostAndHandsItBack`, `TestArchivePolicyAsksForAFreshProof`, `TestBackupLimitsFollowThePolicy`, `TestScheduledBackupsFollowThePolicy`, `TestOffsiteSyncerSnapshotsAndSweeps`]
-
-### 豁免条件（世界不会被回收） {#exemptions-world-never-reaped}
-
-- `spec.reaperExempt=true`：完全跳过，如系统服。[GO-TESTED: `TestReapExemptServerNeverTouched`]
-- CRD 不存在：日志 reaper: CRD missing, skipping。
-- 空闲不超过 15 天：尚不符合条件。
-
-### 回收前提醒（`warn_before` 时间偏移） {#pre-reap-warnings-the-warn-before-offsets}
-
-有所有者的服在截止前三天/一天（archive.warn_before）通过 API 使用的同一中继向**已验证邮箱**发提醒：优先使用 Owner 在面板保存的中继（§17「面板中设置的邮件中继」），否则使用 `[smtp]`。回收器每次运行时从数据库读取面板中继 [CODE-ONLY]。warned_3d_at/warned_1d_at 仅记录成功投递：
-
-- 面板和 `[smtp]` 均未配置中继，或所有者无已验证邮箱：日志 warning suppressed/no warner wired 或投递错误，不写时间戳，配置中继后仍可发送。
-- 中继失败：日志记录，次日重试，直到回收移除候选。
-- warned 统计已投递，不统计尝试。
-
-使用 `[smtp]` 中继时，回收器在 minecraft 命名空间读取 felis-smtp、felis-config 的副本，secretKeyRef 不能跨空间。setup 邮件页刷新两个副本，安装后配置即可；仅改控制空间 Secret 不够。[GO-TESTED：已投递/重试/抑制矩阵；本地 SMTP 接收端实测完整流程。]
-
-向导还将密码存到权限 0600 的 `/etc/felis/smtp-password`，上传页将桶密钥存到 uploads-s3-access-key、uploads-s3-secret-key。重装或从备份 state 重建会从空 k3s 数据库开始，因此每次安装均从这些主机文件应用两空间的 felis-smtp 及 felis-uploads-s3。主机文件优先，手改 Secret 只保留至下次安装，应通过 setup 修改。早期安装在首次重跑从 Secret 导出主机副本。SMTP 有 username 却两处都无密码，或 s3 上传缺密钥时，安装器警告并提示对应向导页面。[SH-TESTED: bootstrap_test.sh 的迁移、主机优先、两警告及 kubectl argv 不含值；GO-TESTED：权限及替换。]
-
-### 实际存在的误删风险 {#genuine-false-delete-risk-vectors}
-
-- **last_active_at 过期**：内部 join-event 调用 RecordJoin 维持活跃。加入事件未送到 API，活跃世界仍可能在 15 天后符合回收条件，这是最关键检查（§3a）。真实写入为 INTEGRATION-ONLY。认领也重置时间并清 warned_*，重新认领获得完整 15 天；FreshBackup 只计认领后的 inactive_15d 归档，避免复用前所有者世界。[PG-TESTED: `TestReclaimRestartsReaperClock`]
-- **无所有者仍回收**：owner_id 为空不会预警，但 15 天后仍回收，需认领或豁免。[GO-TESTED: `TestReapUnownedServerStillReaped`]
-- DeletePVC 幂等，缺失 PVC 不算错误。
-- **空闲服卷已消失**：若有最近活动后的新回收归档，视为删除后中断，完成释放/审计/计数。无归档的无主服仅重置活跃时钟，避免每天重复计数；有主服因无世界可归档，只释放并审计一次。[GO-TESTED: `TestReapFinishesInterruptedReap`, `TestReapUnownedWithoutWorldRestartsClock`, `TestReapOwnedWithoutWorldReleases`]
-
-仅实现 TarLocal（tar+gzip），VolumeSnapshot/Longhorn 返回 not implemented in this build。真实 PVC 删除和 Postgres 存储路径为 INTEGRATION-ONLY。
-
-### 世界数据的读取位置（hostPath 解析） {#where-worlds-are-read-from-hostpath-resolution}
-
-CronJob 经静态 PV 将 worlds-host-path 只读挂在 /worlds：名称 felis-worlds-root-`<digest>`、hostPath 类型 Directory、Retain，预绑定 minecraft 同名 PVC。PodSecurity baseline 禁止 Pod 内联 hostPath。更换世界根路径或 reaper-node 会生成新摘要 PV/PVC，旧对保留但不使用，可手动删除，Retain 不删目录。
-
-resolveWorldDir 先查 `<root>/<pvc>`，再根据真实 PVC.spec.volumeName 查 `<root>/<pv-name>_<ns>_<pvc-name>`。不用 glob，避免将旧 PV 遗留目录误认为当前世界。默认 k3s 使用 `/var/lib/rancher/k3s/storage`。另外两项须由部署解决：
-
-- **权限**：回收 Pod 以 root + DAC_OVERRIDE 运行。根目录是 0700 root:root，游戏文件属 UID 1000 或旧版 root，Paper level.dat 为 0600。旧 UID 1000/ACL 方式无法遍历读取，会报 permission denied。安装器不再给游戏 UID 1000 存储根访问权。预期回收却保留世界时，先查看 ERROR 中 resolver 的 lstat 原因。
-- **节点**：多节点的世界只在卷所在节点。`--reaper-node` 同时固定 CronJob Pod 与 PV，单节点隐式固定。
-
----
-
-## 11. 无人自动停服不触发，玩家数一直为 0 {#_11-idle-auto-stop-never-fires-player-count-always-shows-0}
-
-面板或 `felis apply` 新建的服务器默认无人 600 秒后停服，下次加入唤醒。管理员在「编辑服务器 → 无人自动停服」修改或关闭。默认启用前创建的服没有 spec.idle，可用 `sudo felis converge` 补齐（§12b）。登录服和大厅无论 spec 如何都不自动停服。
-
-```sh
-kubectl get minecraftserver <name> -o jsonpath='{.spec.idle}'
-```
-
-自动停服和玩家计数都依赖 **spec.rcon.enabled**：
-
-```sh
-kubectl get minecraftserver <name> -o jsonpath='{.spec.rcon.enabled}'
-```
-
-RCON 就绪连接认证后运行 list，parseListReply 支持原版/Paper/Fabric/Forge 的 `There are 3 of a max of 20 players online`、1.12/Bukkit 的 `There are 3/20 players online`、EssentialsX 的 `There are 3 out of maximum 20 players online`（包含隐身玩家），移除 § 颜色码。禁用 RCON 则从未采样，永久 0 不代表无人。
-
-无法读取的计数是**未知**，不会当成零：
-
-```go
-if players.Known && server.Spec.Idle.AutoStopEnabled && server.Spec.Idle.EmptySecondsBeforeStop > 0 {
-```
-
-未知时 status.players 保留上次真实值，不启动或清除空服计时，PlayersCounted=False、ListUnreadable。只启用 idle 而关闭 RCON 不会生效；插件改写或翻译 list 的格式也会阻止自动停服：
-
-```sh
-kubectl get minecraftserver <name> -o jsonpath='{.status.conditions[?(@.type=="PlayersCounted")]}'
-# Reason ListUnreadable: run `list` in the server's panel console to see
-# what the server actually answers.
-```
-
-恢复支持的 list 回复，例如取消该插件覆盖或此消息翻译。游戏服继续运行，仅自动停服等待。两字段都有仍无效，若为探测失败，服务器应显示 Starting/RconNotReachable，见 §1。
-
-此路径曾有三项叠加缺陷，已在真实集群修复（auditfix21/22）：CRD 缺 status.emptySince 导致时间戳被裁剪、空闲服无 watch 事件重查计时、Role 缺 minecraftservers:patch。再次失效时按此顺序检查，每项已有测试：
-
-```sh
-# ① The stamp must persist — should print a timestamp, not an empty string,
-#    a few seconds after a server goes Ready with zero players.
-kubectl get minecraftserver <name> -o jsonpath='{.status.emptySince}'
-
-# ② The operator must be able to write spec.desiredState (403 in the operator
-#    log = missing patch grant on Role felis-operator).
-kubectl auth can-i patch minecraftservers -n <ns> --as=system:serviceaccount:<ctl-ns>:felis-operator
-
-# ③ A wake-up must be scheduled: while empty, expect whatever you set
-#    as emptySecondsBeforeStop to elapse and the box to flip to Stopped without
-#    any external action.
-```
-
-有玩家时 operator 每 30 秒重新探测，最后一人离开后在空服期限精确调度。空闲时日志安静正常，不必持续协调。回收器的 last_active_at 是独立的 Postgres 业务时钟，由加入事件刷新，只防世界回收，不负责停空服。
-
----
-
-## 12. 配置字段似乎没有生效 {#_12-a-configuration-field-seems-to-be-ignored}
-
-以下字段都有控制器读取，但须满足条件：
-
-| 字段 | 预期 | 实际 |
-| --- | --- | --- |
-| `spec.startup.timeoutSeconds` | 启动失败时限 | startupTimedOut，reconciler.go:479、:126；未设置/0 默认 300 秒，随后 StartupTimeout |
-| `spec.startup.readinessTimeoutSeconds` | 首次探测预算 | readinessTimedOut，:490、:157；默认 300 秒，随后 ReadinessTimeout；与单次连接的 5 秒不同 |
-| `spec.idle.autoStopEnabled` | 空服自动停止 | :175 分支，但必须启用 RCON 提供计数 |
-| `spec.idle.emptySecondsBeforeStop` | 空服宽限 | 同一分支，必须大于 0；0 表示关闭，不是立即停止 |
-
-两个启动期限都从 status.startRequestedAt 起算；就绪期限不是 Pod 就绪后额外获得的时间，而是 RCON 分支使用的整个启动截止时间。
-
----
-
-## 12b. 新字段未应用到已安装的系统服务器（`felis converge`） {#_12b-a-newer-field-never-reaches-an-already-installed-system-server-felis-converge}
-
-setup 按不存在才创建处理 login/lobby，只更新其管理的配置派生环境变量，不重写已有 spec。新字段因此可能永远缺失：大厅无 RCON，控制台失效且人数 0；登录服无 healthHTTPPort。converge 显式补齐零值字段和缺失派生环境键，不覆盖已有 RCON 引用或调优：
-
-```
-sudo felis converge
-```
-
-**先部署新镜像再运行**。旧镜像没有 RCON/HTTP 监听，启用探测会使其停在 Starting，最终 Failed，所以此命令不在每次 setup 自动执行。已最新的系统服显示 already converged。
-
-该命令也为从未设置 idle 的用户服添加无人 600 秒停止；管理员明确关闭的服仍有 duration，保持关闭，只有实际填充的服输出记录。
-
-旧用户服完全未设置 RCON 时，控制台、人数、自动停服均失效。普通 converge 只列出，不修改；`-user-rcon` 才添加当前默认配置，使用 operator 创建的 `<name>-rcon` Secret：
-
-```
-sudo felis converge -user-rcon
-kubectl -n minecraft get minecraftserver -o custom-columns=NAME:.metadata.name,RCON:.spec.rcon.enabled
-```
-
-这是显式选项，因为镜像必须根据 RCON_PASSWORD 打开监听。平台 paper/lobby 支持，用户自带镜像须先检查。有人明确设置过 RCON（开或关）的服不修改，新配置在下次启动生效。
-
----
-
-## 13. 删除 MinecraftServer 后世界 PVC 仍然保留 {#_13-world-pvc-survives-after-i-deleted-the-minecraftserver}
-
-这是预期行为。世界 PVC 来自 StatefulSet VolumeClaimTemplate，operator 明确设置 persistentVolumeClaimRetentionPolicy 在删除和缩容时均 Retain。没有 finalizer。删除 CR 会通过 ownerReference 回收 StatefulSet，保留 PVC；相同名称重建会挂载原世界。只有回收器在验证备份后删除世界卷（§10）。
-
-旧卷占用名称，新建返回 `409 world_volume_exists`，防止旧世界交给新所有者。查看失去服务器的世界卷：
-
-```
-comm -23 \
-  <(kubectl -n minecraft get pvc -l felis.lolicon.best/server -o jsonpath='{range .items[*]}{.metadata.labels.felis\.lolicon\.best/server}{"\n"}{end}' | sort) \
-  <(kubectl -n minecraft get minecraftservers -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)
-```
-
-回收名称前，若世界可能仍有价值，请先备份：
-
-```
-kubectl -n minecraft delete pvc world-<name>-0      # irreversible — the world is gone
-```
-
-spec.storage.retainOnDelete 曾在 CRD 中，但无人读取。冻结规范 v4.1 §5 要求「finalizer 清理 Service/StatefulSet/ConfigMap，PVC 按 retainOnDelete 处理」，两部分都未实现。该字段现已移除，本文记录与旧规范的明确差异。
-
-实现它会新增跳过回收器备份验证的删世界路径，而其他资源本已由 ownerReference GC 清理。旧 CR 携带该字段仍可使用，下次写入 API server 会裁剪未知键；保留行为不变，因为它从未取决于此字段。
-
----
-
-## 13b. 节点磁盘耗尽：保留哪些数据以及如何恢复 {#_13b-node-runs-out-of-disk-what-survives-and-how-to-recover}
-
-磁盘满会使 kubelet 驱逐游戏 Pod，再 GC 未使用镜像。镜像现在有内部仓库来源，释放空间后可自动重新拉取。
-
-**驱逐保护**：api、operator、reaper、registry 使用内置 system-cluster-critical（2e9）。kubelet 拒绝压力驱逐它们，日志 cannot evict a critical pod；默认优先级 0 的游戏服先被驱逐。磁盘剩 1.7G 的演练中 login/lobby 被驱逐，控制平面仍运行；修复前控制平面也会被驱逐。自定义 PriorityClass 上限 1e9，达不到关键阈值。内置类允许抢占，使无法调度的控制 Pod 可抢占游戏 Pod，确保管理面可部署。
-
-**压力解除延迟**：释放空间后 DiskPressure=True 可能保持约五分钟，默认 eviction-pressure-transition-period=5m 防抖。等待调度不是节点卡死。
-
-**镜像自动恢复**：压力下未用超过两分钟的镜像可能被 GC。平台镜像也在内部仓库，containerd 通过 registries.yaml 和回环 hostPort 重新拉取。删除卡住 Pod 可立即重试，也可等退避。
-
-若仍失败：
-
-1. `df -h /var/lib/rancher` 检查并释放空间，主要占用为 containerd 镜像及 storage 下的世界/备份。
-2. 检查 `kubectl -n felis get pods -l app.kubernetes.io/component=registry`，节点 `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5000/healthz` 应为 200，仅后方 registry:2 健康时返回。匿名 /v2/ 的 401 正常（§9）。
-3. registries.yaml 须将 registry.felis.svc:5000 映射到 http://127.0.0.1:5000。缺失或改动时重跑安装器，内容不同才重写并重启 k3s。
-4. 手建但未推送的镜像：启动 Docker，以 platform 登录（密码来自 felis-registry-auth 的 platform），再 `docker tag <ref> 127.0.0.1:5000/<repo>:<tag> && docker push 127.0.0.1:5000/<repo>:<tag>`。
-
-两处都无镜像时重跑安装器重建/导入并镜像到仓库；单镜像可 `docker save felis:<tag> | k3s ctr images import -`。Docker 存储是有意保留的第二副本，不应随意当空闲空间删除。
-
-## 13c. 主机地址、名称或时钟发生变化 {#_13c-the-host-s-address-name-or-clock-changed}
-
-安装绑定原 IPv4，写入 k3s 节点、网络策略、证书和默认 nip.io 域名，没有自动重新寻址。DHCP 改地址或虚拟机迁移后，集群和代理仍指旧地址，旧面板域名失效。看门狗五分钟后报告 host-address 严重；安装时会警告租约地址。
-
-恢复原地址：路由器 DHCP 保留或静态配置，Rocky 例如 `nmcli con mod <con> ipv4.method manual ipv4.addresses <ip>/<prefix> ipv4.gateway <gw> ipv4.dns <dns> && nmcli con up <con>`。然后重启 API 和代理。新地址迁移需从备份重装（运维 §5）；新地址运行后可 `sudo felis domain set <new-ip>.nip.io` 更换默认域名（§6）。
-
-**节点名已固定**：local-path 卷按节点名绑定；旧安装随主机名变化会出现第二空节点、旧卷 Pending。现在 `/etc/rancher/k3s/config.yaml.d/50-felis.yaml` 的 node-name 固定名称，改主机名无影响。用 `sudo k3s kubectl get node -o jsonpath='{.items[0].metadata.annotations.k3s\.io/node-args}'` 检查。文件还设 write-kubeconfig-mode=0600，管理员配置仅 root 可读，使用 sudo k3s kubectl 或 sudo -E kubectl。
-
-**时钟须同步**：验证码、会话、证书依赖时间；S3 拒绝超过 15 分钟偏差的签名。安装器开启 NTP，缺客户端时装 chrony，除非 FELIS_MANAGE_TIME_SYNC=0。持续未同步 30 分钟后警告 clock。timedatectl 应显示 System clock synchronized: yes、NTP service: active，另查 chronyc sources；出站 UDP 123 被拦会导致未同步。
-
-系统日志在 journald.conf.d/50-felis.conf 持久化，默认限额 1G，可用 FELIS_JOURNAL_MAX_USE 改；journalctl -b -1 查看上次启动日志。
-
----
-
-## 13d. k3s 证书在一年后过期 {#_13d-k3s-certificates-expire-after-a-year}
-
-k3s 的客户端/服务证书（API server、kubelet、管理员配置、etcd 等）有效 365 天，CA 十年。只在 k3s 启动时，用原密钥续签已过期或剩余不超过 120 天的证书。在此窗口重启或升级 k3s 即自动续期；一年不重启可能导致 API server、节点失效，面板不能启停备份。CA 不由重启续期，需 k3s certificate rotate-ca 及 k3s 官方证书管理流程。
-
-看门狗只读取 server/tls（含 etcd、kube-controller-manager、kube-scheduler）及 agent 下的 crt，不读取私钥，范围与 k3s certificate check 一致。最早到期证书报告 k3s-certs，提前 30 天警告、最后七天及过期严重，提示重启能否续签，CA 不能。`felis watchdog -k3s-cert-dirs ""` 关闭检查。[GO-TESTED: `TestCertFinding`；VM-VERIFIED：v1.36.4+k3s1 真实证书及前移时钟。]
-
-检查和续签：
-
-```sh
-sudo k3s certificate check --output table   # every certificate, its expiry and residual time
-sudo systemctl restart k3s                  # reissues the ones within 120 days of expiry
-sudo k3s certificate check --output table   # the renewed ones show about a year again
-```
-
-k3s unit 的 KillMode=process 保留容器，重启 k3s 时游戏、数据库、控制面继续服务，API server 一分钟内恢复。[VM-VERIFIED：容器 ID 和重启数未变。] 不要用会停止全部容器的 k3s-killall.sh。
-
-在 120 天窗口前提前续签，以配合维护时段：
-
-```sh
-sudo systemctl stop k3s && sudo k3s certificate rotate && sudo systemctl start k3s
-```
-
-面板自身 `/etc/felis/panel-tls.crt` 是另一证书，安装器自签有效 825 天，不在该检查范围。
-
----
-
-## 14. 健康告警与诊断指标（规范 §23） {#_14-health-alerts-and-metrics-for-diagnosis-spec-§23}
-
-完整安装通过 felis-watchdog.timer 运行看门狗，不需要监控栈即可邮件通知所有者。以下指标和规则供另有 Prometheus 的部署使用。
-
-### 看门狗：哪些异常会邮件通知所有者 {#the-watchdog-what-mails-the-owners}
-
-主机每两分钟检查：
-
-| 检查 | 持续多久后通知 | 严重度 |
-| --- | --- | --- |
-| api/operator/registry Deployment 缺失或无可用 Pod | 5 分钟 | 严重 |
-| Kubernetes API 不可达；其余集群检查记为未知并保留状态 | 5 分钟 | 严重 |
-| 登录服应运行却未 Running | 10 分钟 | 严重 |
-| 大厅等其他系统服应运行却未 Running | 10 分钟 | 警告 |
-| 用户服 Failed | 5 分钟 | 警告 |
-| 最近 24 小时备份/恢复/回收 Job 失败 | 立即，仅一次 | 警告 |
-| 回收超过 26 小时无成功 | 立即 | 警告 |
-| 节点 NotReady 或 Disk/Memory/PID 压力 | 2–5 分钟 | 严重 |
-| PostgreSQL 不可达 | 3 分钟 | 严重 |
-| 代理游戏端口拒绝连接 | 3 分钟 | 严重 |
-| 最新 daily 数据库备份超过 26 小时或不存在；新 manual/offsite 不抵消 | 10 分钟 | 严重 |
-| 文件系统空闲低于 15%；低于 5% 更严重 | 15 分钟；严重时 5 分钟 | 警告/严重 |
-| 可用内存低于 10% | 15 分钟 | 警告 |
-| 主机失去安装地址 | 5 分钟 | 严重 |
-| 时钟未通过 NTP 同步 | 30 分钟 | 警告 |
-| k3s 证书剩 30 天；剩七天或已过期更严重 | 立即 | 警告/严重 |
-| 看门狗自身持续失败 watchdog/run | 10 分钟 | 严重 |
-| 状态文件不可解析并被移开 watchdog/state | 立即，仅一次 | 警告 |
-
-通知规则：
-
-- 收件人为启用的所有者账号的已验证邮箱。中继与登录码相同：优先使用 Owner 在面板保存的中继（「平台设置 → 邮件服务」，§17），每次运行时从数据库读取，否则使用 `[smtp]`。
-- 每次最多一封，汇总新问题、未解决问题的每日提醒、连续恢复十分钟后的解决通知。延迟前自愈不通知，升级为严重立即再次通知。
-- 安装期间由 `/run/felis/watchdog-quiet-until` 抑制邮件，安装器退出时移除。
-- 从另一主机备份重建、尚未接管的待机主机，在桶记录的原主机过去三小时仍运行时不发信，日志 holding this mail；原主机停止后待机也成为告警（§16）。[GO-TESTED: `TestMailHold`]
-- 使用 `[smtp]` 中继时，密码优先从主机 `/etc/felis/smtp-password` 读取，API server 停止时也能读取，缺文件才读 `felis-smtp` Secret。当前使用的中继、其密码和收件人缓存在 root-only 的 `/var/lib/felis/watchdog/state.json`。无法读取数据库的运行继续使用上次成功运行缓存的面板中继，仅当上次运行也使用 `[smtp]` 时才回退到 `[smtp]`。因此 PostgreSQL 或 API server 停止时仍可通知。[GO-TESTED：API server 与 PostgreSQL 同时停止时使用主机缓存；`TestRelayForPrefersThePanelRelay`。]
-- 无中继或已验证邮箱时仅写 journal；如配置心跳且有未送达告警则发送失败心跳。新安装提示 NO ALERT MAIL。setup 最后卡片的 alerts 行显示去向或缺失项，按 e 配邮件（或在面板保存中继），再在面板「账号 → 邮箱验证」验证；heartbeat 行显示检查。该卡片和 `felis doctor` 优先读取 Owner 在面板中保存的中继和心跳，未保存时回退到 `felis.toml` 和心跳文件，与看门狗一致。[SH-TESTED；GO-TESTED: `TestAlertRouteLines`, `TestHostAlertRoute`]
-
-命令：
-
-```bash
-journalctl -u felis-watchdog -n 40          # every check of the latest runs
-sudo felis watchdog -dry-run                # run the checks now; mail nothing, change nothing
-systemctl list-timers felis-watchdog.timer  # when it last and next runs
-```
-
-健康时 every check passed，否则逐项日志并在发信时记录主题。shell 的 dry-run 使用默认值，不含代理或地址检查；unit 带 proxy-addr、node-ip、安装时磁盘列表，可用 systemctl cat felis-watchdog 查看。
-
-### 心跳：如何发现整台主机失联 {#the-heartbeat-what-notices-the-host-itself-going-down}
-
-主机关机、定时器停止、看门狗发信前崩溃无法自报。每次执行向 Healthchecks.io 或兼容服务发心跳，由外部服务在停止后通知。
-
-1. 建检查，周期两分钟，宽限十分钟。
-2. 在以下任一位置向看门狗提供该检查的 ping URL：
-   - 面板「平台设置 → 监控心跳」卡片。看门狗下次运行即发送心跳。
-   - 主机：重跑安装器，设置 `FELIS_WATCHDOG_HEARTBEAT_URL=<检查 URL>`，写入 `/etc/felis/watchdog-heartbeat-url`（root-only，0600）。
-
-   URL 路径是检查的密钥，面板、安装输出和日志只显示协议/主机。
-
-后续不设置变量会保留文件，设为 off 则删除。无心跳文件时提示 NO HEARTBEAT。[SH-TESTED: bootstrap_test.sh]
-
-面板保存的 URL 存于 `platform_settings` 的一行（`watchdog_heartbeat`），优先于主机文件。每次运行从数据库读取并缓存在看门狗状态中，因此数据库停止期间的运行以及下文的失败回退仍会向它发送心跳。卡片上的「移除心跳地址」清除该行；此后看门狗改为向安装器写入的主机文件 URL 发送心跳（如有），监控服务上的检查会因心跳缺失而告警，直到在该服务中暂停此检查。保存和移除需要重新确认身份；审计操作为 `platform.heartbeat` 和 `platform.heartbeat.clear`。API：`GET`、`PUT`、`DELETE /api/v1/settings/heartbeat`（Owner）；`GET` 只返回是否已设置 URL 及其协议和主机。安装器结束摘要（通过 `felis panel-settings`）、setup 卡片的 `heartbeat` 行和 `felis doctor` 均计入面板保存的 URL，仅当面板和主机文件都没有 URL 时才警告。[GO-TESTED: `TestHeartbeatForPrefersThePanelURL`, `TestWatchdogUnitFailedPingsThePanelHeartbeat`, `TestHeartbeatSettingKeepsItsKeyPrivate`, `TestHeartbeatSettingAsksForAFreshProof`, `TestCheckAndRedact`]
-
-| 执行结果 | 心跳 |
-| --- | --- |
-| 告警成功送达，或无到期告警 | GET 原 URL |
-| 未送达告警、邮件失败、状态未保存 | POST URL/fail，正文含原因和发现 |
-| 安装中的上述失败 | 不发送 |
-| 为其他主机异地桶待机 | 不发送，由写桶主机发送 |
-
-带查询字符串 ? 的 URL 无 fail 端点，失败时不发送，等待宽限耗尽。十秒超时或非 2xx 仅日志 heartbeat 错误，不改变检查/邮件决定的退出码。[GO-TESTED: `TestHeartbeatSend`, `TestWatchdogRunHeartbeat`]
-
-备份包（§16）携带 /etc/felis 及心跳文件，面板保存的 URL 则随数据库一并携带。由备份包重建的主机在 `felis offsite take-over` 前处于待机状态，不发送心跳；接管后使用同一检查。
-
-### 看门狗自身故障 {#when-the-watchdog-itself-fails}
-
-unit 的 OnFailure=felis-watchdog-failed.service 在崩溃、三分钟期限、配置不可加载等失败时运行 `felis watchdog -unit-failed`：
-
-- 立即将 systemd 结果发 fail 心跳，如 result exit-code, exit status 3；安装/待机时抑制。
-- 记录 watchdog/run，持续十分钟后发邮件。中继和收件人在 `felis.toml` 可加载时取自它，否则取自看门狗缓存；Owner 在面板保存的中继（以上次成功运行的缓存为准）优先于 `felis.toml`。首次成功按普通告警恢复。
-
-[VM-TESTED：systemd 252 将退出 3 传到回退服务，并向本地 fail POST，静默文件抑制；GO-TESTED: `TestWatchdogUnitFailedBrokenConfig`，六次两分钟间隔失败在十分钟用缓存发一封。]
-
-状态 JSON 不可解析时改名 state.json.unreadable-`<unix time>`，从新状态开始并通知 watchdog/state。历史丢失使仍存在问题重新作为新告警发信。常见于断电或手改，查 df 后可删除移开的副本。[GO-TESTED: `TestRecoverState`]
-
-状态文件不可写时，保存在 tmpfs `/run/felis/watchdog-state.json`，root-only；下次读取两个副本中较新者，避免两分钟重复发信。日志说明临时保存，退出 1 并发 fail；连续五次后发一次 watchdog/run。恢复写入后删 tmpfs 副本；此前重启会失去邮件历史，未解决问题重新通知。[GO-TESTED: `TestSaveStateOr`, `TestWatchdogRunStateThatDoesNotSave`, `TestWatchdogUnitFailedStateThatDoesNotSave`]
-
-```bash
-journalctl -u felis-watchdog-failed -n 20   # what the fallback reported and pinged
-systemctl status felis-watchdog             # the failed run's result
-```
-
-### 指标 {#metrics}
-
-排查时关注：
-
-- `felis_servers_total`：受管服务器数。
-- `felis_server_phase{server,role,phase,desired}`：当前阶段值为 1。role 为 login/lobby 或用户服空值，desired 区分主动停服和启动失败。
-- `felis_build_info{component,version}`：对应 api/operator 进程值为 1，缺失说明进程或采集异常。
-- `felis_start_duration_seconds`：首次就绪时记录 ReadySignalAt−StartRequestedAt。永不完成的启动没有样本，缺样本本身也是信号。
-- `felis_image_build_failures_total`：构建 Job 失败数。
-- `felis_reaper_worlds_deleted_total`：确认备份并实际删 PVC 后增加，突然增长须检查加入事件。
-- `felis_http_requests_total{face,method,route,code}`、`felis_http_request_duration_seconds{face,route}`：按路由模式，而非原始路径统计；无匹配为 unmatched，face 为 internal/external。日志流计请求但不计延迟。单一路由 5xx 增加定位处理器，unmatched 增加可能是扫描。
-- API 的 go_*、process_*：goroutine、堆、文件描述符，goroutine 只增不减可能是流或上传未结束。
-- `go_sql_*{db_name="felis"}`：最多 25 连接，各连接默认 statement_timeout=15s、idle_in_transaction_session_timeout=60s，URL 已设置则保留。in_use 达 max_open 且 wait_count 增长表示等待连接，应查 `SELECT pid, state, wait_event, query FROM pg_stat_activity` 的慢查询/锁。超时日志 canceling statement due to statement timeout。
-
-API 每请求写 logfmt：face、method、route、path、status、duration_ms、bytes、request_id、principal（登录后用户 ID）；成功探测和采集除外。
-
-```bash
-kubectl -n felis logs deploy/felis-api | grep 'msg=request' | grep 'status=5'
-kubectl -n felis logs deploy/felis-api | grep 'request_id=<id from the error>'
-```
-
-插件请求在 internal 各路由中独立可见：
-
-```promql
-sum by (route, code) (rate(felis_http_requests_total{face="internal", route="/api/v1/internal/servers/{name}/join-event"}[5m]))
-sum by (route, code) (rate(felis_http_requests_total{face="internal", route="/api/v1/internal/servers/{name}/wake"}[5m]))
-histogram_quantile(0.95, sum by (le, route) (rate(felis_http_request_duration_seconds_bucket{face="internal"}[5m])))
-```
-
-未到 API 的拒绝、重置、超时不计 API 指标，由调用方计数。代理每活跃十分钟输出自己看到的 API 及失败，代理控制台 /felis 显示启动以来总量：
-
-```bash
-journalctl -u felis-velocity | grep 'Felis: last 10 min'
-# Felis: last 10 min: felis-api calls=412 (no answer=0, 4xx=3, 5xx=0, retried=0), avg=18 ms, max=240 ms,
-#   busy refusals=0, join-events failed=0, join-events dropped=0, transfers failed=0,
-#   server-list refreshes failed=0, waiting now=0
-journalctl -u felis-velocity | grep 'server list refresh'
-kubectl -n minecraft logs login-0 | grep 'link status poll'
-```
-
-no answer 增加而 API 请求平稳，检查内部网络策略、Service、Pod。busy refusals/join-events dropped 非零说明 API 比代理八线程池可承受的更慢。刷新或绑定状态故障开始时警告，每五分钟报告计数，恢复时 info。
-
-### 采集指标 {#scraping}
-
-两个 Service 都带 prometheus.io/scrape|port|path 注解，支持注解发现的 Prometheus 可直接采集。
-
-- operator 的 :8080/metrics，Service felis-operator-metrics：服务器数、阶段、启动时长、operator build_info，以及 controller_runtime_reconcile_* / workqueue_*。
-- API 内部 :8081/metrics，Service felis-api-internal：api build_info、HTTP、Go/process、SQL 池、构建失败，以及 §17 的 felis_mail_total、felis_rate_limited_total、felis_auth_otp_lockouts_total、felis_auth_failures_total、felis_sessions_revoked_total、felis_audit_write_failures_total。与探测一样无认证，仅 ClusterIP，外部接口不提供。
-- 回收删除数产生于一次性 CronJob，通常在采集前已退出；没有 pushgateway 则没有采集路径，应查 Pod 日志或 world_backups 表。
-
-### 告警规则 {#alert-rules}
-
-`deploy/alerts/` 提供：
-
-- 控制面：FelisOperatorDown、FelisAPIDown，进程停止或未采集。
-- 服务器：FelisLoginGateDown、FelisSystemServerDown、FelisServerFailed。
-- 协调：FelisReconcileErrors；超过三分钟的 FelisReconcileStuck。operator liveness 在协调超过十分钟重启，readiness 等 informer 缓存同步。
-- 世界 Job（需 kube-state-metrics）：FelisWorldJobFailed、26 小时未成功的 FelisReaperStale。
-- 构建失败、慢启动；节点磁盘/内存阈值及 DiskPressure。
-- 数据库备份时效（§16，需 node-exporter textfile collector）。
-- 登录滥用（§17）：邮件预算、中继失败、限流、账号验证码锁、登录拒绝率及审计丢行。
-
-普通 Prometheus 将 felis-alerts.yaml 加入 rule_files，并运行 `promtool check rules felis-alerts.yaml`、`promtool test rules felis-alerts_test.yml`；测试固定各规则触发时间。kube-prometheus-stack/prometheus-operator 用 `kubectl apply -f felis-prometheusrule.yaml`，release 标签须匹配 ruleSelector。
-
----
-
-## 15. 控制平面升级与失败回滚 {#_15-control-plane-upgrades-and-rolling-back-a-bad-one}
-
-`felis update` 只做检查，输出目标版本和明确的 `--apply` 命令。主机更新器从目标解析出的完整提交下载安装器，备份数据库和部署状态，再用该安装器协调 CLI、核心服务、插件和系统镜像。`--version`、`--ref`、`--dev`、`--all` 见运维 §4。应原样使用输出的命令，以保持已审阅的目标。执行更新需要处于有效的维护窗口或显式指定 `--now`；`--force` 不会跳过备份、无法读取的维护窗口或兼容性检查。
-
-`felis update -h` 中没有 `--apply` 的主机仍需运行一次安装器（`curl -fsSL <installer URL> | sudo bash`）以获取新 CLI。在已完成的安装上，`sudo felis setup` 只打开配置控制台，不能用于升级。更新器复用与该安装器相同的校验和、镜像导入/构建及 rollout 检查。升级时需注意控制平面的两项特性：
-
-- API/operator 均单副本 Recreate，无选主，重叠会竞争同集群；部署窗口面板/API 暂停，通常数秒，导入镜像可能更久。
-- 新 Pod 无法启动时，180 秒后 rollout 失败并打印 describe，显示 ErrImagePull/ImagePullBackOff 等。
-
-下载产物执行前检查：
-
-| 产物 | 校验 |
-| --- | --- |
-| felis-linux-`<arch>` | 发布版 SHA256SUMS，不存在或不同则从同标签编译 |
-| 镜像 tar、镜像清单、felis-velocity.jar | SHA256SUMS；清单每行是已知角色和摘要，导入后 containerd 须有对应摘要。失败回退本地（§15c），ARTIFACT_DIR 则停止 |
-| k3s airgap 镜像 | 发布版 sha256sum-`<arch>`.txt，不匹配则由 k3s 从 Docker Hub 拉取 |
-| k3s | 固定标签安装脚本，默认 v1.36.4+k3s1，脚本校验二进制 |
-| cloudflared | 默认 2026.9.1 和固定 sha256，其他版本需 FELIS_CLOUDFLARED_SHA256 |
-| Go 工具链 | 各架构固定 sha256，其他版本需 FELIS_GO_SHA256 |
-| registry、PostgreSQL | registry:2.8.3@sha256:a3d8…、postgres:18.6-trixie@sha256:5a5a…，附件必须携带同名同摘要 |
-| Limbo、spawn schematic、Paper、LuckPerms、Velocity | game-stack.lock 的构建及 sha256 |
-| Temurin JRE | 25.0.4.1+1，各架构固定 sha256 |
-| Felis/limbo/lobby/paper 的基础镜像 | 各 Dockerfile 摘要固定 |
-
-公共仓库发布版还附签名构建来源证明。`gh attestation verify felis-linux-amd64 --repo FelisMC/Felis` 可查构建工作流和提交。
-
-各发布版独立标签，如 felis/felis:v1.2.3；源码戳 v1.2.3+gabc1234 转为 v1.2.3-gabc1234，无版本为 demo。升级结束打印原标签，存入 `/etc/felis/previous-felis-image`。回滚：
-
-```
-kubectl -n felis rollout undo deployment/felis-api deployment/felis-operator
-kubectl -n felis rollout status deploy/felis-api
-```
-
-rollout undo 返回前 ReplicaSet 的镜像标签。镜像通常仍在节点，GC 后可从仓库重拉；清理保留最新五个 felis/felis 标签及仍被游戏 Pod 引用的镜像。同版本重跑复用标签并重启，因此 undo 仍可能落在同标签；下次安装器会再次应用当前安装版本。
-
-平台升级默认不动运行游戏服。其 initContainer 也使用 Felis 镜像，运行服保留旧版，下次启动获得新版本；若发布版另改游戏 Pod 模板，则会像编辑服务器一样重启一次。
-
-**重跑的重启条件**：
-
-| 组件 | 何时重启 |
-| --- | --- |
-| Velocity | unit、JRE、velocity.jar/toml、转发密钥、绑定配置（service-token 自动重读除外）、插件 jar 改变，或服务未运行。velocity.fingerprint 记录指纹，删除可强制 |
-| login/lobby | 新镜像 ID 与 system-server-images 不同。安装器 pin-images --system 固定新摘要，operator 分别更新；仓库不可达则重建 Pod。BUILDX_NO_DEFAULT_ATTESTATIONS=1 避免构建时间证明令每次 ID 不同 |
-| PostgreSQL | 固定镜像或 Pod 改变，API 暂停数秒；未改则不重启 |
-| API/operator/registry gate 和 GC | 版本标签变化，或同版本重新构建 |
-
-数据库在 k3s 内，发行版升级不改变其版本。major 与现有集群不同时安装器拒绝并提示导出恢复（运维 §4）。首次含 felis-postgres 的重跑迁入 k3s，移除旧 felis-postgres-firewall.service；Arch 的 pacman -Syu 在旧集群存在时保留宿主机 PostgreSQL 包，供回退。
-
-undo 只回滚镜像，迁移仍在；数据库问题需恢复升级前 pre-migrate 包（§16）。
-
-**Schema 检查**：API、reaper、offsite、migrate up 比较数据库迁移集合与内嵌集合。数据库更新时，旧构建拒绝并提示 schema is newer，例如数据库 0026、构建只到 0025；跨迁移 undo 会 CrashLoopBackOff，需恢复 pre-migrate。数据库落后时 API/reaper/offsite 拒绝，须 migrate up；setup preflight 会自行应用。[PG-TESTED]
-
-**失败与主机二进制**：安装器早期替换 `/usr/local/bin/felis`，旧版留 felis.prev。迁移开始前失败会还原旧二进制，使定时器和 setup 与仍运行数据库/控制面匹配；迁移开始后保留新版。[VM-VERIFIED]
-
-## 15b. 游戏镜像、固定构建与世界版本升级 {#_15b-game-images-pinned-builds-and-moving-a-world-to-a-newer-minecraft}
-
-game-stack.lock 固定 Limbo CI/Minecraft、Paper、LuckPerms、Velocity 构建及 sha256。同发布版各主机使用相同构建，重跑不重复构建。`bash deploy/update-game-stack-lock.sh` 解析最新构建、计算摘要、改写 lock；--check 仅报告变化。
-
-- FELIS_GAME_STACK=latest 在安装时选择最新上游，对无摘要产物计算哈希，警告不属于该发布版。
-- FELIS_VELOCITY_VERSION=`<minor>` 选择该 minor 最新、仍内容寻址并校验的构建。
-- FELIS_JRE_VERSION 选择 Java feature release，默认 25、固定 Temurin 25.0.4.1+1。安装器安装的 JRE 随重跑更新至固定补丁，其他供应商的保留。
-
-默认游戏标签如 felis/paper:demo 可变，但服务器不会自动跟随。API 创建服务器时固定当时摘要；安装器在推新镜像前用 pin_user_server_images 固定旧裸标签服务器。摘要限定引用永远按原构建启动。login/lobby 每次更新也固定，可查 spec.image。
-
-安装器另推不会重写的 `<Minecraft version>-<12 hex image id>` 标签，如 felis/paper:26.2-3f9c0a1b2c4d。将版本标签入白名单，可在 demo 变化后继续创建指定版本服务器。
-
-升级现有世界须在「编辑服务器」选镜像并确认已备份；重选当前标签会更新到最新摘要。API PATCH 要求 confirmImageChange=true，否则 409 image_change_unconfirmed。先备份：新 Minecraft 加载会升级区块，旧版无法再打开。审计保存 image_from/image_to，回退时恢复旧构建及升级前备份。旧镜像必须仍在仓库：无服务器/白名单引用的构建 24 小时后可清理，各 felis 仓库最新五个保留（§9）。
-
-| 症状 | 原因 | 处理 |
-| --- | --- | --- |
-| image_not_in_registry | 白名单标签未推送或已删除 | 推送/重建后重试 |
-| registry_unavailable | API 无法访问 registry.felis.svc:5000 | 检查仓库 Pod 及允许 API 的 registry-ingress |
-| could not pin every user server | 仓库停机或标签丢失 | 修复后启动前执行 sudo felis pin-images；丢标签需管理员选新镜像 |
-| could not pin the login system server / lobby | 推送后仓库未响应 | 安装器改重建 Pod，仅裸标签可得到新版；仓库 Ready 后重跑 |
-| 重跑时运行服重启 | 首次将当前构建固定到摘要 | 每服发生一次，无需处理 |
-| the registry no longer holds build … | 摘要无引用超过 24 小时被清理 | 选当前标签，需要保留的版本标签入白名单 |
-
-## 15c. 安装发布版时仍在主机上构建 {#_15c-the-installer-builds-on-the-host-although-it-installs-a-release}
-
-某附件不可用时安装器注明产物及原因，仅该镜像回退 Docker 构建，registry/PostgreSQL 改从 Docker Hub 拉取，不使用未校验内容 **[SH-TESTED]**。每下载三次，间隔五秒；持续一分钟低于 1 KiB/s 会中断重试。
-
-发布版 preflight 不预留 Docker 构建空间，所以首次回退先检查 `/var/lib/containerd` 约 8 GiB；已有缓存时约 2 GiB。不足则在装 Docker 前停止，提示所需/可用 MiB、nothing has been built。可等待附件可用后重跑、释放空间，或 FELIS_PREFLIGHT=warn 强制构建 **[SH-TESTED]**。
-
-主机构建的 Docker 输出保留在终端回滚缓冲区中。构建插件时，`[felis] Downloading <file> (<host>)` 标明每项 Gradle 依赖下载；进行中的下载每十秒报告字节数、速度和已用时间。仅当服务器提供总大小时才显示百分比。连续三十秒没有新数据时，该行显示 `no new data for …; waiting for the download`；这只报告等待状态，不改变 Gradle 的超时或重试行为。
-
-| 消息 | 含义 | 处理 |
-| --- | --- | --- |
-| release vX publishes no SHA256SUMS | 老版无附件或仍上传 | 老版可正常回退；新版等待清单发布后重跑 |
-| SHA256SUMS lists no `<file>` / could not download `<file>` | 部分附件缺失 | 稍后重跑，当前本机构建仍正确 |
-| downloaded `<file>` hashes to … but … says … | 损坏或清单后替换 | 重跑重新获取；持续不匹配应报告附件问题 |
-| image listing … is malformed | 镜像列表不可解析 | 报告，全部镜像本机构建 |
-| release's registry image is … but installer runs … | base tar 摘要与脚本不同，版本不匹配 | 运行发布标签安装器，update --panel 给命令 |
-| containerd holds no `<image>` from `<tar>` | 导入 tar 无指定摘要 | 查 sudo k3s ctr images ls，再报告 |
-| FELIS_ARTIFACT_DIR: … 并停止 | 目录附件缺失或校验失败，不回退构建 | 重拷对应附件再运行 |
-
-中途中断留下 `/var/lib/felis/artifacts`，重跑复用仍匹配校验和的 tar，镜像入库后删除目录。
-
-
-## 16. 控制平面数据库备份与灾难恢复 {#_16-control-plane-database-backups-and-disaster-recovery}
-
-API 的 PostgreSQL 保存世界之外的账号、Passkey、MC 绑定、归属、配额、审计，以及将归档映射至所有者的 world_backups 索引。丢失数据库会使世界归档失去归属。数据库在 k3s 的 felis-postgres 运行，集群目录在主机 `/var/lib/felis/postgres`；felis db 根据配置的 deployment 在 Pod 内执行 pg_dump/psql/pg_restore，备份包留在主机。
-
-### 运行哪些任务，备份包存放在哪里 {#what-runs-and-where-the-bundles-go}
-
-- felis-db-backup.timer 每日执行备份，FELIS_DB_BACKUP_TIME 默认 `*-*-* 03:30:00`，随机延迟最多 15 分钟，Persistent=true 补开机漏执行。安装时先创建首份，暴露管线错误。[CODE-ONLY；unit/timer 内容由 bootstrap_test.sh 验证。]
-- 每次 migrate up 在已有数据且待迁移时先创建 pre-migrate；失败则不应用任何迁移，提示 pre-migration backup failed, nothing applied。[GO-TESTED]
-- 恢复前创建 pre-restore，`-no-safety-backup` 可跳过。[GO-TESTED]
-
-备份目录 FELIS_DB_BACKUP_DIR 默认 `/var/lib/felis/db-backups`，0700，位于 /var/lib/rancher 外，避免 k3s 重装删除。每份 felis-db-`<UTC stamp>`-`<label>`.tar 包含：
-
-| 成员 | 内容 |
-| --- | --- |
-| MANIFEST.json | 版本、schema、pg_dump 版本、各成员 sha256 |
-| db.dump | felis 数据库的 custom 格式导出 |
-| state/etc/felis/... | /etc/felis 全部文件：DB/转发/调用方/仓库机密，两个配置和软链接、异地桶凭证/密钥、SMTP/上传密钥、面板证书，以及 system-server-images、velocity.fingerprint；有意排除 bootstrap.done |
-| k8s/minecraftservers.json | 全部 MinecraftServer，移除 status/服务端元数据，可直接 apply；导出尝试三次、间隔十秒，仍失败则省略并在 manifest 说明 |
-
-旁边有 sha256sum 格式的 .sha256。**备份包包含机密，须像 /etc/felis 一样保护**。保留数按标签独立：daily 默认 14（FELIS_DB_BACKUP_KEEP），pre-migrate 10，pre-restore 5，offsite 1，manual 永不自动清理。另有安装变量 FELIS_DB_BACKUP_TIME、METRICS、PRE_MIGRATE_BACKUP。
-
-### 最近一次备份是否及时 {#is-the-newest-backup-fresh}
-
-以下四处都检查最新 **daily** 是否在 26 小时内。新的 manual、pre-migrate、offsite 可恢复，但不清除此告警，因为每日管线仍停了。
-
-- 面板「管理 → 维护与备份」显示最新备份类型/大小，daily 缺失或过期变红并给命令。来自 db_backup_last 设置，daily_at 是写入时磁盘最新 daily。
-- `sudo felis db check` 失败退出 1；db list 显示全部年龄。
-- 看门狗邮件通知。
-- Prometheus 的 FelisDBBackupStale（严重）、FelisDBBackupMetricMissing（警告）读 felis_db_backup_last_success_timestamp_seconds。每日任务写至 FELIS_DB_BACKUP_METRICS，默认 `/var/lib/node_exporter/textfile_collector/felis_db_backup.prom`；node-exporter 的 textfile.directory 须指该目录，否则两小时后缺指标告警。
-
-过期时检查：
-
-```
-sudo systemctl status felis-db-backup.timer          # enabled? next run?
-sudo journalctl -u felis-db-backup -n 50 --no-pager   # why the last run failed
-sudo systemctl start felis-db-backup.service         # run the daily backup now; clears the alarm
-```
-
-**缺 MinecraftServer 的包**仍保存数据库，但无法重建服务器。三次导出失败后命令先 wrote 再退出 1，timer 失败；卡片为黄色不完整并给原因/命令。该包为最新时看门狗报告 lacks the MinecraftServer objects；verify、offsite list/fetch-db 也注明。pre-migrate/pre-restore 同样可不含 CR，不阻止升级/恢复，因为回滚数据库不需要 CR。异地同步在世界归档后创建的包则拒绝不完整，下次重试。集群可回答 get minecraftservers -A 后手动备份。[GO-TESTED：dbbackup、CLI、watchdog、DBBackupCard.test.tsx。]
-
-常见失败：Postgres 未运行（下节）、PATH 无 k3s、备份盘满（删除 partial，旧包保留）、外部数据库比主机 pg_dump 新导致 server version mismatch（安装匹配客户端）。
-
-### felis-postgres 未运行或无法就绪 {#felis-postgres-is-not-running-or-never-became-ready}
-
-安装器十分钟未就绪则停止，提示 felis-postgres did not become ready 并打印事件。检查：
-
-```sh
-sudo k3s kubectl -n felis get pods -l app.kubernetes.io/component=postgres -o wide
-sudo k3s kubectl -n felis describe deploy/felis-postgres | tail -n 30
-sudo k3s kubectl -n felis logs deploy/felis-postgres --tail=60
-```
-
-| 症状 | 原因 | 修复 |
-| --- | --- | --- |
-| postgres 拉取失败 | Docker Hub 不可达且无缓存 | §8e 隔离节点平台镜像 |
-| CreateContainerConfigError、Secret felis-postgres 不存在 | 超级用户 Secret 丢失 | 重跑创建；镜像仅初始化集群时读取，安装器/db 经 Pod socket 连接 |
-| /var/lib/postgresql/18/docker Permission denied | hostPath UID 999 或 SELinux container_file_t 丢失 | 重跑修复；手动 chown -R 999:999 /var/lib/felis/postgres，restorecon -R 同路径 |
-| database files are incompatible with server | 不同 major 创建的集群 | 运维 §4 的大版本升级 |
-| Pending、Insufficient memory | 节点资源满 | §13b |
-
-Pod 内通过 socket 以超级用户查询：
-
-```sh
-sudo k3s kubectl -n felis exec -it deploy/felis-postgres -c postgres -- psql -U postgres felis
-```
-
-迁入 k3s 前的宿主机副本仍保留，回退见运维 §4。
-
-### 检查备份包 {#check-a-bundle}
-
-```
-sudo felis db verify felis-db-20260924T033012Z-daily.tar   # bare names resolve in the backup dir
-sha256sum -c felis-db-20260924T033012Z-daily.tar.sha256    # on a copy, without felis
-```
-
-verify 检查旁边校验文件、manifest 各成员、无缺失或未列成员、manifest 位于首项，不操作数据库。
-
-### 在原主机恢复（撤销误操作） {#restore-on-the-same-host-undo-a-mistake}
-
-```
-kubectl -n felis scale deployment felis-api felis-operator --replicas=0
-sudo felis db restore -yes felis-db-20260924T033012Z-daily.tar
-sudo felis migrate up -config /etc/felis/felis.host.toml
-kubectl -n felis scale deployment felis-api felis-operator --replicas=1
-```
-
-- 不带 yes 只打印内容并退出 2。
-- 存在其他连接时拒绝并打印缩容命令；force 可覆盖已知空闲连接。
-- 在单事务内删除 felis 角色拥有内容并重放 dump，**任何失败回滚，数据库保持原样**，输出 psql/pg_restore 错误。[PG-TESTED]
-- pre-restore 包保留恢复前数据库，恢复它可撤销本次恢复。
-- migrate up 将旧包 schema 升到运行版本；启动时不自动迁移。只有回退到创建包的旧版时跳过，见下节。
-- 只替换数据库，不改变世界 PVC 或归档；备份后新建的服保留卷但失去归属行。
-
-### 回滚损坏数据库的升级 {#roll-back-an-upgrade-that-broke-the-database}
-
-迁移只向前，回退用升级前 pre-migrate：
-
-```
-kubectl -n felis scale deployment felis-api felis-operator --replicas=0
-sudo felis db list | grep pre-migrate                  # newest one is the upgrade's
-sudo felis db restore -yes <that bundle>
-kubectl -n felis rollout undo deploy/felis-api
-kubectl -n felis rollout undo deploy/felis-operator
-kubectl -n felis scale deployment felis-api felis-operator --replicas=1
-```
-
-此时**不要 migrate up**，主机仍是新版，会重新应用迁移。随后用同标签安装器和附件安装旧版：
-
-```
-curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/v1.2.3/deploy/bootstrap.sh \
-  | sudo FELIS_RELEASE=v1.2.3 bash
-```
-
-FELIS_RELEASE 显式选择旧发布版，避免又装最新并迁移。不能与 REF、ARTIFACT_DIR、SKIP_FETCH、dev 混用；未发布标签在任何修改前停止。[SH-TESTED] 早于该变量的安装器会忽略它，`curl -fsSL <URL> | grep -c FELIS_RELEASE` 为 0；改用 FELIS_REF=v1.2.3 从源码构建，较慢且需 §15c 资源。
-
-### 整机灾难恢复：恢复内容及其来源 {#whole-host-disaster-recovery-what-comes-back-and-from-where}
-
-主机/磁盘丢失后，从异地桶加全新安装恢复：
-
-| 数据 | 主机位置 | 异地副本及恢复方法 | 最多损失 |
+| 提示 | 返回 | 原因 | 解决办法 |
 | --- | --- | --- | --- |
-| 控制面数据库 | felis-postgres、/var/lib/felis/postgres | 各备份包一小时内复制，世界归档复制后再创建新包；fetch-db、db restore | 最新包后变化，默认一天加一小时 |
-| 主机机密/配置/证书 | /etc/felis | 每包 state，tar 解出 | 同数据库 |
-| MinecraftServer | k3s | 每包 k8s/minecraftservers.json，kubectl apply | 同数据库 |
-| 世界归档（回收器、定时恢复点、立即备份、恢复前快照） | felis-backups 卷 | 一小时内复制，随后备份索引；fetch-worlds | 最近一小时归档 |
-| 实时世界 | world-* 卷 | **仅归档**，从最新归档恢复 | 该世界最新归档之后全部变化 |
-| 用户镜像 | registry 卷 | 每小时复制，镜像列表保留 14 天；fetch-images | 最近一小时推送 |
-| 投稿上传 | felis-uploads 卷 | 每小时复制，列表保留 14 天；fetch-uploads | 最近一小时上传 |
-| Cloudflare 连接器 | 配置、root 的登录证书/隧道凭证、unit | 配置入包，证书/凭证/unit 不复制；setup 的 Cloudflare 步骤重建 | 无，隧道/DNS/Access 在 Cloudflare |
-| 平台镜像、代理、JRE、构建工具 | registry、/opt/felis | 不复制，安装器重新获取/构建和推送 | 无 |
-| k3s 令牌/CA/存储/Secret/Deployment | /var/lib/rancher/k3s | 不复制，安装器新建单节点并从 /etc/felis 渲染 | 无 Felis 数据仅存在此处 |
+| 「Owner 账户未初始化，登录不可用」 | — | 尚未创建 Owner | 在主机上执行 `sudo felis setup`，打开其输出的一次性设置链接（见[初始化向导](/guide/deployment#setup-wizard)） |
+| 「设置链接无效或已被使用」 | — | 一次性设置链接已过期或已使用 | 再次执行 `sudo felis setup` 获取新链接 |
+| 「当前部署已禁用本地登录，请通过组织的安全入口访问控制台。」 | `403 local_auth_disabled` | 平台设置 `local_auth_enabled` 关闭或缺失。创建首个 Owner 时会开启该设置。关闭期间，已有会话同样会被拒绝 | 执行 `sudo felis breakGlass` 创建或恢复 Owner，该操作会开启本地登录（见[应急访问](/operations/access#break-glass)） |
+| 「登录请求已触发限流，请等待限流解除后重试。」 | `429 rate_limited` | 同一客户端地址发出的登录请求过多 | 按 `Retry-After` 响应头给出的时间等待。所有人同时受影响时，见[所有人同时被限流](#sign-in-rate-limited) |
+| 「邮件服务未配置，无法发送验证码。…」 | `503 mail_unavailable` | 面板和配置文件中均未配置邮件中继 | 使用 Passkey 登录，玩家也可使用游戏绑定码登录。配置邮件中继（见[邮件中继](/operations/monitoring#mail-relay)） |
+| 「邮件发送已触发限流，…」 | `429 mail_rate_limited` | 整个安装的邮件额度已用完，即「每小时发信上限」（默认每小时 120 封） | 见[邮件问题](#mail-problems) |
+| 「验证码邮件发送失败——…」 | `502 mail_undeliverable` | 邮件中继拒绝了该邮件 | 见[邮件问题](#mail-problems) |
+| 「验证码错误次数过多，请重新获取验证码。」 | `429 otp_locked` | 当前验证码的尝试次数已用完 | 重新获取验证码 |
+| 「24 小时内验证码错误次数已达上限，此账号的邮箱验证码暂时停用，…」 | `429 otp_account_locked` | 该账户 24 小时内输错验证码 10 次 | 使用 Passkey，或见[账户的邮箱验证码被锁定](#email-code-locked) |
+| 「该账户为管理员账户——请使用管理员登录。」 | `403 staff_account` | 工作人员账户（Admin 和 Owner）不能在玩家控制台使用邮箱验证码登录 | 在运维控制台登录 |
+| 「登录服务当前不可用。」 | `503 auth_unavailable` | PostgreSQL 不可达 | 见[数据库不可用](#database-unavailable) |
+| 「等待游戏内批准…」一直不结束 | — | 管理员登录需要一位在游戏内在线的管理员批准 | 见[管理员登录等待批准](#operator-sign-in) |
 
-**实时世界是缺口**。世界的当前状态只存在于其卷中；桶中只有回收器、定时恢复点、所有者立即备份或恢复前快照写入的归档。运行中的世界同样生成定时恢复点（§10），因此自上次恢复点后有人游玩的世界，通常有一份不早于 `scheduled_every`（默认一天）的恢复点。从未归档的世界恢复后为空。提醒所有者重要操作前备份，以备份页最新归档年龄为实际恢复点。
+Passkey 与面板域名绑定。面板域名变更后，用户须重新注册 Passkey。
 
-可缩短 FELIS_DB_BACKUP_TIME，如 `*-*-* 00/6:30:00` 每六小时，并配套 KEEP，每次安装都传入；异地复制一小时内收取。
+### 所有人同时被限流 {#sign-in-rate-limited}
 
-恢复时间主要由传输决定：全新安装获取或构建平台镜像、数据库恢复数秒至数分钟，三个 fetch 按桶带宽移动 status 列出的镜像/上传/归档，跳过已存在项，可中断恢复。记录大小和下载速度，按每个发布版在备用机演练确认。备用机运行不带 `-take-over` 的 `felis restore-host`（下一节），或按下文手动步骤执行并跳过第 8、11 步，识别原主机后待机，不写/清桶，原主机持续写时不向其所有者发信。不能接入生产隧道，否则分担真实流量；通过自身地址访问（第 10 步）。
+所有用户同时收到「登录请求已触发限流」。
 
-顺序必须保持：先恢复 state 使安装器复用机密/桶；先镜像后数据库，在清理器 24 小时宽限内恢复引用；CR 与所属数据库一同恢复；再恢复世界。移域名前检查邮件，因 Passkey 可能失效；域名在 CR apply 后更换，以更新登录服环境。
+**原因**
 
-### 在新主机重建（原主机已丢失） {#rebuild-on-a-new-host-the-old-one-is-gone}
+每个客户端地址最多可同时发出 20 次登录请求，每分钟补充 20 次，由全部登录端点共享；IPv6 客户端按 /64 共享一个限额。一个人登录需要三到四次请求，因此该限制通常只影响脚本。Felis 从 `[auth] client_ip_header` 指定的请求头读取客户端地址；未指定请求头时，使用 TCP 对端地址。此时在反向代理或隧道之后，所有访客共用代理的地址和同一个限额。
 
-需要异地副本或自行拷出的包，桶副本还需加密密钥。
+**排查**
 
-**一条命令完成：`felis restore-host`**。有异地副本时，安装器可自行重建全新主机。提供原安装的桶、凭证和密钥（原安装设置过 `FELIS_OFFSITE_REGION`、`FELIS_OFFSITE_PREFIX` 时一并提供），并请求重建：
+felis-api 启动时会记录限流所依据的地址：
 
-```
-FELIS_OFFSITE_ENDPOINT=https://s3.example.com FELIS_OFFSITE_BUCKET=felis-backups \
-FELIS_OFFSITE_ACCESS_KEY=... FELIS_OFFSITE_SECRET_KEY=... FELIS_OFFSITE_KEY=... \
-FELIS_RESTORE_FROM_OFFSITE=1 FELIS_RESTORE_TAKE_OVER=1 \
-  bash deploy/bootstrap.sh          # or the curl | sudo bash one-liner
-```
-
-安装器在修改主机前先检查请求：缺少上述五个 `FELIS_OFFSITE_*` 值中的任一项时拒绝 `FELIS_RESTORE_FROM_OFFSITE=1`；在已安装 Felis 的主机上同样拒绝（`sudo felis restore-host -yes -force` 会替换此类安装的数据）。`FELIS_RESTORE_BUNDLE` 指定比最新包更早的包（`felis-db-<stamp>-<label>.tar`，见 `felis offsite list`）。演练机不要设置 `FELIS_RESTORE_TAKE_OVER`。安装完成后、输出摘要和打开 setup 控制台之前，安装器运行 `felis restore-host -yes`（根据上述变量附加 `-bundle` 和 `-take-over`），因此 setup 控制台能找到原安装的 Owner。重建中止时，安装器提示 `the rebuild stopped before it finished; fix the cause above and run: sudo felis restore-host -yes`；该命令从中止处继续（安装器带有 `-take-over` 时一并添加）。
-
-已安装、`[offsite]` 配置指向原桶且尚无服务器的主机，可直接以 root 运行该命令：
-
-```
-sudo felis restore-host                      # the steps; nothing changes
-sudo felis restore-host -yes                 # rebuild, leaving the bucket to the old host
-sudo felis restore-host -yes -take-over      # rebuild, then make this host write the bucket
+```bash
+sudo k3s kubectl -n felis logs deploy/felis-api | grep 'sign-in rate limit keys on'
 ```
 
-它按下文编号步骤执行至接管桶为止，每步运行该步骤所列的命令：
+在代理之后出现 `felis api: sign-in rate limit keys on the TCP peer ([auth] client_ip_header unset)`，即可确认原因。被拒绝的请求计入 `felis_rate_limited_total{scope="auth_door"}`；连续 10 分钟每分钟拒绝超过 10 次时触发 `FelisSignInFlood` 告警（见[指标](/operations/monitoring#metrics)）。
 
-| `restore-host` 步骤 | 作用 | 对应手动步骤 |
-| --- | --- | --- |
-| `fetch_db` | 用 `felis offsite fetch-db` 将最新包（或 `-bundle <name>`）取到 `/var/lib/felis/restore-host` | 1 |
-| `images` | `felis offsite fetch-images` | 4 |
-| `uploads` | `felis offsite fetch-uploads` | 5 |
-| `database` | 将 felis-api 和 felis-operator 缩至 0，执行 `felis db restore -yes -no-safety-backup`、`felis migrate up`，再恢复两者并最多等待 felis-api 5 分钟 | 6 |
-| `servers` | 应用包中的 `k8s/minecraftservers.json`：仅用户服务器（新安装已自行创建登录服和大厅），每台均为 `Stopped`，并去除原集群的节点分配、卷声明名称、锁和进行中标记 | 6 |
-| `worlds` | `felis offsite fetch-worlds` | 7 |
-| `restore_worlds` | 通过 felis-api 为每台恢复的服务器恢复最新的完好备份，并等待其恢复 Job（每台最多 2 小时）；无备份的服务器保持空世界 | 7 |
-| `take_over` | `felis offsite take-over -yes`，仅在指定 `-take-over` 时执行 | 8 |
+**解决**
 
-- **可续跑**。每步完成后记录在 `/var/lib/felis/restore-host/state.json`，中途中断的运行（SSH 断开、桶超时）可从中止处继续。数据库只恢复一次：重跑不会再次恢复数据库，以免覆盖重建后的安装此后写入的内容。首次运行获取的包在后续运行中仍作为本次重建的包。
-- **仅限全新安装**。数据库步骤前，若数据库已有服务器则拒绝；`-force` 会覆盖恢复。
-- **失败的世界会重试**。恢复失败的服务器连同原因列出，该步骤失败；下次运行只重试尚未恢复的服务器。
-- **主机状态保持本机所有**。它不放回旧 `/etc/felis`（第 2 步）：安装器已生成新机密，本机保留自己的根域名、`[smtp]` 中继、上传桶密钥和隧道配置。Owner 在面板保存的邮件中继、保留策略或心跳随数据库恢复。如需同时复用原主机状态，先按第 2 步放回，再带上述变量运行安装器。[CODE-ONLY]
-- **运行结束时**输出每台服务器的世界来自哪份备份，以及剩余的手动步骤：第 9 步（邮件）、第 10 步（将域名指向本机并执行 `felis domain set`；或保留本机地址，此时在旧地址注册的 Passkey 失效，用户需通过邮件验证码登录并重新注册）、第 11 步（Cloudflare 隧道），未指定 `-take-over` 时还有第 8 步。接管后执行 `sudo systemctl start felis-offsite.service`，可在每小时定时器之前发送本机的首份副本。
+1. 在「平台设置 → 访问与安全」的「访问方式与域名」卡片或 `felis setup` 中，选择与面板实际访问路径相符的访问方式（见[访问方式](/operations/access#access-methods)）。「自有反向代理」按 `X-Forwarded-For` 最右侧的一项（即代理追加的一项）限流；「Cloudflare Tunnel」按 `CF-Connecting-IP` 限流。
+2. 使用自有反向代理时，通过防火墙限制面板端口只允许该代理访问，否则直接访问的调用方可以在请求头中填写任意地址。
+3. 使用 Cloudflare 时，还可以在边缘拦截洪水请求：在 Security → WAF → Rate limiting rules 中，匹配面板和运维控制台域名下以 `/api/v1/auth/` 开头的 URI 路径，按 IP 计数，每 10 秒超过 30 次请求时阻断 10 秒。
 
-参数：`-yes`（不加时只打印步骤，不做任何修改）、`-bundle <name>`、`-take-over`、`-force`、`-dir`（默认 `/var/lib/felis/restore-host`）和 `-config`（默认 `/etc/felis/felis.toml`）。数据库尚未恢复时，以不同的 `-bundle` 重跑会获取并使用该包；数据库恢复后，运行会拒绝并指出数据库来源的包（删除 `/var/lib/felis/restore-host/state.json` 可重新开始）。[GO-TESTED: `TestRestoreHostRunsTheRunbookOnce`, `TestRestoreHostTakesTheNamedBundle`, `TestRestoreHostResumesAfterAFailure`, `TestRestoreHostRefusesAnInstallWithServers`, `TestRestorableServersCleansTheOldCluster`, `TestNewestBundleAndBundleEntry`, `TestInternalRestoreRebuildsAWorld`] [SH-TESTED：安装器对 `FELIS_RESTORE_*` 变量的检查，`deploy/bootstrap_test.sh`] [CODE-ONLY：在真实主机上通过安装器完成整机重建]
+### 账户的邮箱验证码被锁定 {#email-code-locked}
 
-**手动执行**。编号步骤是 `restore-host` 所执行操作的参考，也用于在没有桶时从原主机拷出的包重建，以及完成该命令未能完成的步骤。
+用户输入了正确的验证码仍被拒绝，或收到「24 小时内验证码错误次数已达上限，此账号的邮箱验证码暂时停用」。
 
-1. 用相同或更新发布版的任意 felis 二进制（release 的二进制可单独运行），在能访问桶的机器获取最新包：
+**原因**
 
-   ```
-   export FELIS_OFFSITE_ACCESS_KEY=... FELIS_OFFSITE_SECRET_KEY=... FELIS_OFFSITE_KEY=...
-   sudo -E felis offsite fetch-db -endpoint https://s3.example.com -bucket felis-backups \
-        [-region ...] [-prefix ...] latest
-   ```
+同一账户 24 小时内输错邮箱验证码 10 次（累计发给该账户的所有验证码），该账户的邮箱验证码登录即被锁定，直到首次输错后满 24 小时。公开登录对已锁定账户的回复与验证码错误完全相同，账户所有者会收到一封锁定通知邮件。邮箱验证、账户迁移等已登录状态下的验证步骤返回 `429 otp_account_locked`。Passkey 登录不受影响。
 
-   默认写 /var/lib/felis/db-backups，dir 可改；自动 verify 并显示时间、发布/schema、账号/服务器数，继续前核对。密钥错误提示 object does not decrypt with this key，已有记录时注明两密钥 ID，不写文件。自行复制的包用 sha256sum -c 检查。
+**排查**
 
-   latest 默认最新，但若最新无服务器且最多一个账号，而旧包更多，则拒绝并列最多三个旧包。此情况常来自新主机在恢复前接管后上传的空库。用具体名称获取，offsite list 显示数量；按名取疑似空安装包会警告，旧版未记录数量显示 not recorded。
+每次锁定都以 `auth.otp.locked` 记入审计日志，并计入 `felis_auth_otp_lockouts_total{purpose}`（告警 `FelisOTPAccountLocked`）。查询方法见[查找登录失败记录](#sign-in-audit)。
 
-2. **安装前**放回旧 state，复用 DB 密码、调用方/转发令牌、邮件/上传密钥和 offsite.env：
+**解决**
 
-   ```
-   sudo install -d -m 0700 /etc/felis
-   sudo tar -xpf felis-db-....tar -C / --strip-components=1 state/etc/felis
+1. 使用 Passkey 登录，或等待锁定结束。
+2. 确认是账户所有者自己误操作导致锁定后，如需提前解锁，删除该账户的错误验证码记录：
+
+   ```bash
+   sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c \
+     "DELETE FROM otp_failure_windows WHERE user_id = (SELECT id FROM users WHERE username = '<name>');"
    ```
 
-3. 按全新主机安装。包不含 bootstrap.done，创建用旧密码的空库并迁移；发现恢复配置的 offsite 后开启每小时复制，但识别另一写桶主机，保持待机，提示 OFF-SITE COPY ON STANDBY，直到第 8 步不写桶。
+### 查找登录失败记录 {#sign-in-audit}
 
-4. 恢复用户镜像：
+每次被拒绝的登录都会在审计日志中写入一条 `auth.<door>.failed` 记录，`reason` 为 `bad_code`、`no_account`、`staff_account`、`not_staff`、`bad_assertion` 等。每轮限流中的首次拒绝写入 `auth.rate_limited`，并记录来源地址。记录包含 `actor_user_id`（账户，用于归属）、`client_ip`（与限流所依据的地址相同）和 `user_agent`。
 
-   ```
-   sudo felis offsite fetch-images
-   ```
-
-   默认最新镜像列表，at 可指定旧时间；以 platform 经回环端口，按摘要验证清单/层，只推缺失项。视为新推送，保留 24 小时，须在窗口内恢复数据库和白名单引用。
-
-   若新主机已接管并记录空仓库，fetch-images 拒绝最新空列表并提示 at 版本；fetch-uploads 同理。
-
-5. 恢复投稿上传：
-
-   ```
-   sudo felis offsite fetch-uploads
-   ```
-
-   按最新或 at 指定的列表写入 felis-uploads，使用控制面 UID，逐个核对 sha256，已存在者不动。
-
-6. 恢复数据库和服务器：
-
-   ```
-   kubectl -n felis scale deployment felis-api felis-operator --replicas=0
-   sudo felis db restore -yes -no-safety-backup /var/lib/felis/db-backups/felis-db-....tar
-   sudo felis migrate up -config /etc/felis/felis.host.toml
-   kubectl -n felis scale deployment felis-api felis-operator --replicas=1
-   tar -xOf felis-db-....tar k8s/minecraftservers.json | kubectl apply -f -
-   ```
-
-   tar 报 Not found in archive，表示包没有 CR，fetch-db 已提示。选 offsite list 中最新且没有 no MinecraftServer objects 的包，仅从它 apply CR；其未列服务器无法恢复。
-
-7. 恢复世界归档：
-
-   ```
-   sudo felis offsite fetch-worlds
-   ```
-
-   根据恢复的 world_backups 索引获取缺失归档，尚无备份卷时通过短期 felis-bind-felis-backups-* Pod 创建。列出桶中找不到的项。之后正常从归档恢复世界（§10、§13）。最新包索引覆盖桶归档，旧包未列后续归档，超过最长保留期限后同步会删除它们。
-
-8. 接管桶并发送首份副本：
-
-   ```
-   sudo felis offsite take-over          # names the host the bucket names now
-   sudo felis offsite take-over -yes
-   sudo systemctl start felis-offsite.service
-   ```
-
-   无 yes 仅显示原主机及最近写入，退出 4；加 yes 记录当前主机，旧主机再运行也不写桶并提示被接管。**演练机跳过**。
-
-9. 验证邮件。setup 状态页按 e，保存预填中继，重新输入密码（不显示存储值）；自测发至 From，未成功不写配置。按地址允许发件或 SPF 指旧 IP 时，先加入新地址，否则拒绝或进垃圾箱。Owner 在面板保存的中继已在第 6 步随数据库恢复，并处于生效状态；保存 setup 邮件页会以其中输入的中继替换它（§17）。面板可访问后，应改在「平台设置 → 邮件服务」使用「发送测试邮件」检查该中继。无中继且所有者无法登录时用 breakGlass（§17）。下一步可能使 Passkey 失效，邮件是恢复入口。
-
-10. 域名仍指旧地址时迁移。安装器保留备份中的根域名，日志 reusing the installed domain。
-
-    默认 `<旧地址>.nip.io` 必须更换：
-
-      ```
-      sudo felis domain set <new-address>.nip.io       # the plan
-      sudo felis domain set -yes <new-address>.nip.io
-      sudo felis domain check
-      ```
-
-    此步骤在 CR apply 后，以同步登录服 env。计划显示失效 Passkey 数，用户通过邮件登录再注册，其他影响见运维 §6。
-
-    自有域名保留，修改 root、通配符、console、op.console 记录；隧道提供面板时只需改 root 和通配符。dig +short 逐项确认，domain check 只检查可解析，不要求特定 IP。计划迁移可提前降低 TTL。
-
-11. 恢复 Cloudflare 边缘。包含 cloudflared.yml，但 root 登录证书 cert.pem、隧道 JSON、unit 未备份；无连接器时面板域名返回 1033。
-
-    setup 状态页按 n，选 Tunnel + Access；首屏 i 安装 cloudflared，l 执行 tunnel login，经浏览器账号授权生成 cert.pem，两者齐全后回车打开表单。输入 API token、account ID、原允许身份/域名/隧道名。域名来自恢复配置，隧道名默认 felis；其他名称可根据 cloudflared.yml 的 tunnel ID 在 Zero Trust → Networks → Tunnels 查询。
-
-    向导按名称复用隧道并取回凭证，指向面板 DNS，复用 Access 应用使 audience 不变、重写策略，安装启动 cloudflared-felis，确认隧道可用后关闭 NodePort。若保留旧隧道 JSON，可先以 0600 放回 root 的 .cloudflared，仍需 cert.pem。改名称会新建隧道并使旧隧道闲置，随后在控制台删除旧项。**演练机跳过**。
-
-放行玩家前验证：
-
-```
-sudo felis db check                     # the database answers and has a fresh bundle
-kubectl get minecraftservers -A         # every server the bundle held
-kubectl -n minecraft get pods           # servers pull their pinned images (no ImagePullBackOff)
-sudo felis offsite status               # the hourly copy runs from this host again
-sudo felis domain check                 # every name, the certificate and the tunnel on the new address
-```
-
-演练机从隧道安装恢复并改为 nip.io 时，tunnel 检查因仍路由生产域名失败，属于预期。
-
-通过面板域名检查：旧账号登录；除迁域名失效者外 Passkey 随数据库恢复。再退出，用自己能收信的所有者邮箱验证码登录，证明 API 到外部收件箱的真实投递；setup 自测仅证明控制台到 From 地址。码不来见 §17。检查归档列表，恢复最新世界、启动，并以 `<name>.<root>` 加入。
-
-### 保存异地副本 {#keep-a-copy-somewhere-else}
-
-同盘数据库包只防误操作/坏升级，同盘世界归档只防删服，均无法承受磁盘丢失；用户镜像和投稿也一样。异地复制将四类数据在主机加密后送到 S3 兼容桶（AWS、R2、B2、MinIO 等）：
-
-```
-FELIS_OFFSITE_ENDPOINT=https://<account>.r2.cloudflarestorage.com \
-FELIS_OFFSITE_BUCKET=felis-backups \
-FELIS_OFFSITE_ACCESS_KEY=... FELIS_OFFSITE_SECRET_KEY=... \
-  bash deploy/bootstrap.sh          # or the curl | sudo bash one-liner
-```
-
-可选 REGION、PREFIX（同桶多安装）、DB_KEEP（默认 30）。安装器写 offsite 配置，将凭证及生成的密钥存入 0600 offsite.env，**仅在终端显示密钥一次**，不进入 tee、cloud-init、CI 日志；无终端时提示读取命令。请存密码管理器，桶只有加密对象，无密钥不可读。重跑保留原密钥，拒绝与文件不同的 FELIS_OFFSITE_KEY。无桶提示 NO OFF-SITE COPY。旧安装器曾因读 offsite 的管道竞争误删 timer，重跑当前版修复；list-timers 检查。[SH-TESTED；VM-TESTED：竞争失败重跑。]
-
-明文 felis-key-id 仅记录密钥 ID，不泄露密钥。首次同步写入，旧桶以是否能解最新对象判断。安装器 check-key、每次 sync 先检查。密钥不匹配时，在任何复制或清理前停止，安装结束 OFF-SITE COPY STOPPED，status 退出 1，看门狗立即通知。将 offsite.env 的 KEY 恢复为桶密钥并启动 service，或换空桶/前缀重跑。[GO-TESTED: `TestSyncRefusesAnotherKeysBucket`, `TestCheckKey`；SH-TESTED；VM-TESTED：MinIO 拒绝错误密钥且桶不变、check-key 0/3、fetch-db 显示 ID。]
-
-明文 felis-writer 记录写入主机 ID、名称、最近同步。主机 ID 在 `/var/lib/felis/offsite/host-id`，不入备份。重建机有凭证却无原 ID，发现另一写入者即待机，不复制不清理，status 退出 1；原主机三小时内活跃则抑制邮件，超过后通知待机不复制。含加密对象却无 writer 的桶也待机，旧版曾写过的主机在下一次同步可认领。take-over 无 yes 只显示，加 yes 改为本机；原主机下次停止复制、status 1、立即通知。演练误接管时，在生产执行 take-over -yes 收回。[GO-TESTED: `TestLeasePlan`, `TestSyncStandsBy`, `TestOffsiteTakeOver`, `TestRestoredHostKeepsStandingBy`；SH-TESTED；VM-TESTED：MinIO 待机、接管、旧主机被替换后收回及旧版认领。]
-
-运行内容：
-
-- timer 每小时 sync，随机最多十分钟、Persistent=true。复制 offsite_at 为空的归档并记录，复制桶缺少的最新 db_keep 个包并清旧包；记录已删且 expires_at 过期的归档从桶删除。正确大小的现存对象直接记已复制，中断可继续。[GO-TESTED: internal/offsite]
-- 复制世界归档后创建 fresh offsite 包，布局同 daily，state-dir 默认 /etc/felis，然后上传，保证桶最新索引列全归档。本地保留一份，桶仅保留最新 offsite；db_keep 只数其他标签，繁忙快照不挤掉 daily。未复制或最新包已晚于复制时不创建。面板仍检查 daily timer。[GO-TESTED: `TestOffsiteSyncerSnapshotsAndSweeps`；PG-TESTED]
-- 无数据库记录的桶归档，超过 archive 各 retention 中最长者后清理；年轻者保留并日志说明。数据库完全无归档时跳过清扫，避免未恢复就删桶。[GO-TESTED]
-- 用户镜像复制仓库全部 felis/、mirror/ 之外的清单和层，经回环读取，共享层只保存一次。平台路径只复制服务器/白名单按摘要固定的修订，不复制标签，恢复不覆盖新安装标签。镜像集合变化生成新版列表；被替代超过 14 天的列表及仅其引用层清理，因此误删镜像两周内可 fetch-images -at。途中丢失清单保留旧副本，status 标 not whole。默认 registry.url，registry 参数可改，off 跳过。[VM-TESTED：16 镜像、638 MiB，同摘要恢复空仓库。]
-- 上传复制 felis-uploads 的 sub-*/context.tar.gz，重复内容只存一次，列表同样保留 14 天，可 at。只有大小/修改时间变化才重读；适用于本地 user_uploads_context，uploads-dir 可手动指定，uploads-pvc 空值跳过。[VM-TESTED：17 上传、10 对象、200 MiB，逐字节相同。]
-- 对象路径为 worlds/`<archive>`.fenc、db/`<bundle>`.fenc、registry/blobs 与 manifests/`<sha256>`.fenc、registry/index/`<stamp>`.json.fenc、uploads/blobs/`<sha256>`.fenc、uploads/index/`<stamp>`.json.fenc。AES-256-GCM 以 64 KiB 分段，拒绝截断、重排、错密钥；只有 key-id/writer 明文。
-- 顺序是数据库包 → 世界归档 → 包含新索引的包 → 镜像 → 上传。每对象期限十分钟加按 512 KiB/s 计算的大小时间，10 GiB 约六小时。超时仅该对象失败，下次重试，其他仍继续；大归档可能使一次同步运行数小时，timer 不启动第二次。单对象中断从头传。[GO-TESTED]
-- 回收器须确认桶归档后才删空闲世界（§10）。
-- 十二小时未完成同步则通知；密钥拒绝或桶被接管立即通知。
-
-检查：
-
-```
-sudo felis offsite status        # last run, errors, what the bucket holds, what waits
-sudo felis offsite list          # the bundles, image lists and upload lists in the bucket, newest first
-sudo felis offsite check-key     # whether offsite.env holds the key the bucket was sealed with
-sudo journalctl -u felis-offsite -n 50 --no-pager
-sudo systemctl start felis-offsite.service   # run one now
-```
-
-status 十二小时无成功退出 1。missing 表示数据库有记录但本地卷无文件，没有数据可复制。
-
-换桶时修改 host.toml 的 offsite 及 offsite.env 凭证，再重跑；关闭则删配置节再重跑。跨桶保持同密钥可读取旧副本。
-
-没有桶时自行定期 `rsync -a root@felis-host:/var/lib/felis/db-backups/ /backups/felis-db/`，连同 sha256 并在目标校验；仅覆盖数据库。世界归档位于 storage 的 felis-backups 卷目录，镜像在 *_felis_registry，上传在 *_felis_felis-uploads。
-
-### `FELIS_PRE_MIGRATE_BACKUP=0` {#felis-pre-migrate-backup-0}
-
-跳过迁移前快照（migrate up -no-backup），安装器显著警告。只有快照无法工作且有其他备份时使用，例如外部数据库比主机 pg_dump 新。
-
-
-## 17. 登录被拒绝：429 限流、邮件不可用、验证码锁定与登录失败 {#_17-sign-in-refused-429-limits-no-mail-relay-account-code-locks-failed-sign-ins}
-
-公开登录端点（auth/*，退出和管理登录状态轮询除外）有三项限制，均返回 429、Retry-After 和独立错误码。需发码的端点在无中继时还返回 503 mail_unavailable。
-
-### `rate_limited`：同一地址请求过于频繁 {#rate-limited-one-address-called-the-doors-too-often}
-
-每客户端地址共享 20 次突发、每分钟补充 20 次，覆盖全部登录端点。一次登录三四个请求，通常只影响脚本。IPv6 同 /64 共用限制。计入 felis_rate_limited_total{scope="auth_door"}，每分钟拒绝超过十次、持续十分钟触发 FelisSignInFlood。
-
-地址来自 auth.client_ip_header：
-
-- Cloudflare 使用 CF-Connecting-IP，边缘设置写入，access_jwt_aud 配置隐含此值。NodePort 限回环使所有流量来自 cloudflared，才能信任该头。
-- 自有反代用 X-Forwarded-For 最右一项，即代理追加项；防火墙必须仅允许代理到达 NodePort，否则直连可伪造地址。
-- 未设置则使用 TCP 对端；反代后所有用户共用代理 IP，导致**所有人同时限流**。启动日志 sign-in rate limit keys on 表明来源。同步主机和 Pod 配置后执行 converge。
-
-### `mail_rate_limited`：整个安装的邮件额度已耗尽 {#mail-rate-limited-the-install-wide-mail-budget-is-spent}
-
-API 的验证码及通知共用 smtp.max_per_hour 或面板保存的中继的「每小时发信上限」，默认 120，最多四分之一可突发，防止耗尽中继配额或封号。耗尽时全部地址返回同样 429，不到达中继。felis_mail_total{result="throttled"} 计拒绝，首项触发 FelisMailBudgetExhausted。先查限流指标是否洪水，真实登录需求可按中继额度提高。
-
-中继实际拒信为 result=failed、调用方 502 mail_undeliverable，触发 FelisMailDeliveryFailing，API 日志有中继原因。
-
-### `mail_unavailable`：未配置邮件中继 {#mail-unavailable-no-mail-relay}
-
-面板和 `[smtp]` 均未配置中继时，邮件登录、管理控制台登录、邮箱验证、敏感变更/迁移的邮件二次验证，均在生成码前返回 503 `mail_unavailable`。公开端点在查询邮箱前返回，避免泄露账号。只能 Passkey 登录，已验证邮箱也不作为重新验证方式。验证码绝不写日志。要开放这些端点，可在面板「平台设置 → 邮件服务」卡片保存中继（下一节），或运行 setup 配置邮件。felis.toml 没有 `[smtp]` 时，`felis api` 启动时会说明，并指出使用的是面板中继；面板是否已保存中继，可在「邮件服务」卡片查看。
-
-### 面板中设置的邮件中继 {#the-mail-relay-set-in-the-panel}
-
-Owner 可在面板「平台设置 → 邮件服务」卡片配置中继。它存于 `platform_settings` 的一行（`smtp`），所有发信方都读取它：felis-api（登录码、验证、二次验证码和通知）、回收器的删除前提醒（§10）、看门狗告警（§14）和应急控制台的验证码（下文）。没有该行时，各方回退到 `felis setup` 写入 felis.toml 的 `[smtp]` 中继。在面板保存后，它无需重启即在各处优先生效：felis-api 最多每 15 秒读取一次该行，回收器、看门狗和应急控制台在下次运行时读取。卡片显示当前生效的中继来源：「面板设置」、「安装时的设置」或「未配置」。
-
-- **保存前先验证中继**。「检查并保存」向发件地址发送一封自检邮件，中继接受后才保存；该检查不可跳过，因为静默失败的中继会使用户无法登录。「发送测试邮件」（`POST /api/v1/settings/smtp/test`）通过当前输入的中继（无论是否已保存）向 Owner 的已验证邮箱发送一封邮件（无已验证邮箱时发至发件地址），并消耗上文的全安装邮件额度。失败时指明所处阶段：`smtp_unreachable`、`smtp_tls`、`smtp_auth`、`smtp_sender_refused`、`smtp_recipient_refused`，其余为 `smtp_failed`。中继返回的原文只写入 felis-api 日志，因为其中可能包含内部地址。
-- **卡片接受的取值**。端口仅限 25、465、587 和 2525：felis-api 从集群内部连接中继，其他端口会使检查变成对内部服务的探测。发件人只能是纯地址，不含显示名称。「要求加密连接」（默认开启）拒绝 465 以外端口上不提供 STARTTLS 的中继，本机中继也没有豁免。「每小时发信上限」替代 `[smtp] max_per_hour`（0：使用默认值 120）。felis-api 拒绝连接链路本地、未指定或组播地址（在 DNS 解析后检查），因此中继设置无法访问云元数据地址（169.254.169.254）；此类中继返回 `smtp_unreachable`。
-- **密码**永不返回面板（卡片只显示已保存，留空即保留原值），也不写入审计日志。它保存在数据库行中，因此随数据库备份包及其加密的异地副本一并保存（§16）。
-- 「恢复为安装时的设置」清除该行，将中继交还 felis.toml。setup 控制台的邮件页每次保存时也执行同样操作，因此其中输入的中继即为生效的中继。
-- 保存、清除和测试均需重新确认身份；卡片加载后中继已被修改时，保存返回 `409 mail_settings_changed`。审计操作为 `smtp.updated` 和 `smtp.cleared`。API：`GET`、`PUT`、`DELETE /api/v1/settings/smtp`，以及 `POST /api/v1/settings/smtp/test`（Owner）。
-- `sudo felis doctor`、`felis setup` 卡片的 `alerts` 行和安装器结束摘要均计入面板保存的中继（安装器查询 `felis panel-settings`，它只输出是或否），仅当面板和 felis.toml 都没有中继时才报告缺失。[GO-TESTED: `TestDoctorCountsPanelSettings`, `TestHostAlertRoute`, `TestPanelSettingsSaysWhatThePanelHolds`] [SH-TESTED: `deploy/bootstrap_test.sh`]
-
-[GO-TESTED: `TestMailSettingsReadShowsWhereTheRelayComesFrom`, `TestMailSettingsSaveChecksTheRelayAndOverridesFelisToml`, `TestMailSettingsRefusesAPortOffTheSubmissionList`, `TestMailSettingsClearHandsTheRelayBack`, `TestMailSettingsTestMailsTheOwner`, `TestMailSettingsOwnerOnly`, `TestRelayTestErrorCategories`, `TestValidateRefusesWhatCannotBeARelay`, `TestParseTreatsAClearedRowAsAbsent`, `TestRelayForPrefersThePanelRelay`, `TestPanelFirstRecoveryMailer`, `TestRefuseLinkLocal`]
-
-### 邮件中继因缺少 TLS 被拒绝 {#relay-refused-for-lacking-tls}
-
-465 从首字节使用 TLS，其他端口须 STARTTLS；不提供时失败 smtp: `<host>`:`<port>` does not offer STARTTLS，调用方 502，日志/向导显示详情，面板检查返回 `smtp_tls`。除本机 localhost、127.0.0.0/8、::1 外默认强制，避免途中读取码或剥离升级协商。使用 465 或支持 STARTTLS 的中继；可信链路可在两个配置的 smtp 中设 require_tls=false，重跑和向导保留，API 启动时警告。面板保存的中继改为在「邮件服务」卡片关闭「要求加密连接」；该设置对本机中继没有豁免，因此不支持 STARTTLS 的本地中继也需关闭此项。
-
-### `otp_account_locked`：24 小时内输错验证码 10 次 {#otp-account-locked-ten-wrong-codes-in-24-hours}
-
-同账号跨全部邮件码累计十次错误，锁定到首次错误后的 24 小时。公开登录返回与错误码相同回复，账号收到一次锁定邮件；已登录的邮箱验证/迁移验证返回 429 otp_account_locked。Passkey 不受影响。审计 auth.otp.locked，指标 felis_auth_otp_lockouts_total{purpose}，触发 FelisOTPAccountLocked。
-
-确认是所有者误操作后，可提前解锁：
-
-```sh
-sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c \
-  "DELETE FROM otp_failure_windows WHERE user_id = (SELECT id FROM users WHERE username = '<name>');"
-```
-
-### 谁尝试过登录：审计记录 {#who-tried-the-audit-trail}
-
-每个拒绝写 auth.`<door>`.failed，reason 为 bad_code、no_account、staff_account、not_staff、bad_assertion 等，并计 auth_failures；十五分钟超过 30 触发 FelisSignInFailures。每次限流突发首次拒绝写 auth.rate_limited 及来源。行有 actor_user_id（实际归因列）、client_ip、user_agent；actor 只是已验证邮箱或用户名的显示文字，不使用未验证输入。
-
-```sh
+```bash
 sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c "
   SELECT created_at, action, actor, client_ip, payload->>'reason' AS reason
   FROM audit_logs
@@ -1567,204 +579,961 @@ sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U post
   ORDER BY created_at DESC LIMIT 50;"
 ```
 
-审计写入失败不使业务失败，日志 audit: lost，计 felis_audit_write_failures_total，触发 FelisAuditWriteFailing，通常是 PostgreSQL 问题（§16）。
+被拒绝的登录同时计入 `felis_auth_failures_total{door,reason}`；15 分钟内超过 30 次时触发 `FelisSignInFailures` 告警。审计记录写入失败时，操作本身仍会成功，felis-api 记录 `audit: lost ...`，并触发 `FelisAuditWriteFailing` 告警；原因几乎总是数据库（见[数据库不可用](#database-unavailable)）。审计记录的保留与导出见[审计日志](/guide/administration#audit-log)。
 
-### 记录保留多久 {#how-long-rows-are-kept}
+### 管理员登录等待批准 {#operator-sign-in}
 
-API 启动一分钟后及每六小时清理，日志 retention: pruned spent rows 按表统计：
+在运维控制台使用「管理员登录」时，页面一直停留在「等待游戏内批准…」。
 
-| 记录 | 清理时间 |
+**原因**
+
+管理员登录需要两个因素：发送到工作人员邮箱的验证码，以及一位在游戏内在线的管理员的批准。只有关联到工作人员账户的 Minecraft 账号可以批准。登录请求在短时间后过期。
+
+**解决**
+
+1. 请一位在游戏内在线的管理员执行 `/felis web op approve <code>`。该命令显示请求所属的账户；管理员执行 `/felis web op approve <code> <account>` 并写明账户名即可批准。
+2. 改用 Passkey 登录，Passkey 登录无需游戏内批准。
+3. 没有任何工作人员账户能够登录时，在主机上执行 `sudo felis breakGlass` 恢复访问（见[应急访问](/operations/access#break-glass)）。
+
+## 内部 API 与游戏插件 {#internal-api}
+
+### 游戏插件无法访问内部 API {#internal-api-errors}
+
+游戏代理、登录空间、构建 Job 和 `felis backup-now` 调用 felis-api 的内部 API（端口 8081，路由位于 `/api/v1/internal/` 下）。内部 API 通过 ClusterIP Service `felis-api-internal` 访问，与面板使用的 `felis-api` Service（端口 443）相互独立，且从不暴露在节点上。每个调用方使用各自的 Bearer 令牌认证，每条路由只服务 OpenAPI 文档中为其列出的调用方（见 [API 参考](/reference/api#authentication)）。
+
+| 调用方 | `felis` 中的 Secret（键 `token`） | API 环境变量 | 调用方读取位置 |
+| --- | --- | --- | --- |
+| 游戏代理（`velocity`） | `felis-service-token` | `FELIS_SERVICE_TOKEN` | `/opt/felis/velocity/plugins/felis-link/felis-link.properties` 中的 `service-token` |
+| 登录空间（`limbo`） | `felis-limbo-token`，`minecraft` 中有副本 | `FELIS_LIMBO_TOKEN` | 登录 Pod 的环境变量 `FELIS_SERVICE_TOKEN` |
+| 构建 Job（`build`） | `felis-build-token`，构建命名空间中有副本 | `FELIS_BUILD_TOKEN` | 构建 Job 的下载步骤 |
+| `felis backup-now`（`ops`） | `felis-ops-token` | `FELIS_OPS_TOKEN` | 每次运行时从 Secret 读取 |
+
+安装器将四个令牌生成到 `/etc/felis/secrets.env`（`SERVICE_TOKEN`、`LIMBO_TOKEN`、`BUILD_TOKEN`、`OPS_TOKEN`），并在每次运行时应用。审计日志以来源 `internal:<caller>` 记录内部操作。
+
+内部 API 出错时，代理记录 `server list refresh failed …; keeping current registrations`，并沿用最后一次收到的服务器列表继续路由；玩家看到 `登录验证暂时不可用，请稍后重试。`；登录空间记录 `FelisLimbo: link status poll failed`；构建在获取构建上下文时失败。
+
+**原因**
+
+| 现象 | 原因 |
 | --- | --- |
-| 会话 | 到期或退出后 30 天 |
-| 邮件码、Passkey 挑战、setup 绑定、管理登录请求 | 到期或使用后 30 天 |
-| /felis link 码 | 到期后 30 天 |
-| 未完成账号迁移 | 最后步骤后 30 天，已完成保留 |
-| otp_failure_windows | 开始后 30 天 |
-| audit_logs | 超过 audit.retention 或面板保存的值 |
+| 调用无法建立连接，没有 HTTP 状态码 | `felis-api-internal` Service 不存在或不再选中 API Pod，或 felis-api 已停止 |
+| 某个调用方的所有调用都返回 `401` | 该调用方的令牌未设置，或与 API 的副本不一致 |
+| `403 wrong_caller` | 令牌有效，但属于该路由不服务的调用方，例如构建令牌访问代理路由 |
+| felis-api Pod 停留在 `CreateContainerConfigError` | `felis` 中缺少四个令牌 Secret 之一 |
+| felis-api 拒绝启动并提示 `the X and Y tokens are the same value; each caller needs its own` | 两个调用方的令牌相同 |
 
-audit.retention 默认 365d，支持天、每月 30 天的 18mo、forever，不接受小于 30d。Owner 可在面板「平台设置 → 备份与审计保留」卡片覆盖该值（「审计记录保留天数」：0 保留全部记录，其余为 30 到 3650 天；见 §10「面板中设置的保留策略」），API 在下次清理时应用。数据库包在其保留期内仍包含旧行。需要长期保存时提前导出：
+**排查**
 
-```sh
-sudo felis db audit-export -until 2026-01-01 -out /root/audit-2025.jsonl
+1. 查看代理的统计行和刷新记录：
+
+   ```bash
+   sudo journalctl -u felis-velocity | grep -E 'Felis: last 10 min|server list refresh'
+   ```
+
+   代理在每个有活动的 10 分钟记录一行统计，例如 `Felis: last 10 min: felis-api calls=412 (no answer=0, 4xx=3, 5xx=0, retried=0), …`。`no answer` 持续增加说明到内部 API 的路径中断：Service、网络策略或 API Pod。`busy refusals` 或 `join-events dropped` 大于零说明 felis-api 的响应速度跟不上代理 8 个线程的处理能力。
+2. 检查 Service，输出中应包含集群 IP 和端口 8081：
+
+   ```bash
+   sudo k3s kubectl -n felis get svc felis-api-internal
+   ```
+
+3. 查找未设置的令牌。felis-api 启动时为每个未设置的令牌记录一行，例如 `felis api: warning: FELIS_LIMBO_TOKEN unset — the internal face turns the limbo caller away`：
+
+   ```bash
+   sudo k3s kubectl -n felis logs deploy/felis-api | grep 'unset'
+   ```
+
+4. 将调用方的令牌与对应 Secret 比较，以代理为例：
+
+   ```bash
+   sudo k3s kubectl -n felis get secret felis-service-token -o jsonpath='{.data.token}' | base64 -d; echo
+   sudo grep '^service-token=' /opt/felis/velocity/plugins/felis-link/felis-link.properties
+   ```
+
+5. 登录空间：查看其日志：
+
+   ```bash
+   sudo k3s kubectl -n minecraft logs login-0 | grep 'link status poll'
+   ```
+
+**解决**
+
+1. Service 缺失、Secret 缺失或令牌不一致时，重新运行安装器（见[安装与部署](/guide/deployment#install)）。安装器会应用 Service、四个 Secret 以及各调用方持有的令牌副本。
+2. 对于其他主机上的代理，将其 `felis-link.properties` 中的 `service-token` 设为 Secret `felis/felis-service-token` 中的值；插件在数秒内读取新值。
+3. 出现 `wrong_caller` 时，按上表为调用方配置其自己的令牌。
+4. 两个令牌相同时，轮换其中一个：
+
+   ```bash
+   sudo felis rotate-token <kind>
+   sudo felis rotate-token -yes <kind>
+   ```
+
+   不带 `-yes` 时，命令只输出将要修改的内容及其造成的中断。各类轮换会重启哪些组件见[凭据轮换](/operations/access#rotate-credentials)。
+
+## 账号关联与认领 {#account-linking}
+
+### 关联或认领失败 {#account-link-errors}
+
+玩家在游戏内执行 `/link` 获取一次性绑定码，然后在「账户」页面「Minecraft 关联」卡片的「绑定码」字段中输入，并选择「关联」，即可关联 Minecraft 账号。绑定码由 8 个字符组成（字母和数字，不含 I、O、0、1），有效期 10 分钟，只能使用一次；不区分大小写，忽略首尾空格。认领无主服务器需要已关联的账号和足够的配额（见[账号关联](/guide/players#account-linking)）。
+
+**原因与解决**
+
+| 返回 | 面板提示 | 原因 | 解决办法 |
+| --- | --- | --- | --- |
+| `400 invalid_code` | 「绑定码无效或已过期，请重新获取。」 | 绑定码不存在，或已超过 10 分钟 | 再次执行 `/link`，在 10 分钟内输入新的绑定码 |
+| `409 already_linked` | 「该 Minecraft 账户已关联至其他用户。」 | 该 Minecraft 账号已关联到另一个面板账户。绑定码保持有效，正确的账户仍可使用 | 使用持有该关联的账户登录，或请管理员在「管理 → 用户管理」中检查相关账户 |
+| `412 not_linked` | 「请先关联 Minecraft 账户（账户页 → 关联）。」 | 认领和所有者操作需要已关联的 Minecraft 账号 | 先关联账号 |
+| `403 quota_exceeded` | 「服务器数量已达配额上限。」 | 认领后将超出账户在服务器数、CPU、内存或存储方面的配额 | 由管理员提高配额（见[配额](/guide/administration#quotas)） |
+| `409 already_claimed` | 「该服务器已被其他账户认领。」 | 其他账户先完成了认领；同一服务器只有一个账户能认领成功 | 刷新服务器列表 |
+| `409 server_retiring` | 「服务器已进入放弃或删除流程，将在下一次每日回收时处理。…」 | 服务器正在被放弃或删除 | 在面板中撤销该请求 |
+| `404 not_found` | 「请求的内容不存在或已被删除，请刷新后重试。」 | 服务器不存在 | 刷新服务器列表 |
+| `400 bad_request`、`400 bad_mc_uuid` | 「请求未被接受：…」「Minecraft UUID 格式无效。…」 | 游戏插件发出的请求缺少 UUID、绑定码为空、UUID 无效，或认证源不是 `mojang` 或 `thirdparty` | 确认游戏插件与已安装的 Felis 版本一致 |
+
+在运行 Felis 模组的独立服务器上，服务器处于离线模式时，`/link` 回复 `此服务器未开启正版验证，不能在这里绑定`。在 Felis 代理之后，`/link` 由代理提供。
+
+**排查**
+
+成功的关联和认领以 `account.link` 和 `claim` 记入审计日志。失败时查看 felis-api 日志和代理日志：
+
+```bash
+sudo k3s kubectl -n felis logs deploy/felis-api --tail=200
+sudo journalctl -u felis-velocity -n 200
 ```
 
-since/until 接受 UTC 零点日期或 RFC3339，区间左闭右开；每行 JSON、最旧优先。文件 0600，不覆盖已有文件。
+游戏内执行 `/link` 本身失败时，检查内部 API（见[内部 API 错误](#internal-api-errors)）。
 
-### `felis breakGlass`：恢复码与 OVERRIDE [VM-VERIFIED] {#felis-breakglass-the-recovery-code-and-the-override-vm-verified}
+## 构建与镜像 {#builds-images}
 
-有工作人员账号后，sudo breakGlass 询问管理员/所有者身份，通过与登录码相同的中继向其验证邮箱发六位码：数据库可访问时使用 Owner 在面板保存的中继，否则使用 felis.toml 的 `[smtp]`。十分钟有效，五次错误作废。使用 `[smtp]` 时，密码按 password_ref 环境变量 → 主机 smtp-password → Secret → 无 AUTH 读取；k3s 停止也可发，不受 API 邮件预算。正确码才以 recovery 归属账号，邮件注明主机/OS 用户，让未发起者知道 root 被他人使用。
+本节条目涉及「构建流水线」中的镜像构建、平台镜像仓库以及服务器运行的游戏镜像。
 
-其他结果要求输入 OVERRIDE 并说明原因：未知工作人员、无验证邮箱、无中继/读不到 Secret、拒信、过期、五次错误或主动跳过。Esc 重新开始并发新码；中继故障仍可未验证覆盖，但记录原因。
+### 镜像构建失败 {#build-failures}
 
-审计为 break_glass.recovery、root_override，新 Operator 账号为 operator_create，source=break-glass。仅码验证时 verified=true，并有 verified_by=email_otp、code_sent_to；覆盖记录 otp_skipped（unknown_admin、no_verified_email、no_relay、send_failed、code_expired、code_rejected、operator_skipped）及失败详情。root 可后改审计，因此只是归因记录，不是不可篡改证明。
+**原因**
 
-```sh
-sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c "
-  SELECT created_at, action, actor, payload->>'verified' AS verified,
-         payload->>'otp_skipped' AS skipped, payload->>'otp_skip_detail' AS detail
-  FROM audit_logs WHERE source = 'break-glass' ORDER BY created_at DESC LIMIT 20;"
-```
+构建以 Job 形式运行在 `felis-build` 命名空间中。构建 Pod 依次执行 `egress-gate`、`context-fetch`、`kaniko`、`trivy`、`sbom` 和 `scan-gate` 步骤，全部成功后才执行最后的 `push` 步骤，因此被扫描拦截的镜像不会进入镜像仓库。构建错误会指明失败的步骤及其最后几行输出、超出的期限或扫描结论。
 
-### 可选：在边缘层配置 Cloudflare 限流规则 {#optional-a-cloudflare-rate-limiting-rule-in-front}
-
-API 限制与边缘无关。Cloudflare 可在 Security → WAF → Rate limiting rules，为 console/op.console 的 URI Path 以 /api/v1/auth/ 开头的流量，按 IP 每十秒 30 请求，阻断十秒（原文使用 Free 计划限制）。
-
----
-
-## 18. 服务器文件修改或上传被拒绝 {#_18-server-files-a-change-or-an-upload-is-refused}
-
-文件页仅供所有者/管理员，须完全停服。读取会复用同一世界的只读 `felis files` Job，避免每打开一个文件夹或文件都启动 Pod。该 worker 通过现有内部 API、使用限定于该世界的随机令牌拉取命令；每个请求仍经过所有者/管理员和停服检查。worker 空闲 45 秒或累计运行四分钟后退出；每个 API 进程最多四个 worker，达到上限时改用一次性读取。不缓存任何文件内容。面板缓存目录列表 30 秒，刷新、写入、上传或恢复会使缓存失效。文本编辑器高亮常见配置格式并保留 CRLF；二进制文件和超大文件改为提供下载。
-
-修改仍在 minecraft 运行一次性 Job，标签为 `app.kubernetes.io/managed-by=felis-files`，files-mode 为 list/read/write/mkdir/delete/rename/upload/unzip。读取和列表不持锁，全部修改持世界锁，唤醒或第二操作返回 maintenance_in_progress。面板逐个上传，期间禁用其他修改。
-
-| HTTP | 错误码 | 含义与处理 |
-| --- | --- | --- |
-| 409 | not_stopped | Pod 仍在保存终止，等待服务器 Pod 不再存在 |
-| 409 | maintenance_in_progress | 其他文件、备份、恢复或回收占用，见 §3b |
-| 409 | file_exists | 新建/重命名/无覆盖上传路径已存在，改名或确认替换 |
-| 409 | file_changed | 编辑后文件已变，加载最新或明确覆盖 |
-| 400 | bad_path | 路径出卷（..、绝对路径、外指链接），移动受保护的 server.properties/config/paper-global.yml，或读取后者。名称保护避免机密泄露，paper-global.yml 含共享转发密钥 |
-| 404 | not_found | 路径或父目录消失，刷新 |
-| 413 | too_large | 读取超过 1 MiB、保存超过 256 KiB、单请求上传超过 64 MiB；大文件改整体上传，面板自动分片 |
-| 411 | length_required | 上传无 Content-Length，使用面板或 curl -T |
-| 400 | upload_incomplete | 正文少于声明长度，重试，原文件未改 |
-| 507 | upload_staging_full | 暂存后空闲低于 10%，清理上传卷 |
-| 507 | volume_full | 世界卷满，旧文件保持，清文件或扩卷 |
-| 504 | files_timeout | API 等待超过 90 秒，Job 可能继续，见下文 |
-| 503 | files_unavailable | 无 Job runner，或上传暂存目录/内部地址未配置，查启动日志 |
-| 404 | upload_not_found | 会话取消、完成、空闲六小时或 API 重启，重新上传 |
-| 409 | upload_offset_mismatch | 分片起点不同，面板查询偏移后续传 |
-| 409 | upload_busy | 同上传另一分片仍在传，面板处理 |
-| 413 | part_too_large | 超 32 MiB 或超声明总量，客户端错误，改用面板 |
-| 409 | upload_incomplete | 尚未传齐便提交，客户端错误 |
-| 429 | too_many_uploads | 账号已有四个大文件会话，完成/取消一个 |
-
-**上传分两段**：浏览器至 API，暂存 `/var/lib/felis/uploads/.file-staging`，未挂上传卷时在临时目录 felis-file-staging。Job 用一次性令牌从 API 内部 file-uploads/`<id>` 获取，验证大小/sha256，再落盘。响应后删暂存，API 重启清空目录；获取失败或字节不匹配不改目标。日志：
-
-```sh
-kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>,app.kubernetes.io/managed-by=felis-files
-kubectl -n minecraft logs job/<job>
-```
-
-**files_timeout 后** Job 可运行至自身两分钟期限并成功。结束前仍持锁，等待并刷新列表确认。完成后保留 Job/日志两分钟。
-
-**超过 64 MiB 的文件**自动创建 files/uploads 会话，一次预留整文件暂存空间，不足则 507；发送 32 MiB 分片，避开 Cloudflare 100 MB，失败重试/按偏移续传，除空间无额外总量上限。途中启动服务器只影响提交，提交前须再次停服。commit 立即 202，后台 Job 最多两小时。会话绑定账号/服务器，空闲六小时删除；未获取全文件就失败的 Job 保留会话，可再次 commit，无须重传。目录应上传 zip，避免中断只留下半个世界。
-
-**解压**仅 zip，先在归档旁 `.felis-unzip-*` 隐藏目录完整写入检查，成功才移入；失败不改目标并删临时目录。写前检查越界/链接（archive_unsafe、archive_symlink）、文件/目录冲突（type_conflict）、空间（volume_full）；声明大小不符为 archive_invalid。支持 Windows 中文 GBK 文件名。未允许覆盖而冲突时 file_exists，面板显示列表确认后带 replace 重试。
-
-大上传/解压关页仍继续，files/ops 显示运行项及过去 30 分钟结果、字节进度；失败返回具体码或 job_failed/Job 条件，两小时为 DeadlineExceeded。Job 标 files-async=true，无结果失败日志保留 30 分钟：
-
-```sh
-kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>,felis.lolicon.best/files-async=true
-```
-
-**下载文件/目录**用 files/download 的 export Job，export-mode=files，只读读取或打 zip，由 API 流式输出。要求停服并持世界锁到结束。拒绝 paper-global.yml，目录压缩也排除；server.properties 隐去 rcon.password，按真实文件匹配保护链接。世界/备份导出同样过滤。每用户并行两个、全平台四个，每用户每小时 30，越限 429 export_busy。
-
-审计 file.write/mkdir/delete/rename（to）、upload（size_bytes、sha256、overwrite）、unzip（overwrite）、download；server_name=`<server>`:`<path>`：
-
-```sh
-sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U postgres felis -c "
-  SELECT created_at, actor, action, server_name, payload
-  FROM audit_logs WHERE action LIKE 'file.%' ORDER BY created_at DESC LIMIT 20;"
-```
-
-[GO-TESTED: internal/fileedit、handlers_files_test.go、handlers_fileops_test.go、cmd/felis/files_test.go、TestExpireFileSessions、maintenance。VM-TESTED：带文件 Job 标签的 Pod 可到 API 内部接口；256 KiB 内容拆六变量通过真实二进制逐字节落盘，单 140 KB 变量会 argument list too long。API 上传两段端到端尚未在集群执行。]
-
----
-
-## 19. 计划任务被跳过、漏执行或失败 {#_19-scheduled-tasks-a-run-is-skipped-missed-or-failed}
-
-每服所有者/管理员最多 20 项计划任务，面板「计划任务」，API schedules。可每日定时或每 15 分钟至 12 小时，在所选星期和 IANA 时区（默认浏览器时区）执行控制台命令、重启、停止、启动、备份。重启/停服/备份可提前 1–30 分钟用 say 提醒。API 每 15 秒循环，时间误差约 15 秒；数据库将一次运行只分配给一个 API。
-
-| 操作 | 运行中 | 停服中 |
-| --- | --- | --- |
-| command | RCON 执行，移除前导 / | 跳过 |
-| restart | 停止 Pod 再启动 | 跳过 |
-| stop | 停止 | 跳过 |
-| start | 跳过，Failed 可重新开始 | 按面板启动，仍受容量/退役/世界占用限制 |
-| backup | 执行不停服备份（§10），玩家保持在线，仅在复制世界期间暂停存档；无法执行时（游戏未响应控制台、世界被占用）停服、备份后重新启动 | 备份 |
-
-不停服备份前的提醒会说明这一点（`A backup runs in <n> min; saving pauses for a few seconds`）；需停服的备份，其提醒说明服务器将暂停并在之后恢复。两种备份都记录为定时恢复点（`scheduled_keep`、`scheduled_retention`，§10）。
-
-停服期限 15 分钟、备份 45、启动 15。重启/备份失败时，原本运行的仍尝试启动，避免失败备份让世界一直离线。
-
-| last_result | 原因/last_detail | 处理 |
-| --- | --- | --- |
-| ok | 空或命令回复 | 无需处理 |
-| skipped | 新所有者，与保存时不同 | 自动关闭任务，新所有者审阅并保存重新启用 |
-| skipped | 无需运行：未运行/已停/已运行/无世界/退役/删除/不存在，或启动时容量/世界忙 | 下次继续尝试 |
-| missed | 计划时间 API 未运行超过十分钟 | 丢弃此轮避免数小时后突然重启，下次正常 |
-| failed | API 在首步中断，claim 超两分钟 | 检查服务器是否处于预期状态 |
-| failed | 十五分钟未停 | 查 §1/§2，未执行备份 |
-| failed | 世界被占十五分钟 | §3b |
-| failed | 备份失败、超过 45 分钟或存储满 | §10 及备份页 Job |
-| failed | 无法再次启动 | 容量、退役或世界忙超过十五分钟；修复后面板启动 |
-| failed | 控制台不可达或命令失败 | RCON，§1c |
-
-「立即运行」对关闭的任务也生效，不改变下次计划。run_state 为 claimed/stopping/backing_up/starting 时不能编辑、删除、重跑（409 schedule_running）。
-
-夏令时跳过的时间按跳变前偏移，提前一小时执行；重复时间只在首次执行。未知时区退回 UTC。删服删除任务，相同名字重建不会继承。审计 schedule.create/update/delete/run_now（人工）、run（每个完成任务的结果/详情）。
-
-[GO-TESTED: `TestScheduleNextRun`, `TestScheduleInputValidation`, `TestScheduleRunnerBackup`, `TestScheduleRunnerRestart`, `TestScheduleRunnerStaleClaim`, `TestScheduleRunnerBacksUpARunningServerLive`, `TestScheduleWarningSaysTheServerStaysUp`；PG-TESTED: `TestScheduleStoreRunCAS`, `TestDueSchedules`, `TestSchedulesFollowTheServer`]
-
----
-
-## 快速索引：症状 → 章节 {#quick-reference-symptom-→-section}
-
-| 症状 | 章节 |
+| 错误或状态 | 原因 |
 | --- | --- |
-| 查看运行状态、问题和诊断包 | §0 |
-| 卡在 Starting | §1 |
-| PodNotReady，镜像/PVC/启动问题 | §1a |
-| RCON 密钥、认证、端口错误 | §1b、§1c |
-| Failed | §2 |
-| 玩家进入错误位置 | §3、§4 |
-| 唤醒拒绝或 403/409/429/503 | §3a |
-| maintenance_in_progress，恢复后不能启动 | §3b |
-| 离线模式导致路由关闭 | §4 |
-| 面板 401/403 | §5 |
-| 本地密码拒绝 | §5c |
-| 内部服务令牌 401 | §6 |
-| 绑定/认领 400/409/412/403/404 | §7 |
-| 构建目标/RBAC/网络/失败或执行器拉取问题 | §8、§8e |
-| 仓库推送/拉取不可达 | §9 |
-| 意外删世界或跳过备份 | §10 |
-| 备份运行中的服务器、live_backup_console、玩家看到存档暂停 | §10 |
-| 面板中设置的备份或审计保留、当前生效的值 | §10、§17 |
-| awaiting_stop 持续、corrupt 损坏、orphan_archives | §10 |
-| 备份/世界导出被拒或截断 | §10 |
-| 自动停服不触发、玩家 0、PlayersCounted=False | §11 |
-| 配置似乎无效 | §12 |
-| 删除后 PVC 保留 | §13 |
-| 磁盘满、驱逐、镜像拉取失败 | §13b |
-| 指标采集 | §14 |
-| 看门狗告警或不发邮件 | §14 |
-| 主机失联未发现、NO HEARTBEAT、在面板中设置心跳 URL、failed unit、状态损坏 | §14 |
-| Operator/API/LoginGate/ReconcileStuck 告警 | §14、§1、§2 |
-| 控制平面升级/镜像回滚 | §15 |
-| 镜像变更确认、仓库不可用、世界版本升级 | §15b |
-| 数据库备份过期或从未备份 | §16 |
-| pre-migration backup failed, nothing applied | §16 |
-| 误操作后恢复数据库 | §16 |
-| 丢主机，从数据库包重建；felis restore-host、FELIS_RESTORE_FROM_OFFSITE | §16 |
-| Worker 节点离线导致其服务器停止；主控高可用 | [多机部署](/guide/distributed) |
-| felis-postgres 未就绪或无数据库 Pod | §16 |
-| 异地副本过期/未配置、awaiting_offsite 持续 | §16、§10 |
-| 全部用户 rate_limited | §17 |
-| mail_rate_limited、邮件预算告警 | §17 |
-| 面板保存的邮件中继；smtp_unreachable、smtp_tls、smtp_auth、mail_settings_changed | §17 |
-| 验证码正确却拒绝、otp_account_locked | §17 |
-| 登录失败及来源 | §17 |
-| 审计写入失败 | §17 |
-| breakGlass 无码、Root override、otp_skipped | §17 |
-| 会话/验证码/审计保留与导出 | §17 |
-| 文件修改、上传、解压、容量、超时错误 | §18 |
-| 计划任务 skipped/missed/failed 或易主后关闭 | §19 |
+| `the scan blocked the image: 1 CRITICAL, 1 HIGH (CVE-…, …)` | 漏洞或泄露机密的严重级别包含在 `[registry] scan_fail_on` 中（默认 `CRITICAL`）。 |
+| 构建卡住，随后拉取基础镜像或软件包失败 | 构建 Pod 只能访问集群 DNS、内部镜像仓库和 API 内部接口，所有来自互联网的下载均被阻止。 |
+| `felis fetch-context: … it changed after approval; refusing to build` | 上传的构建上下文与管理员审批时的摘要不一致。 |
+| 审批时返回 `409 context_changed` | 提交者在审阅之后重新上传了文件。 |
+| 上传返回 `507 uploads_full` 或 `403 submission_quota_exceeded` | 已上传的构建上下文超出 `user_uploads_max_bytes`（默认所有用户合计 4Gi）、单个用户的 2 GiB，或会使上传卷剩余空间低于 10%。单个上下文受 `context_max_bytes` 限制（默认 1Gi）。 |
+| 提交返回 `400` 和 `must target the internal registry "…", not "…"` | 镜像引用指向内部镜像仓库之外。 |
+| `push` 返回 `403` | 目标仓库位于 `felis/` 或 `mirror/` 下，这两个前缀保留给平台使用。 |
+| `push` 返回 `401` | `felis-build` 命名空间中的 `felis-registry-push` Secret 缺失或已过期。 |
+| 构建 Pod 状态为 `Evicted` | 构建占用的磁盘超过 `build_disk_limit`（默认 `12Gi`），包括解压的上下文、解包的基础镜像和镜像 tar 包。 |
+| `the build namespace's NetworkPolicy is not enforced` | 集群未执行 NetworkPolicy（CNI 不支持，或 k3s 以 `--disable-network-policy` 启动）。 |
+| `scan-gate` 以退出码 2 结束 | 扫描报告缺失或无法读取，构建按失败处理。 |
 
-### 面板无法确认服务器状态与应急停止 {#panel-cannot-confirm-state-and-emergency-stop}
+构建使用的 ServiceAccount `felis-build` 和 `felis-restore` 在任何位置都没有 Role，因此它们发出的所有 Kubernetes API 请求都会被拒绝。这是构建隔离的一部分，应保持它们没有任何权限。
 
-控制 API 超时或失联时，最后一次读取的状态仅作参考；显示「启动中」不能证明游戏进程仍然健康。控制台保留已有日志，标记状态已过期并显示最后读取时间，同时自动重试。首次读取失败时，也会向 Owner 提供主机侧恢复步骤。
+**排查**
 
-普通停止由 operator 执行。Owner 可以在服务器控制台选择「更多操作 → 应急停止」，输入服务器名并重新验证身份。应急停止先持久保存 `desiredState=Stopped`，再通过 Kubernetes 的 scale 子资源将该 MinecraftServer 自己拥有的 StatefulSet 缩至零。它绕过游戏 RCON 和 operator，保留正常的 Pod 终止宽限期，且不删除世界。缩容失败时，已保存的停止意图不会撤销，界面明确提示结果未确认。请求被受理不代表游戏已停止：状态读取独立检查 StatefulSet 的副本目标和游戏 Pod，在副本目标仍大于零或游戏 Pod 仍在运行或退出时显示「停止中」。
+1. 在面板中打开「构建流水线」，在失败的构建上选择「扫描与日志」。该页面显示扫描结论和最多 100 条发现（拦截项排在前面），已接受为已知风险的发现标记为「已接受」，并提供 Trivy 报告和 SBOM 下载。
+2. 查看每个步骤的输出：
 
-控制 API 本身离线时，浏览器无法执行集群操作。Owner 可展开主机侧恢复步骤，在部署主机上依次保存停止意图、缩容并检查 Pod（命名空间不是 `minecraft` 时需替换）。节点离线时还需检查节点和容器运行时；强制删除 Pod 不能证明进程已经退出。不要通过强制删除世界、Pod 或 PVC 来解决控制端失联。应急停止所需的 Kubernetes 权限依赖新的 RBAC，随平台更新应用。
+   ```bash
+   sudo k3s kubectl -n felis-build get jobs,pods
+   sudo k3s kubectl -n felis-build logs job/<build-job> --all-containers --prefix
+   sudo k3s kubectl -n felis-build describe pod <build-pod>
+   ```
+
+管理员也可以通过 API 读取相同的扫描数据：`GET /api/v1/images/build/{id}/scan`、`GET /api/v1/images/build/{id}/scan/report` 和 `GET /api/v1/images/build/{id}/sbom`。`404 scan_not_found` 表示构建在扫描前已停止；`404 scan_document_not_kept` 表示报告或 SBOM 超出每个镜像可保留的 6 MiB，扫描结论和发现始终保留。
+
+**解决**
+
+- **扫描拦截**：升级镜像中存在漏洞的组件后重新构建。如需将某项发现接受为已知风险，将其 ID（CVE 或 GHSA 编号，或 `aws-access-key-id` 等机密规则 ID）加入 `[registry] scan_accept`；已接受的发现仍会统计和列出。没有修复版本的漏洞仅在 `scan_fail_unfixed = true` 时拦截。将 `HIGH` 加入 `scan_fail_on` 后，所有基于平台 `felis/paper` 镜像的构建都会被拦截，因为其上游 `paper.jar` 含有五项可修复的 HIGH 级发现，接受这些 ID 后才能继续构建：
+
+  ```toml
+  [registry]
+  scan_fail_on = ["CRITICAL", "HIGH"]
+  scan_accept = ["CVE-2021-35515", "CVE-2021-35516", "CVE-2021-35517", "CVE-2021-36090", "CVE-2025-67030"]
+  ```
+
+  每次更换基础镜像时，应重新审查已接受的 ID。
+- **下载被阻止**：让 Dockerfile 基于内部镜像仓库中的镜像（例如平台的 `felis/paper`），并将构建所需的全部文件放入上传的上下文。
+- **上下文已变化**：下载并审阅新上传的文件，然后重新审批。如果在面板之外审阅（命令行下载或其他浏览器），应将所审阅文件的 `sha256sum` 与审阅页面显示的摘要进行比较。
+- **上传配额**：删除已拒绝的提交，或提高 `user_uploads_max_bytes`。被拒绝提交的上传文件在判定 7 天后删除。
+- **推送返回 `401`**：重新运行安装器，安装器会重新创建推送 Secret。**推送返回 `403`**：选择 `felis/` 和 `mirror/` 之外的仓库。
+- **被驱逐**：提高 `build_disk_limit`，并保证节点剩余磁盘空间高于该值。
+- **NetworkPolicy 未执行**：恢复集群的 NetworkPolicy 执行能力。
+
+修改 `[registry]` 中的配置项时，须同时编辑两个配置文件并重新加载 API。felis-api 从 `felis-config` Secret 读取配置，仅重启无法使修改生效。
+
+1. 在 `/etc/felis/felis.host.toml` 和 `/etc/felis/felis.pod.toml` 中修改该配置项。
+2. 重新生成 Secret 并重启 felis-api：
+
+   ```bash
+   sudo k3s kubectl -n felis create secret generic felis-config \
+     --from-file=felis.toml=/etc/felis/felis.pod.toml --dry-run=client -o yaml | sudo k3s kubectl apply -f -
+   sudo k3s kubectl -n felis rollout restart deployment/felis-api
+   ```
+
+::: tip
+扫描结果反映构建当天的漏洞库，已准入的镜像之后不会再次扫描。如需重新扫描，先执行 `sudo felis mirror-build-tools -only trivy-db` 更新漏洞库，再以相同上下文发起新的构建。
+:::
+
+### 构建 Pod 无法启动 {#build-pods-not-starting}
+
+**原因**
+
+构建 Pod 运行 Kaniko 和 Trivy，Trivy 需要读取漏洞库和 Java 库。构建命名空间无法访问互联网，因此这四项都来自内部镜像仓库中的副本：
+
+| 工具 | 镜像仓库中的副本 |
+| --- | --- |
+| Kaniko | `mirror/kaniko-executor:v1.24.0` |
+| Trivy | `mirror/trivy:0.74.0` |
+| 漏洞库 | `mirror/trivy-db:2` |
+| Java 库 | `mirror/trivy-java-db:1` |
+
+安装器通过 `felis mirror-build-tools` 复制这些副本，`felis-build-tools.timer` 在每天 04:00 和 16:00 更新它们。复制需要能够访问 gcr.io、ghcr.io 和 mirror.gcr.io。
+
+| 症状 | 原因 |
+| --- | --- |
+| 构建一直处于「排队中」 | 已有 `[registry] max_concurrent_builds` 个构建正在运行（默认 2，最多 6）。排队的构建按提交先后启动。 |
+| `mirror/kaniko-executor` 或 `mirror/trivy` 出现 `ImagePullBackOff` | 首次复制尚未完成，或安装时主机无法访问互联网。 |
+| 扫描失败并提示 `failed to download vulnerability DB` | 缺少 `mirror/trivy-db:2`。 |
+| 看门狗提示 `the vulnerability DB was last refreshed … ago` | 定时任务执行失败（网络、镜像仓库停止或磁盘已满）。连续三天没有成功执行时看门狗发出警告；扫描仍会拦截，但依据的是旧的漏洞公告。 |
+| 设置 `build_user_namespaces = "on"` 后没有构建能够启动 | 节点无法运行 `hostUsers: false` 的 Pod。用户命名空间需要 Kubernetes 1.33 或更高版本、containerd 2.x，以及支持 idmapped mount 的内核（5.19 或更高版本；RHEL 和 CentOS Stream 9 内核已包含回移补丁）。 |
+
+**排查**
+
+```bash
+sudo k3s kubectl -n felis-build get pods
+journalctl -u felis-build-tools -n 50
+sudo cat /var/lib/felis/build-tools/status.json
+sudo k3s kubectl -n felis logs deploy/felis-api | grep 'build pods run'
+```
+
+felis-api 启动时在日志中说明构建 Pod 是否使用用户命名空间：`build pods run in a user namespace (hostUsers: false)` 或 `build pods run without a user namespace: …`。
+
+**解决**
+
+1. 主机能够访问 gcr.io、ghcr.io 和 mirror.gcr.io 后，重新复制工具：
+
+   ```bash
+   sudo felis mirror-build-tools                  # 全部四项
+   sudo felis mirror-build-tools -only trivy-db   # 单项
+   ```
+
+2. 隔离网络中的主机：在可访问互联网的机器上获取这四个镜像，通过端口转发以 `platform` 用户身份按上表名称推送到镜像仓库：
+
+   ```bash
+   sudo k3s kubectl -n felis port-forward svc/registry 5000:5000
+   # platform 用户的密码
+   sudo k3s kubectl -n felis get secret felis-registry-auth -o jsonpath='{.data.platform}' | base64 -d
+   ```
+
+   推送目标为 `localhost:5000/mirror/<名称>:<标签>`。两个数据库应按需要的漏洞公告时效定期重复推送。定时任务能够访问上游之前，看门狗警告会一直保留。
+3. 如果设置 `build_user_namespaces = "on"` 后构建无法启动，将其改回 `"auto"`（默认值，仅在节点支持时启用用户命名空间）或 `"off"`，修改方法见[镜像构建失败](#build-failures)。
+
+::: info
+Kaniko v1.24.0 是上游的最后一个版本，不再获得安全修复。如需使用仍在维护的分支，将其镜像复制到 `mirror/` 下，并将 `[registry] kaniko_image` 设置为该镜像。
+:::
+
+### 镜像仓库推送或拉取失败 {#registry-errors}
+
+**原因**
+
+平台镜像仓库以 `registry` Deployment 运行在 `felis` 命名空间中，镜像地址形如 `registry.felis.svc:5000/<仓库>:<标签>`。节点通过回环端口 `127.0.0.1:5000` 拉取镜像，`/etc/rancher/k3s/registries.yaml` 将镜像仓库名称映射到该端口；端口和该文件缺一不可。读取无需凭证，所有写入都需要 `felis-registry-auth` Secret 中的令牌。
+
+| 症状 | 原因 |
+| --- | --- |
+| 镜像仓库 Pod 无法启动，其存储卷一直处于 `Pending` | 集群没有默认 StorageClass。 |
+| 写入返回 `503` 和 `Retry-After`，拉取正常 | 每日垃圾回收正在占用只读窗口。安装器和构建推送会等待窗口结束。 |
+| 推送超大镜像层时进程被终止 | 镜像仓库内存耗尽（上限为 2Gi）。 |
+| 磁盘压力或镜像垃圾回收后拉取失败 | `registries.yaml` 缺失或被修改，或镜像仓库已停止。 |
+| 推送返回 `401` | 凭证缺失或错误。`felis-registry-auth` Secret 缺失时，镜像仓库变为只读。 |
+| 平台镜像和用户镜像全部丢失 | 镜像仓库存储卷已丢失。 |
+| 安装器在隔离网络主机上提示 `could not pull …` | 镜像仓库和 PostgreSQL 镜像来自 Docker Hub，并按摘要固定。 |
+
+**排查**
+
+```bash
+sudo k3s kubectl -n felis get pods -l app.kubernetes.io/component=registry
+sudo k3s kubectl -n felis get pvc registry
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5000/healthz   # 预期为 200
+sudo cat /etc/rancher/k3s/registries.yaml
+sudo k3s kubectl -n felis logs deploy/registry -c registry-gc
+```
+
+匿名的 `GET /v2/` 请求返回 `401`，属于正常现象。
+
+**解决**
+
+- **存储卷 `Pending`**：将一个 StorageClass 设为集群默认。
+- **垃圾回收期间返回 `503`**：等待窗口结束。如需立即执行回收，删除其标记文件并重启镜像仓库 Pod：
+
+  ```bash
+  sudo k3s kubectl -n felis exec deploy/registry -c registry-gc -- rm -f /var/lib/registry/.felis-last-gc
+  sudo k3s kubectl -n felis rollout restart deploy/registry
+  ```
+
+- **拉取失败**：`registries.yaml` 必须将 `registry.felis.svc:5000` 映射到 `http://127.0.0.1:5000`。文件缺失或被修改时，重新运行安装器。
+- **凭证**：`sudo felis rotate-token -yes registry` 替换镜像仓库令牌，并重启镜像仓库和 felis-api。参见[轮换凭证](/operations/access#rotate-credentials)。
+- **存储卷丢失**：重新运行安装器，安装器会重新推送全部平台镜像。已配置[异地副本](/operations/backup#offsite)时，`sudo felis offsite fetch-images` 会按原摘要恢复用户镜像；该命令只推送缺失的内容，中断后再次运行的开销很小。未配置异地副本时，从已批准的提交重新构建用户镜像，其上传的上下文保留在上传卷中。固定到镜像仓库中已不存在的摘要的服务器无法拉取镜像，须由管理员为其选择当前镜像（参见[游戏镜像](#game-images)）。
+- **隔离网络中的 `could not pull`**：将发布版附件复制到主机后安装（[离线安装](/guide/deployment#offline-install)）。没有附件时，在可联网的机器上按主机架构获取同一摘要的镜像，用 containerd 导出后在主机上导入：
+
+  ```bash
+  # 在可访问互联网的机器上执行；$ref 为警告中给出的带摘要的完整引用
+  sudo ctr images pull --platform linux/amd64 "$ref"
+  sudo ctr images export --platform linux/amd64 image.tar "$ref"
+  # 在 Felis 主机上执行
+  sudo k3s ctr images import image.tar
+  ```
+
+  ARM 主机使用 `linux/arm64`。`docker save` 会改写镜像清单，导出的副本将无法匹配摘要。导入后重新运行安装器，安装器会识别该镜像并将其固定，防止被镜像垃圾回收清除。
+
+### 创建服务器或更换镜像被拒绝 {#game-images}
+
+**原因**
+
+游戏镜像使用可被安装器移动的标签，例如 `registry.felis.svc:5000/felis/paper:demo`。服务器创建时固定到当时该标签对应的摘要，因此始终运行同一个构建。每次运行安装器还会以后续运行不会改写的版本标签推送每个游戏构建，格式为 `<Minecraft 版本>-<镜像 ID 的 12 位十六进制>`（例如 `felis/paper:26.2-3f9c0a1b2c4d`）。连续 24 小时没有被任何服务器或白名单条目引用的构建会被镜像仓库删除；每个 `felis/` 仓库最新的 5 个构建始终保留。
+
+| 消息 | 原因 | 解决 |
+| --- | --- | --- |
+| `image_not_in_registry` | 白名单中的标签从未推送到内部镜像仓库，或已被删除。 | 推送或重新构建该镜像后重试。 |
+| `registry_unavailable` | felis-api 无法访问 `registry.felis.svc:5000`。 | 检查镜像仓库 Pod，并确认 `felis-registry-ingress` NetworkPolicy 仍允许 felis-api 访问。 |
+| `the registry no longer holds build …` | 镜像指向的摘要已被镜像仓库清理。 | 选择当前标签。需要保留的构建，将其版本标签加入白名单。 |
+| `409 image_change_unconfirmed` | 通过 API 更换镜像时未携带 `"confirmImageChange": true`。 | 备份世界后携带确认字段重新提交。 |
+| 安装器提示 `could not pin every user server` | 镜像仓库停止，或服务器引用的标签已从镜像仓库丢失。 | 修复镜像仓库，并在启动这些服务器前执行 `sudo felis pin-images`。标签已丢失的服务器保留其裸标签，直到管理员为其选择新镜像。 |
+| 安装器提示 `could not pin the login system server`（或 lobby） | 推送后镜像仓库未及时响应。 | 镜像仓库 Pod 就绪后重新运行安装器。 |
+| 运行安装器期间某台运行中的服务器重启了一次 | 安装器将其固定到正在运行的构建。 | 无需处理，每台服务器只会发生一次。 |
+
+**排查**
+
+```bash
+sudo k3s kubectl -n felis get pods -l app.kubernetes.io/component=registry
+sudo k3s kubectl -n minecraft get minecraftserver <name> -o jsonpath='{.spec.image}'
+```
+
+`spec.image` 指明服务器运行的确切构建（`@sha256:` 之后的摘要）。
+
+**解决**
+
+将世界迁移到更新的构建或 Minecraft 版本：
+
+1. 备份世界。Minecraft 加载区块时会升级区块格式，旧版本无法再打开这些区块。
+2. 打开「编辑服务器配置」并选择镜像。重新选择当前标签会将服务器更新到该标签的最新构建。
+3. 勾选「我已备份世界，确认更换镜像」并保存。
+
+如需回退，重新设置之前的构建（审计日志为每次更换记录 `image_from` 和 `image_to`），并恢复升级前的备份。回退的前提是镜像仓库中仍保留旧构建。默认标签移动后，如需继续以指定 Minecraft 版本创建服务器，将该版本标签加入白名单（[镜像](/guide/administration#images)）。
+
+### 安装发布版时在主机上构建镜像 {#host-build-fallback}
+
+**原因**
+
+安装发布版时，安装器从发布版附件获取镜像和 Velocity 插件，并按发布版的 `SHA256SUMS` 逐一校验。某个附件无法使用时，安装器会指明该附件及原因，改为在主机上用 Docker 构建该镜像；此时镜像仓库和 PostgreSQL 镜像从 Docker Hub 拉取。每次下载最多尝试三次，间隔五秒；传输速度持续一分钟低于 1 KiB/s 时会中断并重试。
+
+**排查**
+
+查看安装器在构建前输出的消息：
+
+| 消息 | 含义 | 解决 |
+| --- | --- | --- |
+| `release vX publishes no SHA256SUMS … building them on this host instead` | 发布版没有附件，或附件仍在上传。 | 对于新发布版，等发布页面列出 `SHA256SUMS` 后重新运行。 |
+| `SHA256SUMS lists no <file>` 或 `could not download <file> from release vX` | 发布版缺少该附件。 | 稍后重新运行。在此之前主机构建的结果同样正确。 |
+| `downloaded <file> hashes to …, but release vX's SHA256SUMS says …` | 下载内容损坏，或附件已被替换。 | 重新运行。每次都出现相同的不匹配时，说明附件本身有问题，应报告。 |
+| `the release's image listing … is malformed` | `felis-images-linux-<arch>.txt` 无法解析。 | 报告该问题。所有镜像都会在主机上构建。 |
+| `the release's registry image is …, but this installer runs …` | 安装器与发布版版本不一致。 | 运行该发布版标签对应的安装器；`felis update --panel` 会输出相应命令。 |
+| `k3s containerd holds no <image> from <tar>` | tar 包中没有列表所指摘要的镜像。 | `sudo k3s ctr images ls \| grep felis` 显示已导入的内容。报告该问题。 |
+| `FELIS_ARTIFACT_DIR: …`，安装停止 | 附件目录中的文件缺失或校验失败。从目录安装时不会回退到主机构建。 | 从发布版重新复制所指文件后重新运行。 |
+
+构建插件时，`[felis] Downloading <file> (<host>)` 标明每项 Gradle 依赖下载，进行中的下载每十秒报告一次进度。`no new data for …; waiting for the download` 表示该下载已有三十秒没有收到新数据；Gradle 自身的超时和重试机制保持不变。
+
+**解决**
+
+在主机上构建约需要 `/var/lib/containerd` 下 8 GiB 空间（Docker 已有构建缓存时约 2 GiB）。空间不足时，安装会在安装 Docker 之前停止：
+
+```
+building here what the release did not supply takes about … MiB under /var/lib/containerd, and … has … MiB free; nothing has been built
+```
+
+可以等附件能够下载后重新运行、释放空间，或设置 `FELIS_PREFLIGHT=warn` 强制构建。中途停止的安装会将已下载的文件保留在 `/var/lib/felis/artifacts`，下次运行复用其中仍与 `SHA256SUMS` 一致的文件。
+
+## 系统服务器与配置 {#configuration}
+
+本节条目涉及未在现有服务器上生效的设置、空闲自动停服，以及已删除服务器遗留的世界卷。
+
+### 新版本引入的设置未应用到现有服务器 {#system-server-fields}
+
+**原因**
+
+安装器只在登录空间和大厅服务器不存在时创建它们，已存在的服务器保持不变。因此，新版本为它们新增的字段在较早的安装中保持未设置：大厅可能缺少 RCON（控制台无响应，在线人数始终为 0），登录空间可能缺少 HTTP 就绪检查。在空闲自动停服成为默认设置之前创建的用户服务器没有空闲设置，无人时不会停止。在 RCON 成为默认设置之前创建的用户服务器控制台无响应、在线人数始终为 0、无法不停服备份，也不会空闲停服。
+
+部分字段仅在满足条件时生效：
+
+| 字段 | 行为 |
+| --- | --- |
+| `spec.startup.timeoutSeconds` | 启动允许的时间。`0` 或未设置时为 300 秒；超时后服务器进入 `Failed`，原因为 `StartupTimeout`。 |
+| `spec.startup.readinessTimeoutSeconds` | 等待 RCON 探测期间整个启动过程的期限，从发出启动请求开始计算。`0` 或未设置时为 300 秒；超时后服务器进入 `Failed`，原因为 `ReadinessTimeout`。 |
+| `spec.idle.autoStopEnabled`、`spec.idle.emptySecondsBeforeStop` | 仅在 `spec.rcon.enabled` 开启时生效，因为在线人数通过 RCON 读取。`emptySecondsBeforeStop: 0` 表示关闭空闲停服。 |
+
+**排查**
+
+```bash
+sudo k3s kubectl -n minecraft get minecraftserver \
+  -o custom-columns=NAME:.metadata.name,RCON:.spec.rcon.enabled,IDLE:.spec.idle.autoStopEnabled
+```
+
+**解决**
+
+在镜像就绪之后（即运行安装器或完成更新之后）执行以下操作。如果服务器镜像不提供相应监听，启用 RCON 或就绪检查会使该服务器停留在 `Starting`，直到被标记为 `Failed`。
+
+1. 补全系统服务器缺失的字段，并为较早的用户服务器设置默认的空闲自动停服（无人在线 600 秒后停止）：
+
+   ```bash
+   sudo felis converge
+   ```
+
+   已是最新状态的服务器显示 `already converged`。已设置的值不会被覆盖，因此管理员关闭的空闲停服保持关闭。不带 `-user-rcon` 时，该命令列出缺少 RCON 的用户服务器，但不修改它们。
+2. 为从未设置过 RCON 的较早用户服务器启用 RCON：
+
+   ```bash
+   sudo felis converge -user-rcon
+   ```
+
+   每台服务器获得与新建服务器相同的 RCON 配置，修改在其下次启动时生效。Felis 自带的 Paper 和大厅镜像支持 RCON；对于用户构建的镜像，执行前应确认其支持 RCON。已明确设置 RCON（开启或关闭）的服务器不会被修改。
+
+面板中也可执行相同操作：「平台设置 → 访问与安全 → 系统服务器补全」，第 2 步对应「为旧用户服务器启用 RCON」，然后选择「执行补全」。
+
+### 删除服务器后世界卷仍然保留 {#world-volume-kept}
+
+**原因**
+
+世界卷的生命周期长于其 MinecraftServer 对象。直接删除该对象（例如使用 `kubectl`）会保留世界卷，以同名重新创建的服务器会挂载同一个世界。世界清理（闲置回收）是唯一会删除世界卷的进程，并且只在备份校验通过后删除。在面板中放弃或删除的服务器，由下一次每日世界清理归档并删除世界卷，这需要配置世界根目录（`FELIS_WORLDS_HOST_PATH`，参见[世界清理](/operations/backup#world-cleanup)）。世界卷存在期间会占用该名称：以此名称创建新服务器时返回 `409 world_volume_exists`。
+
+**排查**
+
+列出服务器已不存在的世界卷：
+
+```bash
+comm -23 \
+  <(sudo k3s kubectl -n minecraft get pvc -l felis.lolicon.best/server -o jsonpath='{range .items[*]}{.metadata.labels.felis\.lolicon\.best/server}{"\n"}{end}' | sort) \
+  <(sudo k3s kubectl -n minecraft get minecraftservers -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)
+```
+
+**解决**
+
+仅在确认不再需要该世界时删除世界卷：
+
+```bash
+sudo k3s kubectl -n minecraft delete pvc world-<name>-0
+```
+
+::: danger
+删除世界卷不可撤销。除非存在该世界的归档，否则世界将永久丢失。
+:::
+
+## 主机问题 {#host-problems}
+
+本节条目涉及磁盘、主机地址、k3s 证书和系统时钟。系统日志为持久化存储，`journalctl -b -1` 可查看上次重启之前的日志。
+
+### 磁盘写满时 Pod 被驱逐或镜像丢失 {#disk-full-symptoms}
+
+**原因**
+
+磁盘写满时，kubelet 首先驱逐游戏服务器 Pod。控制面 Pod（felis-api、operator、世界清理和镜像仓库）使用 `system-cluster-critical` 优先级类，不会被驱逐；kubelet 会为它们记录 `Eviction manager: cannot evict a critical pod`。随后 kubelet 可能清除未被使用的镜像。备份同样会停止：会使归档文件系统剩余空间低于 10% 的备份将失败，并提示 `not enough free disk for the archive`。
+
+常见症状：
+
+- 登录空间或大厅被驱逐，玩家无法进服。
+- 驱逐之后 Pod 停留在 `ImagePullBackOff`。
+- 看门狗发送邮件 `node … reports DiskPressure: the kubelet is evicting pods` 或 `the filesystem holding … is …% free`（剩余低于 15% 时为警告，低于 5% 时为严重）。
+- 释放空间后，节点的 `DiskPressure: True` 最多还会保持约 5 分钟，等待调度的 Pod 也随之等待。
+
+**排查**
+
+```bash
+df -h / /var/lib/rancher /var/lib/felis
+sudo k3s kubectl describe node | grep -A 8 Conditions
+sudo k3s kubectl get pods -A | grep -v Running
+```
+
+占用空间最多的通常是 k3s 的镜像（`sudo k3s ctr images ls -q`）以及 `/var/lib/rancher/k3s/storage` 下的世界卷和备份卷。
+
+**解决**
+
+1. 按[从满盘状态恢复](/operations/storage#disk-full)释放空间或扩容磁盘。
+2. 镜像会自动恢复：所有平台镜像同时保存在平台镜像仓库中，节点在下次尝试时从镜像仓库拉回已清除的镜像。删除停留在 `ImagePullBackOff` 的 Pod 可立即重试。
+3. 如果仍然拉取失败，按[镜像仓库推送或拉取失败](#registry-errors)检查镜像仓库 Pod、`http://127.0.0.1:5000/healthz` 和 `registries.yaml`。
+4. 两处都不存在的镜像，重新运行安装器。安装器会从主机的 Docker 镜像存储重新构建或导入镜像，并推送到镜像仓库，因此应保留该存储作为恢复副本。
+
+### 主机地址发生变化 {#host-address-changed}
+
+**原因**
+
+安装与安装时的 IP 地址绑定。k3s 节点、网络策略、面板证书和默认的 `<ip>.nip.io` 根域名都使用该地址。主机失去该地址后（DHCP 租约变化、虚拟机迁移），集群和游戏代理仍使用旧地址，面板也无法通过原名称访问。安装时如果检测到地址来自 DHCP 租约，安装器会发出警告。
+
+**排查**
+
+看门狗报告 `host-address`（严重，持续 5 分钟后发送）：`this host no longer holds <ip>, the address the install was made on (it has: …)`。
+
+```bash
+ip -brief address
+journalctl -u felis-watchdog -n 40
+```
+
+**解决**
+
+1. 为主机恢复原地址：在路由器上设置 DHCP 保留，或配置静态地址。使用 NetworkManager 时（例如 Rocky Linux）：
+
+   ```bash
+   sudo nmcli con mod <connection> ipv4.method manual ipv4.addresses <ip>/<prefix> ipv4.gateway <gateway> ipv4.dns <dns>
+   sudo nmcli con up <connection>
+   ```
+
+2. 重启 felis-api 和游戏代理：
+
+   ```bash
+   sudo k3s kubectl -n felis rollout restart deploy/felis-api
+   sudo systemctl restart felis-velocity
+   ```
+
+将安装迁移到新地址需要在恢复的备份上重新安装，参见[迁移到其他主机](/operations/backup#move-host)。使用默认 `<ip>.nip.io` 根域名时，在新地址上运行后执行 `sudo felis domain set <new-ip>.nip.io`（[更改根域名](/operations/access#change-domain)）。
+
+::: info
+修改主机名不会造成影响。安装器在 `/etc/rancher/k3s/config.yaml.d/50-felis.yaml` 中固定了 k3s 节点名（`node-name:`），所有本地存储卷都绑定到该名称。可通过 `sudo k3s kubectl get node -o jsonpath='{.items[0].metadata.annotations.k3s\.io/node-args}'` 检查。
+:::
+
+### k3s 证书即将过期 {#k3s-certificates}
+
+**原因**
+
+k3s 自行签发的客户端和服务端证书（API 服务器、kubelet、管理员 kubeconfig、etcd）有效期为 365 天，CA 证书有效期为十年。k3s 只在启动时续签客户端和服务端证书，重新签发已过期或将在 120 天内过期的证书。在此期间因重启或 k3s 升级而重启过 k3s 的主机会自动完成续签。连续一年未重启 k3s 的主机会在证书过期当天失去 API 服务器和节点，面板将无法启动、停止或备份服务器。重启不会续签 CA 证书。
+
+**排查**
+
+看门狗将最早过期的证书报告为 `k3s-certs`：过期前 30 天发出警告，最后 7 天及过期后为严重。提示信息会说明重启能否续签该证书。
+
+```bash
+sudo k3s certificate check --output table
+```
+
+**解决**
+
+1. 重启 k3s 后再次检查，已续签的证书有效期恢复为约一年：
+
+   ```bash
+   sudo systemctl restart k3s
+   sudo k3s certificate check --output table
+   ```
+
+   重启只停止 k3s 本身：游戏服务器、PostgreSQL 和控制面继续运行，API 服务器在一分钟内恢复。`k3s-killall.sh` 会停止所有容器，不应用于此操作。
+2. 如需在 120 天窗口之前续签全部客户端和服务端证书（例如与维护时段对齐）：
+
+   ```bash
+   sudo systemctl stop k3s && sudo k3s certificate rotate && sudo systemctl start k3s
+   ```
+
+3. CA 证书需要执行 `k3s certificate rotate-ca`，并按 [k3s 证书文档](https://docs.k3s.io/cli/certificate)中的步骤操作。
+
+面板自身的证书（`/etc/felis/panel-tls.crt`）不在此检查范围内，参见[面板 TLS 证书](/operations/access#tls)。`felis watchdog -k3s-cert-dirs ""` 可关闭证书检查。
+
+### 系统时钟未同步 {#clock}
+
+**原因**
+
+登录验证码和会话依据系统时钟过期，S3 拒绝签名时间偏差超过 15 分钟的异地副本上传，时钟偏差过大时证书校验也会失败。除非设置 `FELIS_MANAGE_TIME_SYNC=0`，安装器会开启 NTP（`timedatectl set-ntp true`，没有 NTP 客户端时安装 chrony）。防火墙丢弃出站 UDP 123 端口的流量时，时钟将无法同步。
+
+**排查**
+
+看门狗报告 `clock`（警告，持续 30 分钟后发送）。
+
+```bash
+timedatectl          # 预期为 "System clock synchronized: yes" 和 "NTP service: active"
+chronyc sources
+```
+
+**解决**
+
+1. 开启 NTP：
+
+   ```bash
+   sudo timedatectl set-ntp true
+   ```
+
+2. 放行到时间服务器的出站 UDP 123 端口。
+3. 检查 `chronyc sources`，直到选中某个时间源且 `timedatectl` 显示时钟已同步。
+
+## 备份与数据库 {#backups-database}
+
+本节条目涉及世界备份、世界清理、下载、控制面数据库及其备份，以及异地副本。恢复与重建步骤见[备份与恢复](/operations/backup)。
+
+### 世界备份被拒绝或失败 {#backup-failures}
+
+**原因**
+
+备份以 Job 形式运行，归档服务器的整个数据卷。已停止的服务器按原样归档；运行中的服务器进行不停服备份，复制世界期间暂停存档。备份开始前，felis-api 会检查 `[archive]` 或「备份与审计保留」卡片中设置的限制。
+
+| 返回或消息 | 原因 | 解决 |
+| --- | --- | --- |
+| `429 backup_cooldown` | 每台服务器在冷却窗口内只能由所有者发起一次备份（`manual_cooldown`，默认 10 分钟）。 | 等待 `Retry-After` 指定的时间后重试。管理员不受此限制。 |
+| `507 backup_store_full` | 现有备份总量已达到备份存储上限（`max_local_bytes`）。 | 删除不再需要的备份，或提高上限。管理员不受此限制。 |
+| `not enough free disk for the archive` | 归档会使归档文件系统剩余空间低于 10%。 | 释放磁盘空间（[从满盘状态恢复](/operations/storage#disk-full)）。 |
+| `409 not_stopped`，`the server is starting or stopping; back it up once it is running or stopped` | 服务器正处于状态切换中。 | 服务器运行或停止后重试。 |
+| `503 live_backup_console` | 游戏未通过 RCON 响应 `save-off` 或 `save-all flush`：RCON 未开启或无法连接。 | 重试；在服务器停止后备份；或通过 `sudo felis converge -user-rcon` 开启 RCON（[新版本引入的设置未应用到现有服务器](#system-server-fields)）。 |
+| `409 maintenance_in_progress` | 恢复、另一次备份、文件修改、世界下载或世界清理正在占用世界，或服务器正在重启。 | 该操作结束后重试。 |
+| `409 not_stopped`，`stop the server before backing up its world` | 当前 felis-api 无法备份运行中的服务器。 | 先停止服务器。 |
+| 删除备份时返回 `409 restore_in_progress` | 恢复操作可能正在读取该归档。 | 等待恢复完成。 |
+| 备份被标记为「已损坏」 | 回读归档时校验和不一致。 | 该备份无法恢复，保留至过期，也可以手动删除。 |
+
+定时备份（每日恢复点）遵循相同的限制。备份存储已满期间，felis-api 记录 `scheduled backups paused`，不启动任何定时备份；失败的定时备份在 `scheduled_every` 的四分之一时间后重试（默认 6 小时）。felis-api 缺少 `FELIS_IMAGE` 或 `FELIS_BACKUP_PVC` 时，启动日志会记录 `scheduled backups off (needs the backup executor)`。
+
+**排查**
+
+1. 打开服务器的「备份与恢复」页面。「最近操作」列出每次备份、恢复、定时备份和下载，以及其 Job 退出时的错误。
+2. 列出作用于该服务器世界的 Job，并查看失败 Job 的日志：
+
+   ```bash
+   sudo k3s kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>
+   sudo k3s kubectl -n minecraft logs job/<job>
+   ```
+
+**解决**
+
+按表中的原因处理。不停服备份还需要同一节点上至少与世界大小相当的临时空间；复制步骤拒绝启动时，释放该空间。维护前如需备份所有世界，使用 `felis backup-now`（[备份所有世界](/operations/backup#backup-now)）。
+
+### 世界清理 Job 失败 {#world-cleanup-failed}
+
+**原因**
+
+世界清理每天在 `minecraft` 命名空间中以 Job 形式运行一次。所有安装都会由它删除过期备份并回读校验归档。配置世界根目录后，它还会归档并删除闲置超过 15 天的世界，并执行在面板中放弃或删除服务器的请求。没有经过确认的备份时世界不会被删除，因此运行失败时世界保持不变。汇总行中以下任一计数大于零时，本次运行失败（退出码 1）：`skipped`（处理失败的服务器）、`expire_failed`（无法删除的过期备份）、`corrupt`（校验失败、已标记为「已损坏」的归档）或 `verify_failed`（无法读取的归档，下次运行重试）。Job 会重试两次。
+
+**排查**
+
+看门狗发送邮件 `world reaper Job … failed`；连续 26 小时没有成功运行时还会发送 `the world reaper has not succeeded for …`；对应的 Prometheus 告警为 `FelisWorldJobFailed`。查看日志，重点关注汇总行上方的错误：
+
+```bash
+sudo k3s kubectl -n minecraft get jobs | grep felis-reaper
+sudo k3s kubectl -n minecraft logs job/<felis-reaper-job>
+```
+
+汇总行示例：
+
+```
+felis reaper: evaluated=12 reaped=1 released=0 deleted=0 awaiting_offsite=0 awaiting_stop=0 warned=2 skipped=0 store_full=0 evicted=0 expired=3 expire_failed=0 verified=6 corrupt=0 verify_failed=0 swept=0 orphan_archives=0
+```
+
+| 计数 | 含义 |
+| --- | --- |
+| `store_full` | 因备份存储已满而保留的世界。 |
+| `awaiting_stop` | 尚未停止、留待下次运行处理的闲置服务器。某台服务器持续数天停留在此，说明它在被反复启动，或有 Job 一直占用其世界。 |
+| `awaiting_offsite` | 已归档、但需等待异地副本确认后才删除的世界。超过一天仍大于零，说明异地副本同步失败。 |
+| `orphan_archives` | 没有任何备份记录指向的归档。超过保留期限后删除，每次运行会列出前几个归档的路径。 |
+| `evaluated=0` | 未配置世界根目录（`FELIS_WORLDS_HOST_PATH`）。运行只删除过期备份并校验归档；闲置世界既不归档也不释放，在面板中放弃或删除的服务器会一直等待处理。 |
+
+**解决**
+
+1. 修复汇总行上方指出的错误。每天都处理失败的服务器会保留其世界，并在原因修复之前每天使 Job 失败。
+2. `store_full`：释放备份存储空间或提高其上限。
+3. `awaiting_offsite`：参见[异地副本停止同步](#offsite-stopped)。
+4. 世界是否闲置依据玩家进服记录判断。游戏代理无法上报进服事件时，正在游玩的世界也可能在 15 天后被判定为闲置，参见[玩家无法进服](#players-cannot-join)和[内部 API 错误](#internal-api-errors)。无主服务器在清理前不会收到提醒邮件；需要保留的服务器应认领，或通过 `spec.reaperExempt: true` 设为豁免。保留期限和提醒说明见[世界清理](/operations/backup#world-cleanup)。
+
+### 备份或世界下载失败 {#download-failures}
+
+**原因**
+
+下载会启动一个 `felis-export` Job，经 felis-api 将归档流式传输到浏览器。导出世界需要服务器已停止，并在下载结束前一直占用世界，在此期间服务器无法启动。
+
+| 返回或消息 | 原因 |
+| --- | --- |
+| `429 export_busy` | 达到限制：每个用户同时只能有一个导出，全平台同时最多两个，每个用户每小时最多六个。 |
+| `410 export_expired` | Job 未在 10 分钟内连接到 felis-api。 |
+| `503 export_unavailable` | felis-api 缺少 `FELIS_IMAGE` 或 `FELIS_BACKUP_PVC`，启动时记录 `world export disabled`。 |
+| `409 not_stopped`、`409 no_world_volume` | 导出世界需要服务器已停止且存在世界卷。 |
+| `409 backup_corrupt` | 归档与记录的校验和不一致，下载会提前中断。 |
+| `felis-api answered 410 Gone: this export has expired …` | 下载就绪后 90 秒内没有被打开（标签页已关闭，或浏览器阻止了下载）。 |
+| `felis-api answered 410 Gone: the download ended before the archive did …` | 浏览器取消了下载或连接中断。 |
+| `felis-api answered 404 Not Found: no such export` | 导出开始后 felis-api 已重启，或下载凭证已失效。 |
+
+**排查**
+
+失败原因会作为 Job 的最后一行显示在服务器「备份与恢复」页面的「最近操作」中。
+
+**解决**
+
+1. 排除原因后重新发起导出，并保持标签页打开，直到浏览器保存完文件。
+2. Job 始终未连接到 felis-api 的世界导出会占用世界，直到 Job 的两小时期限结束。可立即释放：
+
+   ```bash
+   sudo k3s kubectl -n minecraft delete job -l app.kubernetes.io/managed-by=felis-export,felis.lolicon.best/server=<name>
+   ```
+
+### 数据库备份过期或不完整 {#database-backup-overdue}
+
+**原因**
+
+`felis-db-backup.timer` 每天在 `FELIS_DB_BACKUP_TIME`（默认 `*-*-* 03:30:00`，另加最多 15 分钟随机延迟）执行 `felis db backup`。所有检查都以最新的每日备份包为准，期限为 26 小时；较新的手动、升级前或异地备份包可用于恢复，但不会解除告警，因为每日定时任务仍未恢复。常见原因：
+
+- felis-postgres 未运行：`kubectl exec` 找不到运行中的 Pod，或提示 `pg_dump: … connection refused`（[数据库不可用](#database-unavailable)）。
+- `k3s: executable file not found`：运行 `felis` 时 `PATH` 中没有 `/usr/local/bin`，其他位置也没有 k3s。
+- 备份目录所在磁盘已满。写了一半的文件会被删除，之前的备份包保持完好。
+- `pg_dump: server version mismatch`：外部数据库的版本高于主机上的客户端工具。
+
+集群连续三次未响应 MinecraftServer 对象的导出时，备份包为「不完整」。该备份包仍包含数据库，但从它恢复不会恢复任何服务器；此时 `felis db backup` 以退出码 1 结束。升级时出现 `pre-migration backup failed, nothing applied` 的原因与此相同，此时不会应用任何迁移。
+
+**排查**
+
+「维护与备份 → 备份」中的「控制面数据库备份」卡片显示「已过期」「从未备份」或「不完整」，并给出修复命令。看门狗会发送邮件通知所有者。在主机上执行：
+
+```bash
+sudo felis db check                                   # 失败时以退出码 1 结束并说明原因
+sudo felis db list                                    # 列出每个备份包及其时间
+sudo systemctl status felis-db-backup.timer
+sudo journalctl -u felis-db-backup -n 50 --no-pager
+```
+
+对应的 Prometheus 告警为 `FelisDBBackupStale` 和 `FelisDBBackupMetricMissing`。node-exporter 的 textfile 采集器未读取 `FELIS_DB_BACKUP_METRICS` 所在目录（默认 `/var/lib/node_exporter/textfile_collector/felis_db_backup.prom`）时，会触发后者。
+
+**解决**
+
+1. 按日志中的原因修复。外部数据库版本不一致时，安装对应版本的 `postgresql` 客户端软件包。
+2. 立即执行每日备份，告警随之解除：
+
+   ```bash
+   sudo systemctl start felis-db-backup.service
+   ```
+
+3. 备份包「不完整」时，等 `sudo k3s kubectl get minecraftservers -A` 能够正常返回后，执行 `sudo felis db backup`。
+
+计划、保留和恢复说明见[数据库备份](/operations/backup#database-backups)。
+
+### 异地副本停止同步 {#offsite-stopped}
+
+**原因**
+
+`felis-offsite.timer` 每小时将世界归档、数据库备份包、用户镜像和上传文件复制到存储桶。看门狗和「异地副本」标签页（显示「需要处理」）会报告以下状态：
+
+| 消息 | 原因 |
+| --- | --- |
+| `the off-site copy last completed … ago` | 连续 12 小时没有完成同步（网络、凭证、存储桶或时钟问题）。邮件会附上最后一次错误。 |
+| `the off-site copy has never completed; …` | 首次同步尚未成功。 |
+| `the off-site copy has stopped: the bucket's objects are sealed with another key, …` | `/etc/felis/offsite.env` 中的密钥与写入存储桶时使用的密钥不同，例如重新安装时生成了新密钥。安装器结束时显示 `OFF-SITE COPY STOPPED`。 |
+| `the off-site copy has stopped: <host> took the bucket over, …` | 另一台主机执行了 `felis offsite take-over`。 |
+| `this host was built from another host's backup and copies nothing into the off-site bucket: …` | 本机从备份包恢复而来，在另一台主机写入存储桶期间处于待命状态。 |
+| 安装器结束时显示 `NO OFF-SITE COPY` | 未配置存储桶。 |
+
+上行链路无法在“10 分钟加上按 512 KiB/s 计算的传输时间”内发送完成的对象会单独失败，保持待同步状态，并在下一轮重试。
+
+**排查**
+
+```bash
+sudo felis offsite status        # 最近运行、错误、存储桶内容和待同步项；12 小时没有完成同步时以退出码 1 结束
+sudo felis offsite check-key     # offsite.env 中的密钥是否与存储桶一致
+sudo journalctl -u felis-offsite -n 50 --no-pager
+systemctl list-timers felis-offsite.timer
+```
+
+`status` 中的 `missing:` 行是已被手动从存储卷删除的归档，这些归档已无内容可复制。`not whole:` 列出同步期间从镜像仓库丢失的镜像。
+
+**解决**
+
+- **临时故障**：修复网络、凭证或时钟（[系统时钟未同步](#clock)），然后执行 `sudo systemctl start felis-offsite.service` 或在卡片上选择「立即同步」。
+- **密钥不一致**：将 `/etc/felis/offsite.env` 中的 `FELIS_OFFSITE_KEY` 设置为存储桶的密钥后执行一次同步；或将 `[offsite]` 指向空的存储桶或前缀并重新运行安装器（[加密密钥](/operations/backup#offsite-key)）。
+- **被误接管**（例如被演练用的机器接管）：在生产主机上执行 `sudo felis offsite take-over -yes`。
+- **重建后处于待命状态**：确认本机永久替代旧主机后，执行 `sudo felis offsite take-over -yes`（[整机重建](/operations/backup#rebuild-host)）。
+- **定时任务缺失**：重新运行安装器。
+
+### 数据库不可用 {#database-unavailable}
+
+**原因**
+
+控制面数据库以 `felis-postgres` Deployment 运行，数据位于主机的 `/var/lib/felis/postgres`。数据库不可用时，登录、面板和服务器管理均会失败。
+
+| 症状 | 原因 | 解决 |
+| --- | --- | --- |
+| `postgres` 出现 `ImagePullBackOff` 或 `ErrImagePull` | 节点无法访问 Docker Hub，且本地没有副本。 | 按[镜像仓库推送或拉取失败](#registry-errors)中的方法导入镜像。 |
+| `CreateContainerConfigError`，`secret "felis-postgres" not found` | 超级用户 Secret 已丢失。 | 重新运行安装器，安装器会创建新的 Secret。 |
+| 日志显示 `/var/lib/postgresql/18/docker` 上的 `Permission denied` | 数据目录失去了属主（uid 999），或在 SELinux enforcing 模式下失去了 `container_file_t` 标签。 | 重新运行安装器，或执行 `sudo chown -R 999:999 /var/lib/felis/postgres` 和 `sudo restorecon -R /var/lib/felis/postgres`。 |
+| 日志显示 `database files are incompatible with server` | 数据由另一个 PostgreSQL 大版本创建。 | 按 [PostgreSQL 大版本升级](/operations/upgrade#postgresql-major)操作。 |
+| `Pending`，`Insufficient memory` | 节点没有足够资源容纳该 Pod。 | 释放节点内存。 |
+| felis-api 处于 `CrashLoopBackOff`，提示 `database schema is newer than this felis build: …` | felis-api 被回滚到迁移数据库之前的版本。 | 恢复升级时生成的 `pre-migrate` 备份包（[回滚](/operations/upgrade#rollback)）。 |
+| `database schema is behind this felis build` | 缺少数据库迁移。 | 执行 `sudo felis migrate up -config /etc/felis/felis.host.toml`。 |
+| felis-api 日志出现 `audit: lost …`，告警 `FelisAuditWriteFailing` | 无法写入审计记录，几乎都是 PostgreSQL 故障所致。 | 按下文检查数据库。 |
+| 请求变慢；出现 `canceling statement due to statement timeout` | 请求在排队等待 25 个连接池连接之一，或某条语句超过 15 秒。 | 通过 `pg_stat_activity` 查找慢查询或锁。 |
+
+安装器在 10 分钟内未等到数据库就绪时停止，提示 `felis-postgres did not become ready` 并输出 Pod 事件。看门狗在 3 分钟后发送 `PostgreSQL is unreachable: …`。
+
+**排查**
+
+```bash
+sudo k3s kubectl -n felis get pods -l app.kubernetes.io/component=postgres -o wide
+sudo k3s kubectl -n felis describe deploy/felis-postgres | tail -n 30
+sudo k3s kubectl -n felis logs deploy/felis-postgres --tail=60
+```
+
+以超级用户身份手动查询数据库：
+
+```bash
+sudo k3s kubectl -n felis exec -it deploy/felis-postgres -c postgres -- psql -U postgres felis
+```
+
+```sql
+SELECT pid, state, wait_event, query FROM pg_stat_activity;
+```
+
+**解决**
+
+按表中的方法处理。如需撤销误操作或恢复受损数据，按[恢复数据库](/operations/backup#restore-database)恢复数据库备份包。
+
+## 邮件与告警 {#mail-alerts}
+
+### 邮件无法送达 {#mail-problems}
+
+**原因**
+
+登录验证码、邮箱验证和身份确认邮件、世界清理提醒、看门狗告警以及应急登录验证码都通过同一个邮件中继发送。在面板「邮件服务」卡片中保存的中继优先于 `felis setup` 写入 `felis.toml` 的 `[smtp]` 中继。
+
+| 症状 | 原因 | 解决 |
+| --- | --- | --- |
+| `503 mail_unavailable` | 未配置邮件中继，只能使用 Passkey 登录。 | 配置邮件中继（见下文）。 |
+| `429 mail_rate_limited`，告警 `FelisMailBudgetExhausted` | 每小时发信额度已用完（`[smtp] max_per_hour` 或「每小时发信上限」，默认 120，其中四分之一可一次性发出）。 | 查看 `felis_rate_limited_total` 判断是否存在请求洪泛。如果登录请求真实有效，将上限提高到中继允许的值。 |
+| `502 mail_undeliverable`，告警 `FelisMailDeliveryFailing` | 中继拒绝了邮件。 | 在 felis-api 日志中查看中继给出的原因。 |
+| `smtp: <host>:<port> does not offer STARTTLS`，或卡片显示 `smtp_tls` | 中继使用 465 以外的端口且不支持 STARTTLS。 | 使用 465 端口或支持 STARTTLS 的中继（见下文）。 |
+| `smtp_unreachable` | 无法连接中继；端口不是 25、465、587 或 2525；或地址解析为链路本地、未指定或组播地址。 | 更正主机和端口。 |
+| `smtp_auth` | 中继拒绝了凭证。 | 更正用户名和密码。 |
+| `smtp_sender_refused`、`smtp_recipient_refused` | 中继拒绝了发件人或收件人。 | 使用邮件服务商已授权的发件地址，并检查收件地址。 |
+| `409 mail_settings_changed` | 卡片加载后中继设置已被修改。 | 重新加载后再保存。 |
+| 安装结束时显示 `NO ALERT MAIL`，告警只写入系统日志 | 没有邮件中继，或没有已验证邮箱的所有者。 | 配置邮件中继并验证所有者的邮箱。 |
+| 世界清理日志出现 `reaper: warning suppressed — no warner wired` | 没有邮件中继，或服务器所有者没有已验证的邮箱。 | 配置邮件中继。提醒窗口未结束时，待发送的提醒会在下一次每日运行时发出。 |
+
+**排查**
+
+1. 打开「平台设置 → 通知与保留」。「邮件服务」卡片显示当前生效的中继：「面板设置」「安装时的设置」或「未配置」。
+2. 选择「发送测试邮件」。该操作按当前填写的设置向所有者的已验证邮箱发送一封测试邮件，并指出失败的阶段。每次测试都计入每小时发信额度。
+3. 查看面板不显示的中继原始错误：
+
+   ```bash
+   sudo k3s kubectl -n felis logs deploy/felis-api | grep -i smtp
+   journalctl -u felis-watchdog -n 40
+   sudo felis doctor
+   ```
+
+**解决**
+
+1. 在「邮件服务」卡片中填写中继，选择「检查并保存」。Felis 会先向发件地址发送一封自检邮件，中继接受后才保存。发件人须为不带显示名称的纯邮箱地址。
+2. 也可以执行 `sudo felis setup` 配置邮件。在其中保存会写入 `[smtp]`，同时清除面板中保存的中继，使 setup 中填写的中继生效。中继密码应通过 `felis setup` 修改；手动编辑 `felis-smtp` Secret 只在下次运行安装器之前有效。
+3. 通过可信网络访问且不支持 STARTTLS 的中继，可在卡片上关闭「要求加密连接」，或在 `/etc/felis/felis.toml` 和 `/etc/felis/felis.pod.toml` 的 `[smtp]` 中设置 `require_tls = false`。
+4. 如需接收告警邮件，在「账户 → 邮箱验证」中验证所有者的邮箱地址。
+
+登录限流和账户锁定见[登录问题](#sign-in-problems)。邮件中继、看门狗和心跳的说明见[邮件中继](/operations/monitoring#mail-relay)、[看门狗](/operations/monitoring#watchdog)和[心跳](/operations/monitoring#heartbeat)。
+
+## 文件与计划任务 {#files-schedules}
+
+### 文件管理拒绝修改或上传 {#file-manager-errors}
+
+**原因**
+
+「服务器文件」页面仅向服务器所有者和管理员开放，且只能在服务器完全停止时使用。浏览目录和读取文件不占用世界。每项修改（保存、新建文件或文件夹、重命名、删除、上传、解压）都会运行一个 Job，并在其结束前占用世界，在此期间的唤醒或另一项修改会返回 `409 maintenance_in_progress`。
+
+| 状态码 | 错误码 | 含义 | 解决 |
+| --- | --- | --- | --- |
+| `409` | `not_stopped` | 游戏 Pod 仍然存在，通常正在完成关服存档。 | 等 `sudo k3s kubectl -n minecraft get pods -l felis.lolicon.best/server=<name>` 无输出后重试。 |
+| `409` | `maintenance_in_progress` | 另一项修改、备份、恢复或世界清理正在占用世界。 | 该操作结束后重试。 |
+| `409` | `file_exists` | 新建文件、文件夹、重命名或上传的目标路径已存在内容。 | 更换名称；上传时可选择「替换」。 |
+| `409` | `file_changed` | 编辑器读取文件后，文件已被修改。 | 选择「载入最新内容」或「仍然覆盖」。 |
+| `400` | `bad_path` | 路径超出世界卷，或会移动 `server.properties`、`config`、`config/paper-global.yml`，或读取 `config/paper-global.yml`。 | 这三项须保持原名；`paper-global.yml` 包含所有服务器共用的转发密钥。 |
+| `404` | `not_found` | 路径或新文件夹的上级目录已不存在。 | 选择「刷新」。 |
+| `413` | `too_large` | 读取超过 1 MiB、保存超过 256 KiB，或单次请求上传超过 64 MiB。 | 大文件应整体上传，不在编辑器中修改。面板会自动分片上传超过 64 MiB 的文件。 |
+| `411` | `length_required` | 上传请求缺少 `Content-Length`。 | 通过面板上传，或使用 `curl -T`。 |
+| `400` | `upload_incomplete` | 请求体在声明的长度之前结束，未做任何修改。 | 重试。 |
+| `507` | `upload_staging_full` | 暂存该上传会使 felis-api 的暂存文件系统剩余空间低于 10%。 | 释放上传卷的空间。 |
+| `507` | `volume_full` | 世界卷已满，原文件保持不变。 | 删除服务器不再需要的文件，或扩容存储卷。 |
+| `504` | `files_timeout` | felis-api 等待 90 秒后停止等待。 | Job 可能仍会完成（见下文）。 |
+| `503` | `files_unavailable` | felis-api 未配置文件 Job 执行器或上传暂存。 | 检查 felis-api 的启动日志。 |
+| `404` | `upload_not_found` | 大文件上传会话已不存在：已取消、已完成、闲置 6 小时，或 felis-api 已重启。 | 重新上传该文件。 |
+| `429` | `too_many_uploads` | 该账户已有 4 个大文件上传正在进行。 | 完成或取消其中一个。 |
+| `429` | `export_busy` | 下载限制：每个用户同时两个，全平台同时四个，每个用户每小时 30 个。 | 稍后重试。 |
+
+分片上传过程中出现的 `upload_offset_mismatch`、`upload_busy` 和 `409 upload_incomplete` 由面板自动处理并续传。解压 `.zip` 时会在写入任何内容之前检查所有条目，失败时不做任何修改：`archive_unsafe`（条目超出目标文件夹）、`archive_symlink`（条目为链接）、`type_conflict`（压缩包中的文件与服务器上的文件夹同名，或相反）、`archive_invalid`（条目大小与压缩包声明不符）和 `volume_full`。未选择替换时，会覆盖现有文件的压缩包以 `file_exists` 结束并附带文件列表，面板会显示该列表供确认。文件夹不能直接上传，应压缩为 `.zip` 上传后解压。
+
+**排查**
+
+```bash
+sudo k3s kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>,app.kubernetes.io/managed-by=felis-files
+sudo k3s kubectl -n minecraft get jobs -l felis.lolicon.best/server=<name>,felis.lolicon.best/files-async=true
+sudo k3s kubectl -n minecraft logs job/<job>
+```
+
+已结束的 Job 及其日志保留两分钟；没有结果就失败的大文件上传或解压，其日志保留 30 分钟。Job 无法获取暂存的上传文件或字节不一致时，日志会说明原因。
+
+**解决**
+
+按表中的错误码处理。出现 `files_timeout` 后，Job 会继续运行到自身两分钟的期限，修改仍可能完成，并在结束前一直占用世界。Job 消失后选择「刷新」，确认修改是否已生效。大文件上传和解压在后台运行，最长 2 小时，关闭页面后仍会继续；失败时显示上表中的错误码，或显示 `job_failed` 及 Job 的状态（超过 2 小时为 `DeadlineExceeded`）。
+
+### 计划任务被跳过、错过或失败 {#schedule-errors}
+
+**原因**
+
+felis-api 每 15 秒检查一次计划任务，并在「计划任务」页面记录每次执行的结果。控制台命令、重启和停止只在服务器运行时执行，启动只在服务器停止时执行。运行中的服务器以不停服方式备份；无法不停服备份时，先停止服务器，备份后再启动。每个步骤都有期限：Pod 须在 15 分钟内停止，备份 Job 须在 45 分钟内结束，启动有 15 分钟。无法完成的重启或备份，如果服务器原本在运行，仍会重新启动服务器。
+
+| 结果 | 详情 | 解决 |
+| --- | --- | --- |
+| 已跳过 | `the server has a new owner since this schedule was saved; save it again to use it` | 服务器所有者已变更，任务已自动关闭。新所有者检查任务后重新保存即可启用。 |
+| 已跳过 | `the server was not running`、`the server was already stopped`、`the server was already running`、`the server has no world yet`、`the server is being given up or deleted`、`the server no longer exists`；启动任务还可能为 `the cluster is at its running-server cap` 或 `the world is busy with …` | 本次执行没有可操作的对象，下次执行时会再次尝试。 |
+| 错过 | `felis-api was not running at the scheduled time` | felis-api 在预定时间之后停止运行超过 10 分钟。本次执行被放弃，下次执行照常进行。 |
+| 失败 | `felis-api stopped in the middle of this run` | 执行期间 felis-api 重启。确认服务器处于预期状态。 |
+| 失败 | `the server did not stop within 15 minutes` | 参见[服务器无法停止](#server-wont-stop)。备份未执行。 |
+| 失败 | `another operation kept the world busy for 15 minutes` | 恢复、文件修改或另一次备份占用了世界。 |
+| 失败 | `the backup failed: …`、`the backup did not finish within 45 minutes`、`the backup store is full; ask an administrator to free space` | 参见[世界备份被拒绝或失败](#backup-failures)。「备份与恢复」页面显示对应的 Job。 |
+| 失败 | `could not start the server again: …` | 服务器已停止但无法重新启动（达到运行服务器上限、服务器正在被放弃，或 15 分钟后世界仍被占用）。原因排除后在面板中启动服务器。 |
+| 失败 | `the server console could not be reached`、`the console is not configured`、`the command failed: …` | RCON 无法连接或未开启。参见[服务器卡在启动中](#server-stuck-starting)和[新版本引入的设置未应用到现有服务器](#system-server-fields)。 |
+
+执行进行中的任务无法编辑、删除或再次执行（`409 schedule_running`）。
+
+**排查**
+
+每个任务行显示最近一次的结果和详情。审计日志将每次完成的执行记录为 `schedule.run`，包含结果和详情（[审计日志](/guide/administration#audit-log)）。
+
+**解决**
+
+按表中的详情处理。以下时间规则可解释执行时间与预期不符的情况：
+
+- 夏令时切换时被跳过的时间点会提前一小时执行；重复出现的时间点只在第一次执行。
+- 主机无法识别的时区按 UTC 执行。
+- 「立即执行」会立刻开始一次执行，对已关闭的任务同样有效，且不改变下次计划的执行时间。
+- 删除服务器会删除其计划任务；同名新建的服务器没有任何计划任务。
+
+## 快速索引 {#quick-reference}
+
+| 症状 | 参见 |
+| --- | --- |
+| 从何处开始：状态、健康检查、支持包、日志 | [首先检查](#first-steps) |
+| 服务器卡在 `Starting`；`PodNotReady`、`RconNotReachable` | [服务器卡在启动中](#server-stuck-starting) |
+| 服务器处于 `Failed`；`StartupTimeout`、`ReadinessTimeout` | [服务器进入 Failed](#server-failed)、[新版本引入的设置未应用到现有服务器](#system-server-fields) |
+| 服务器无法停止 | [服务器无法停止](#server-wont-stop) |
+| 服务器无人时不停止；在线人数始终为 0；`PlayersCounted` 为 `False` | [服务器无人时不自动停止](#idle-stop) |
+| 玩家无法进服或被送到错误位置；唤醒被拒绝 | [玩家无法进服](#players-cannot-join) |
+| 路由未启用 | [路由未启用](#routing-disabled) |
+| 面板返回 401 或 403 | [面板错误](#panel-errors) |
+| 登录被拒绝：`rate_limited`、`otp_account_locked` | [登录问题](#sign-in-problems) |
+| 游戏代理或插件访问内部 API 返回 401 | [内部 API 错误](#internal-api-errors) |
+| 账号绑定或认领错误 | [账号绑定错误](#account-link-errors) |
+| 构建失败；扫描拦截；`context_changed`；`uploads_full` | [镜像构建失败](#build-failures) |
+| 构建一直「排队中」；`mirror/kaniko-executor` 出现 `ImagePullBackOff`；`failed to download vulnerability DB` | [构建 Pod 无法启动](#build-pods-not-starting) |
+| 镜像仓库推送或拉取失败；写入返回 `503`；隔离网络主机提示 `could not pull …` | [镜像仓库推送或拉取失败](#registry-errors) |
+| `image_not_in_registry`、`registry_unavailable`、`image_change_unconfirmed`；将世界迁移到更新的 Minecraft 版本 | [创建服务器或更换镜像被拒绝](#game-images) |
+| 安装发布版时在主机上构建镜像 | [安装发布版时在主机上构建镜像](#host-build-fallback) |
+| 大厅控制台无响应；较早的服务器缺少 RCON 或空闲停服；`felis converge` | [新版本引入的设置未应用到现有服务器](#system-server-fields) |
+| `409 world_volume_exists`；删除服务器后世界卷仍在 | [删除服务器后世界卷仍然保留](#world-volume-kept) |
+| Pod 被驱逐；`DiskPressure`；文件系统告警 | [磁盘写满时 Pod 被驱逐](#disk-full-symptoms)、[从满盘状态恢复](/operations/storage#disk-full) |
+| 看门狗报告 `host-address`；地址变化后面板无法访问 | [主机地址发生变化](#host-address-changed) |
+| 看门狗报告 `k3s-certs` | [k3s 证书即将过期](#k3s-certificates) |
+| 看门狗报告 `clock`；S3 拒绝异地副本上传 | [系统时钟未同步](#clock) |
+| `backup_cooldown`、`backup_store_full`、`live_backup_console`、`not enough free disk for the archive` | [世界备份被拒绝或失败](#backup-failures) |
+| 世界清理 Job 失败；`awaiting_stop`；备份被标记为「已损坏」 | [世界清理 Job 失败](#world-cleanup-failed) |
+| 下载被拒绝或中断：`export_busy`、`export_expired`、`export_unavailable` | [备份或世界下载失败](#download-failures) |
+| 数据库备份「已过期」「从未备份」或「不完整」；`FelisDBBackupStale`；`pre-migration backup failed, nothing applied` | [数据库备份过期或不完整](#database-backup-overdue) |
+| `the off-site copy last completed … ago`；`OFF-SITE COPY STOPPED`；`awaiting_offsite` 持续大于 0 | [异地副本停止同步](#offsite-stopped) |
+| `felis-postgres did not become ready`；`database schema is newer than this felis build` | [数据库不可用](#database-unavailable) |
+| 撤销误操作；恢复数据库 | [恢复数据库](/operations/backup#restore-database) |
+| 主机已丢失 | [整机重建](/operations/backup#rebuild-host) |
+| 升级出现问题 | [回滚](/operations/upgrade#rollback) |
+| `mail_unavailable`、`mail_rate_limited`、`smtp_tls`；`NO ALERT MAIL` | [邮件无法送达](#mail-problems) |
+| 看门狗告警邮件；`NO HEARTBEAT` | [看门狗](/operations/monitoring#watchdog)、[心跳](/operations/monitoring#heartbeat) |
+| 没有管理员能够登录 | [应急访问](/operations/access#break-glass) |
+| 服务器文件：修改、上传或解压被拒绝 | [文件管理拒绝修改或上传](#file-manager-errors) |
+| 计划任务显示已跳过、错过或失败 | [计划任务被跳过、错过或失败](#schedule-errors) |
+| 工作节点离线，其上的服务器停止运行 | [故障切换](/guide/distributed#failover) |
