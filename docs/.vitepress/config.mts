@@ -184,6 +184,12 @@ export default withMermaid({
     sequence: { useMaxWidth: false, wrap: true },
   },
   head: [
+    ['link', { rel: 'icon', href: '/favicon.ico', sizes: 'any' }],
+    ['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }],
+    ['link', { rel: 'icon', href: '/favicon-32x32.png', type: 'image/png', sizes: '32x32' }],
+    ['link', { rel: 'icon', href: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' }],
+    ['link', { rel: 'apple-touch-icon', href: '/apple-touch-icon.png', sizes: '180x180' }],
+    ['link', { rel: 'mask-icon', href: '/safari-pinned-tab.svg', color: '#65a26c' }],
     ['meta', { name: 'theme-color', content: '#ffffff', media: '(prefers-color-scheme: light)' }],
     ['meta', { name: 'theme-color', content: '#000000', media: '(prefers-color-scheme: dark)' }],
   ],
@@ -200,7 +206,7 @@ export default withMermaid({
     },
   },
   themeConfig: {
-    logo: { src: '/felis-logo.png', alt: 'Felis' },
+    logo: { src: '/felis-logo.svg', alt: 'Felis' },
     nav: [
       { text: '官网', link: 'https://felismc.com/', target: '_self' },
       { text: '开始使用', link: '/', activeMatch: '^/(?:$|guide/(?!distributed$|building$))' },
