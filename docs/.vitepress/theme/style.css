@@ -66,3 +66,7 @@ html[lang='zh-CN'] { --vp-code-copy-copied-text-content: '已复制'; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+
+/* Table headers stay on one line, so a short column is never squeezed to one CJK
+   character per line; a wide table scrolls inside its own box. */
+.vp-doc th { white-space: nowrap; }

@@ -6,90 +6,110 @@ const gettingStartedSidebar: DefaultTheme.SidebarItem[] = [
     text: '开始使用',
     items: [
       { text: '认识 Felis', link: '/' },
+      { text: '环境要求', link: '/guide/requirements' },
       { text: '安装与部署', link: '/guide/deployment' },
-      { text: '管理服务器', link: '/guide/servers' },
     ],
   },
   {
-    text: '项目资料',
-    collapsed: true,
+    text: '使用指南',
     items: [
-      { text: '开源协议', link: '/reference/license' },
-      { text: '项目说明', link: '/reference/readme-en' },
+      { text: '管理服务器', link: '/guide/servers' },
+      { text: '玩家接入', link: '/guide/players' },
+      { text: '平台管理', link: '/guide/administration' },
     ],
   },
 ]
 
 const operationsSidebar: DefaultTheme.SidebarItem[] = [
   {
-    text: '部署与运维',
+    text: '运维',
     items: [
-      { text: '部署架构', link: '/reference/architecture' },
-      { text: '运维手册', link: '/operations/' },
+      { text: '运维概览', link: '/operations/' },
       { text: '备份与恢复', link: '/operations/backup' },
+      { text: '存储与磁盘', link: '/operations/storage' },
+      { text: '升级', link: '/operations/upgrade' },
+      { text: '访问与域名', link: '/operations/access' },
+      { text: '监控与告警', link: '/operations/monitoring' },
+      { text: '卸载与重装', link: '/operations/uninstall' },
       { text: '故障排查', link: '/operations/troubleshooting' },
-      { text: '多机部署（实验性）', link: '/guide/distributed' },
+    ],
+  },
+  {
+    text: '进阶',
+    items: [
+      { text: '多机部署与高可用', link: '/guide/distributed' },
     ],
   },
 ]
 
-const developmentSidebar: DefaultTheme.SidebarItem[] = [
+const referenceSidebar: DefaultTheme.SidebarItem[] = [
   {
-    text: '开发参考',
+    text: '参考',
     items: [
-      { text: '从源码构建', link: '/guide/building' },
-      { text: '贡献指南', link: '/reference/contributing' },
-      { text: 'API 定义', link: '/reference/api' },
-      { text: '时序图', link: '/reference/sequence-diagrams' },
+      { text: '命令行参考', link: '/reference/cli' },
+      { text: '配置参考', link: '/reference/configuration' },
+      { text: 'API 参考', link: '/reference/api' },
+      { text: '系统架构', link: '/reference/architecture' },
       { text: '服务端插件', link: '/reference/plugins' },
-      { text: '集成边界', link: '/reference/deferred-seams' },
+      { text: '大厅镜像', link: '/reference/lobby' },
+      { text: '登录空间镜像', link: '/reference/limbo' },
+      { text: '已知限制', link: '/reference/limitations' },
+      { text: '开源协议', link: '/reference/license' },
     ],
   },
   {
-    text: '镜像参考',
-    collapsed: true,
+    text: '开发',
     items: [
-      { text: '大厅镜像', link: '/reference/lobby' },
-      { text: '登录服镜像', link: '/reference/limbo' },
+      { text: '从源码构建', link: '/guide/building' },
+      { text: '贡献指南', link: '/reference/contributing' },
+      { text: '时序图', link: '/reference/sequence-diagrams' },
     ],
   },
 ]
 
 const sidebar: Record<string, DefaultTheme.SidebarItem[]> = {
   '/guide/distributed': operationsSidebar,
-  '/guide/building': developmentSidebar,
-  '/reference/architecture': operationsSidebar,
-  '/reference/license': gettingStartedSidebar,
-  '/reference/readme-en': gettingStartedSidebar,
+  '/guide/building': referenceSidebar,
   '/operations/': operationsSidebar,
-  '/reference/': developmentSidebar,
+  '/reference/': referenceSidebar,
+  '/guide/': gettingStartedSidebar,
   '/': gettingStartedSidebar,
 }
 
 const englishLabels: Record<string, string> = {
   '开始使用': 'Getting started',
-  '认识 Felis': 'Introduction to Felis',
-  '安装与部署': 'Installation and deployment',
+  '认识 Felis': 'Introduction',
+  '环境要求': 'Requirements',
+  '安装与部署': 'Installation',
+  '使用指南': 'User guide',
   '管理服务器': 'Managing servers',
-  '项目资料': 'Project information',
-  '开源协议': 'License',
-  '项目说明': 'Project README',
-  '部署与运维': 'Deployment and operations',
-  '部署架构': 'Deployment architecture',
-  '运维手册': 'Operations guide',
+  '玩家接入': 'Player access',
+  '平台管理': 'Platform administration',
+  '运维': 'Operations',
+  '运维概览': 'Operations overview',
   '备份与恢复': 'Backup and restore',
+  '存储与磁盘': 'Storage and disks',
+  '升级': 'Upgrading',
+  '访问与域名': 'Access and domains',
+  '监控与告警': 'Monitoring and alerts',
+  '卸载与重装': 'Uninstall and reinstall',
   '故障排查': 'Troubleshooting',
-  '多机部署（实验性）': 'Multi-node deployment (experimental)',
-  '开发参考': 'Developer reference',
-  '从源码构建': 'Build from source',
-  '贡献指南': 'Contributing',
-  'API 定义': 'API definition',
-  '时序图': 'Sequence diagrams',
-  '服务端插件': 'Server-side plugins',
-  '集成边界': 'Integration boundaries',
-  '镜像参考': 'Image reference',
+  '进阶': 'Advanced',
+  '多机部署与高可用': 'Multi-node and high availability',
+  '参考': 'Reference',
+  '命令行参考': 'Command-line reference',
+  '配置参考': 'Configuration reference',
+  'API 参考': 'API reference',
+  '系统架构': 'Architecture',
+  '服务端插件': 'Server plugins',
   '大厅镜像': 'Lobby image',
-  '登录服镜像': 'Login server image',
+  '登录空间镜像': 'Login space image',
+  '已知限制': 'Known limitations',
+  '开源协议': 'License',
+  '开发': 'Development',
+  '从源码构建': 'Building from source',
+  '贡献指南': 'Contributing',
+  '时序图': 'Sequence diagrams',
 }
 
 function englishSidebar(items: DefaultTheme.SidebarItem[]): DefaultTheme.SidebarItem[] {
@@ -116,21 +136,9 @@ export default withMermaid({
       themeConfig: {
         nav: [
           { text: 'Website', link: 'https://felismc.com/', target: '_self' },
-          {
-            text: 'Getting started',
-            link: '/en/',
-            activeMatch: '^/en/(?:$|guide/(?:deployment|servers)$|reference/(?:license|readme-en)$)',
-          },
-          {
-            text: 'Operations',
-            link: '/en/operations/',
-            activeMatch: '^/en/(?:operations/|guide/distributed$|reference/architecture$)',
-          },
-          {
-            text: 'Developer reference',
-            link: '/en/reference/contributing',
-            activeMatch: '^/en/(?:guide/building$|reference/(?!(?:architecture|license|readme-en)$))',
-          },
+          { text: 'Getting started', link: '/en/', activeMatch: '^/en/(?:$|guide/(?!distributed$|building$))' },
+          { text: 'Operations', link: '/en/operations/', activeMatch: '^/en/(?:operations/|guide/distributed$)' },
+          { text: 'Reference', link: '/en/reference/cli', activeMatch: '^/en/(?:reference/|guide/building$)' },
         ],
         sidebar: Object.fromEntries(Object.entries(sidebar).map(([path, items]) => [
           '/en' + path,
@@ -195,21 +203,9 @@ export default withMermaid({
     logo: { src: '/felis-logo.png', alt: 'Felis' },
     nav: [
       { text: '官网', link: 'https://felismc.com/', target: '_self' },
-      {
-        text: '开始使用',
-        link: '/',
-        activeMatch: '^/(?:$|guide/(?:deployment|servers)$|reference/(?:license|readme-en)$)',
-      },
-      {
-        text: '部署与运维',
-        link: '/operations/',
-        activeMatch: '^/(?:operations/|guide/distributed$|reference/architecture$)',
-      },
-      {
-        text: '开发参考',
-        link: '/reference/contributing',
-        activeMatch: '^/(?:guide/building$|reference/(?!(?:architecture|license|readme-en)$))',
-      },
+      { text: '开始使用', link: '/', activeMatch: '^/(?:$|guide/(?!distributed$|building$))' },
+      { text: '运维', link: '/operations/', activeMatch: '^/(?:operations/|guide/distributed$)' },
+      { text: '参考', link: '/reference/cli', activeMatch: '^/(?:reference/|guide/building$)' },
     ],
     sidebar,
     socialLinks: [{ icon: 'github', link: 'https://github.com/FelisMC/docs' }],
