@@ -25,3 +25,5 @@ bun run docs:preview
 中文页面位于 `docs/`，英文页面位于 `docs/en/`，例如 `docs/guide/deployment.md` 对应 `docs/en/guide/deployment.md`。语言切换保留当前文章和章节，导航、侧栏、搜索与阅读设置随语言切换。搜索索引按语言划分。
 
 直接在本仓库修改文档，并同步更新两种语言，命令、配置键、错误码和验证标记保持一致。标题末尾的 `{#章节标识}` 在对应页面中使用同一值；翻译标题时保留该标识，避免旧链接和语言切换后的章节定位失效。OpenAPI、许可证和图片由两种语言共用 `docs/public/` 下的原件。
+
+Felis 主仓库不再保存文档，全部文档以本仓库为准。OpenAPI 定义的原件位于主仓库 `api/openapi.yaml`，接口变更后复制到 `docs/public/openapi.yaml`。
