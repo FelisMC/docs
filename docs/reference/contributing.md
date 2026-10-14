@@ -17,6 +17,14 @@ Felis 是基于 Kubernetes 的 Minecraft 服务器控制平面。仓库分为四
 
 代码按职责拆分。优先修改实际负责该行为的最小模块，避免增加宽泛抽象或重写周边代码。
 
+## 界面文案 {#interface-copy}
+
+界面文案须采用书面文档风格，客观、简洁、准确：说明当前状态、原因或影响，以及可执行的操作。只描述已确认的事实，避免口语化表达、拟人化表述和缺乏依据的耗时估计。中文说明应使用“执行”“选择”“查看”“配置”等明确动词，操作名称须与界面实际标签一致。中英文文案须保持相同的含义和正式程度。应更新现有翻译条目，避免新增重复的消息或组件。
+
+## 面板视觉风格 {#panel-visual-style}
+
+复用 `PageHeader`、`Card` 系列组件，以及共享的表单和按钮组件。卡片标题、边框、圆角、间距和保存页脚遵循共享定义，避免在单个页面中重新定义这些样式。浅色主题使用白色卡片背景、克制的语义色和 16px 功能图标。保存操作使用 `CardFooter`，交互控件使用 `Button`。表单标签使用共享的 `Label` 样式和 8px 字段间距；单行控件使用共享的 36px 高度。多行字段和确认项复用 `Textarea` 与 `Checkbox`。页面专用的控件类只用于调整布局、代码字体或语义校验状态。表格、控制台、紧凑统计和状态消息可保留适合其内容的间距和颜色。保留共享的页面边距和底部间距。
+
 ## 本地开发 {#local-development}
 
 大部分日常开发可在 macOS 或 Linux 上完成，不需要完整集群。完整产品依赖 Postgres 和 Kubernetes，单元测试与前端开发可以本地运行。
@@ -275,6 +283,36 @@ cd panel && npm run typecheck && npm test && npm run build
 
 无法运行相关检查时，交付说明中须明确说明。
 
----
+## 品牌图标 {#brand-icons}
 
-来源：[CONTRIBUTING.md](https://github.com/FelisMC/Felis/blob/main/CONTRIBUTING.md)。安装及功能状态另据主仓库 README 和插件文档同步。
+品牌图标位于仓库的 `assets/icons/`，基于参考图片手工临摹。矢量文件仅使用路径、形状、渐变和蒙版，没有嵌入位图。所有彩色导出均来自 `assets/felis-logo.svg`。
+
+| 文件 | 用途 |
+| --- | --- |
+| `assets/felis-logo.svg` | 1040 × 640 紧裁透明矢量原稿 |
+| `assets/felis-logo.png` | README 用图，保留现有 540 × 341 尺寸 |
+| `assets/icons/felis-reference.svg` / `.png` | 保留参考图的 1254 × 1254 白底构图 |
+| `assets/icons/felis-icon.svg` | 居中的方形透明图标 |
+| `assets/icons/felis-app.svg` / `.png` | 浅绿圆角应用图标，1024 × 1024 |
+| `assets/icons/felis-app-dark.svg` / `.png` | 深绿圆角应用图标，1024 × 1024 |
+| `assets/icons/felis-maskable.svg` / `.png` | 不透明方形背景，猫脸位于中心安全圆内 |
+| `assets/icons/felis-monochrome.svg` | 紧裁黑色单色版，眼睛和鼻子镂空 |
+| `assets/icons/felis-mask.svg` | 方形单色版，供 Safari 固定标签使用 |
+| `assets/icons/png/icon-{size}.png` | 透明图标：16、20、24、32、40、48、64、96、128、180、192、256、512、1024 px |
+| `assets/icons/felis.ico` | Windows 多分辨率图标：16、24、32、48、64、128、256 px |
+| `assets/icons/felis.icns` / `assets/icons/felis.iconset/` | macOS 图标及 16、32、128、256、512 pt 的 1× / 2× PNG |
+| `assets/icons/preview.png` | 图标套装预览 |
+
+网页资源位于 `panel/public/`，由 `panel/index.html` 引用：SVG / ICO / PNG favicon、180 px Apple Touch Icon、Safari 固定标签图标，以及 192 / 512 px 普通和 maskable 图标。`site.webmanifest` 提供应用名称和图标元数据，不提供离线缓存。
+
+面板通过 `panel/src/assets/felis-logo.svg` 引用白底圆角方形图标：桌面侧栏和手机导航使用 28 px，登录与初始化页头使用 44 px。该图标沿用套装中 `felis-app.svg` 的构图，底色改为白色。构建时生成带内容哈希的文件名，重新导出时会同步更新此文件。
+
+标签页图标单独向下偏移，以对齐视觉中心；SVG、PNG、ICO 和 Safari 固定标签使用相同位置，应用图标保持原有构图。仅需重新导出标签页资源时，可在下方命令后加上 `--favicons-only`。
+
+修改矢量原稿后可重新导出。导出需要 Node.js 和 `sharp`，macOS 的 ICNS 导出还使用系统自带的 `iconutil`。在仓库根目录运行：
+
+```sh
+NODE_PATH=/path/to/node_modules node scripts/generate-icons.cjs
+```
+
+`NODE_PATH` 指向已安装 `sharp` 的 `node_modules` 目录。导出工具不会增加面板的运行依赖；非 macOS 平台仍会生成其余格式和 `iconset`。

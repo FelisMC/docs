@@ -156,7 +156,3 @@ sequenceDiagram
         APIExternal-->>Panel: 200 {linked:true, mc_uuid, auth_source}
     end
 ```
-
----
-
-原文：[docs/sequence-diagrams.md](https://github.com/FelisMC/Felis/blob/main/docs/sequence-diagrams.md)。

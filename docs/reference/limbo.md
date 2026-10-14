@@ -91,6 +91,8 @@ sudo felis setup
 
 `felis setup` 输出 Velocity 的网关和大厅配置，保证新连接首先进入 `login`。只有认证成功并由网关放行后，才能进入大厅或之前记住的用户后端。
 
----
+## 在面板中自定义 {#customize-in-the-panel}
 
-来源：[deploy/limbo/README.md](https://github.com/FelisMC/Felis/blob/main/deploy/limbo/README.md)。
+管理员打开「登录与大厅」，选择「登录空间」，编辑前先将其停止。表单可配置登录书标题、作者、页标题、登录链接文案、登录说明、是否自动打开登录书，以及登录等待时间（30–3600 秒）。这些设置保存在 `/data/felis-experience.json`；显式设置的 `FELIS_LOGIN_TIMEOUT_SECONDS` 环境变量优先。系统生成的绑定码、登录 URL 和聊天提示保持不变。认证流程和传送目标由系统维护，不属于面向玩家的自定义项。
+
+通过页面中链接的文件管理上传替换用的 `/data/spawn.schem`、编辑 Limbo 的 `server.properties` 或添加兼容 Limbo 的插件，然后启动该空间。Paper 世界 ZIP 和 Paper 插件无法在 Limbo 中使用。该页面还提供日志、备份与恢复，以及镜像与资源设置。登录入口停止期间，新玩家无法加入；自定义镜像必须保留登录插件，并支持代理的转发协议。

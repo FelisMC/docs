@@ -67,6 +67,4 @@ The deployment zone (RootDomain, spec §2) never appears here — `example.test`
 is a placeholder, per the no-hardcoded-domain red line.
 ```
 
----
-
-Source: [docs/openapi.yaml](https://github.com/FelisMC/Felis/blob/main/docs/openapi.yaml).
+The host-operation endpoints are subject to the same checks. They are served on the external face with `x-felis-tier: owner`, a grade the definition uses in addition to the four named above: `GET /api/v1/platform/host` (host overview), `POST /api/v1/platform/host/quiet` (holding or releasing the watchdog's mail), `POST /api/v1/platform/offsite/key` (reading the off-site encryption key), `GET /api/v1/platform/audit-export` (audit log export) and `GET /api/v1/settings/node-control/tasks/{id}/artifact` (downloading a file a host task produced, such as a support bundle). All except the host overview require fresh reauthentication. Besides the node lifecycle actions, the `action` of `POST /api/v1/settings/node-control/tasks` includes the host tasks the panel runs on the controller host, for example `db-backup`, `db-restore`, `offsite-configure`, `restore-host`, `domain-set`, `doctor` and `support-bundle`; the request can carry `params` and write-only `secrets` (passed to the host only, never stored with the task or returned), and the task record includes `result` and `artifact`.

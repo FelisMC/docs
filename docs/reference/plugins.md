@@ -149,14 +149,14 @@ best/lolicon/felis/paper/MenuTiles.class     (+ $Kind, $Tile)
 
 | 模块 | Gradle | JDK | 原因 |
 | --- | --- | --- | --- |
-| `velocity` | 9.8.0 | 运行需要 ≥ 21，生成 Java 21 字节码 | 普通 `java` 插件；velocity-api 3.5.1 声明 `jvm.version = 21` |
-| `paper` | 9.8.0 | **Java 25 工具链** | paper-api 26.3 是 Java 25 产物，模块声明 `JavaLanguageVersion.of(25)` 工具链 |
-| `limbo` | 9.8.0 | 运行需要 ≥ 21，生成 Java 17 字节码 | 当前 LOOHP/Limbo 发布版使用 class-file major 65，编译 JDK 必须 ≥ 21 才能读取；`release 17` 字节码可运行于使用 Java 17+ 的 Limbo |
+| `velocity` | 9.8.1 | 运行需要 ≥ 21，生成 Java 21 字节码 | 普通 `java` 插件；velocity-api 3.5.1 声明 `jvm.version = 21` |
+| `paper` | 9.8.1 | **Java 25 工具链** | paper-api 26.3 是 Java 25 产物，模块声明 `JavaLanguageVersion.of(25)` 工具链 |
+| `limbo` | 9.8.1 | 运行需要 ≥ 21，生成 Java 17 字节码 | 当前 LOOHP/Limbo 发布版使用 class-file major 65，编译 JDK 必须 ≥ 21 才能读取；`release 17` 字节码可运行于使用 Java 17+ 的 Limbo |
 | `fabric` | 8.8 | 17 | loom 1.7.4 使用的 `Problems.forNamespace` 在 Gradle 9 被移除 |
 | `forge` | 8.8 | 17 | ForgeGradle 6 仅支持 Gradle 8 |
 | `neoforge` | 8.14 | 17 | NeoGradle 7.1.38 要求 Gradle API ≥ 8.14 |
 
-安装器内置的 `velocity`、`paper`、`limbo` 插件在所有构建路径中均使用 Gradle 9.8.0：本地和 CI 使用 wrapper，大厅与登录服 Dockerfile、安装器的 Velocity 构建使用 `gradle:9.8.0-jdk25@sha256:…` 镜像。镜像、摘要或 wrapper 版本不一致时，`bootstrap_asset_test.go` 会失败。
+安装器内置的 `velocity`、`paper`、`limbo` 插件在所有构建路径中均使用 Gradle 9.8.1：本地和 CI 使用 wrapper，大厅与登录服 Dockerfile、安装器的 Velocity 构建使用 `gradle:9.8.1-jdk25@sha256:…` 镜像。镜像、摘要或 wrapper 版本不一致时，`bootstrap_asset_test.go` 会失败。
 
 ```bash
 # Velocity and Paper
@@ -213,7 +213,3 @@ unset GRADLE_USER_HOME
 **Velocity** 还需要在同一文件设置 `root-domain`（以及可选的 `lobby-server`），并确保 `velocity.toml` 中为 `online-mode=true`，才能启用 §11 路由。任一条件不满足时，代理仍提供 `/link`，但路由保持关闭，见 [Velocity 路由](#velocity-routing-§11)。插件 ID 固定为 `felis-link`，因此配置目录为 `plugins/felis-link/`；ID 在 0.1 → 0.2 jar 之间保持不变，旧配置可继续使用。
 
 **Paper 大厅**无需配置令牌，也无需维护服务器列表：菜单显示代理实际路由的服务器，由代理通过 `felis:control` 发送。旧版本在 `plugins/FelisPaper/config.yml` 中留下的 `servers:` 列表会被忽略，插件会在启动时提示。大厅必须与后端位于同一 Velocity 代理之后，只通过代理的 `felis:control` 入口访问控制平面，因此不需要自己的 `api-base-url` 或 `service-token`。安装器将该 jar 构建并打包进大厅镜像；自行运行大厅时才需要手动安装。
-
----
-
-原文：[plugins/README.md](https://github.com/FelisMC/Felis/blob/main/plugins/README.md)。

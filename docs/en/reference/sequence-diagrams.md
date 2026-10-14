@@ -158,6 +158,3 @@ sequenceDiagram
     end
 ```
 
----
-
-Source: [docs/sequence-diagrams.md](https://github.com/FelisMC/Felis/blob/main/docs/sequence-diagrams.md).

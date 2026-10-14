@@ -25,7 +25,7 @@ connect → login (limbo auth gate) → lobby (/menu hub) → target backend
 
 ```
 docker build -f deploy/lobby/Dockerfile \
-  --build-arg PAPER_JAR_URL=https://<mirror>/paper-1.21.x-<build>.jar \
+  --build-arg PAPER_JAR_URL=https://<mirror>/paper-26.3-<build>.jar \
   --build-arg PAPER_JAR_SHA256=<sha256 of that jar> \
   -t felis-lobby:demo .
 # Publish into the cluster's registry (on the node; docker treats 127.0.0.1 as
@@ -37,13 +37,21 @@ docker push 127.0.0.1:5000/felis/lobby:demo
 sudo felis setup
 ```
 
+## 在面板中自定义 {#customize-in-the-panel}
+
+管理员打开「登录与大厅」（`/admin/lobby`）。读取或保存所选空间的设置前须先停止该空间，完成后启动该空间以应用设置。大厅表单可配置欢迎文案、菜单标题、加入行为、游戏模式、建造保护，伤害、饥饿和虚空坠落的处理方式，以及难度、时间、天气和世界规则。设置保存在 `/data/felis-experience.json`，独立于镜像，保存时保留未知键。没有该文件的现有安装沿用原有的受保护大厅默认值。
+
+该页面还提供现有的文件管理（包括上传和 ZIP 解压）、控制台、备份与恢复、建造权限，以及镜像与资源设置。更换地图的步骤：备份并停止大厅，上传世界 ZIP，解压到卷根目录，确认世界目录直接包含 `level.dat`，并在 `server.properties` 中设置 `level-name`。大厅运行时，在其控制台使用 `setworldspawn x y z` 设置出生点。插件 JAR 放入 `plugins/`，且须与 Paper 版本匹配；内置的 Felis 和 LuckPerms JAR 在启动时从镜像刷新。自定义镜像必须保留菜单与控制插件。
+
+operator 对大厅复用 `init-forwarding` 的 YAML 合并逻辑，保留自定义的 Paper 全局配置，同时刷新必需的认证设置。只有在没有受管转发 initContainer 的独立运行场景下，镜像才会重写该文件。RCON 密钥和代理转发密钥仍由系统管理。
+
 ## 配置（由部署者负责） {#configure-deployer-s-responsibility}
 
 - 游戏端口必须为 `25565`，与 CRD 的 `GamePort` 一致。
 - `online-mode` 和玩家身份转发设置须与集群外 Velocity 代理一致。
 - 大厅仅使用 `felis:control` 插件消息通道，按设计不持有 felis-api 令牌（规范 §12）。
 
-## 大厅允许哪些操作 {#what-the-lobby-allows}
+## 大厅默认行为 {#what-the-lobby-allows}
 
 felis-paper 的 `LobbyGuard` 使大厅成为不会受到破坏、玩家也不会受伤的中转区：
 
@@ -54,8 +62,4 @@ felis-paper 的 `LobbyGuard` 使大厅成为不会受到破坏、玩家也不会
 
 `felis.lobby.build` 默认授予 OP。允许管理员建造大厅时，可以在大厅控制台用 LuckPerms 授权（`lp user <name> permission set felis.lobby.build true`），或将其设为 OP。
 
-入口脚本每次启动都将 `max-players` 固定为 `200`，覆盖 Paper 的默认值 `20`：所有已认证玩家都经过大厅，服务器停服时其玩家也会同时来到这里。
-
----
-
-来源：[deploy/lobby/README.md](https://github.com/FelisMC/Felis/blob/main/deploy/lobby/README.md)。
+`max-players` 未设置时，入口脚本将其初始化为 `200`，替代 Paper 的默认值 `20`；之后通过文件编辑器所做的修改在重启后保留。所有已认证玩家都经过大厅，服务器停服时其玩家也会同时来到这里。

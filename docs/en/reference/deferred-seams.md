@@ -20,10 +20,10 @@ package — state the verification boundary in buckets, so a green test suite is
 mistaken for a finished integration. This file is the same idea across the whole
 tree.
 
-## The marker collides with a different vocabulary in troubleshooting.md {#the-marker-collides-with-a-different-vocabulary-in-troubleshooting-md}
+## The marker collides with a different vocabulary in the troubleshooting guide {#the-marker-collides-with-a-different-vocabulary-in-troubleshooting-md}
 
-`docs/troubleshooting.md` uses `[INTEGRATION-ONLY]` for something else, defined in
-its own opening at `:19`: the symptom is produced by the kubelet, kaniko or a live
+The [Troubleshooting](/en/operations/troubleshooting) page uses `[INTEGRATION-ONLY]` for something else, defined in
+its opening section: the symptom is produced by the kubelet, kaniko or a live
 handshake, so it cannot be reproduced from the repository. Those twelve marks say
 where a failure comes from. They are not unfinished work and are not indexed below.
 A grep across `*.md` and `*.go` returns both sets; only the Go ones are seams.
@@ -35,19 +35,19 @@ A grep across `*.md` and `*.go` returns both sets; only the Go ones are seams.
   update` passes nil deliberately. The notification is the panel instead:
   `felis-update-check.timer` runs `felis update --record` daily on the host, which
   stores the report under `platform_settings.update_report`, and **Admin → Updates →
-  Component versions** shows it with the command that applies each update.
-- `internal/updates/seams.go:43` — `Applier`. Nothing applies an update anywhere. A
-  nil applier is not silent — `Run` records `errNoApplier` against every planned
-  apply, so a mis-scheduled apply is loud rather than lost.
+  Component versions** shows it with the read-only command that prepares an update.
+- `internal/updates/seams.go:43` — `Applier`. No unattended runner adapts this interface.
+  The host CLI implements explicit `felis update --apply` separately, using the target
+  installer after window checks and backup. A nil applier in the read-only runner
+  still records `errNoApplier` against a mistakenly scheduled apply.
 - `internal/updater/gatherer_integration.go:22` — the two current-version seams
   `NewSysGatherer` leaves nil, for the in-cluster path: the k8s read of the
   control-plane Deployment image, and the Velocity jar inspection. Both are answered
   on the host path (see "Built" below), so this gap is specific to a caller that has
   a cluster client instead of the node.
-- `internal/api/handlers_updates.go` — the maintenance window is advisory: no
-  in-cluster runner applies updates. `felis update` reads the stored window, prints
-  where now sits against it and warns before an apply outside it; the runner itself
-  still runs with a zero window, so no path can claim an apply is under way.
+- `internal/api/handlers_updates.go` — no in-cluster runner applies updates. The host
+  `felis update --apply` now consumes the stored window and refuses outside it unless
+  explicit `--now` starts manual maintenance. The check/record runner remains read-only.
 - `internal/submit/blobstore.go` — CLOSED 2026-09-22. The uploads PVC still cannot
   cross namespaces, so the transport went through the API instead of a mount: the
   derived context ref is now the internal-face URL
@@ -61,7 +61,7 @@ A grep across `*.md` and `*.go` returns both sets; only the Go ones are seams.
   filesystem view or object-store credentials. Kaniko, Trivy and Trivy's two DBs
   come from the registry's `mirror/` copies, which the installer and
   felis-build-tools.timer keep current (`felis mirror-build-tools`,
-  docs/troubleshooting.md §8e); the `[registry]` keys override them.
+  [Troubleshooting §8e](/en/operations/troubleshooting#_8e-build-pods-never-start-executor-images-and-the-scan-dbs)); the `[registry]` keys override them.
 
 ## Built; only its I/O is unverifiable from this repo {#built-only-its-i-o-is-unverifiable-from-this-repo}
 
@@ -144,7 +144,3 @@ worth revisiting.
   excluded) and `felis-login-to-internal-api` opens the one platform path a game pod
   needs — login → felis-api:8081. Any new in-cluster service a game server must call
   needs its own allow policy next to that one (`internal/platform/netpol.go`).
-
----
-
-Source: [docs/deferred-seams.md](https://github.com/FelisMC/Felis/blob/main/docs/deferred-seams.md).

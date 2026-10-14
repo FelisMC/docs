@@ -18,7 +18,7 @@ title: API 定义
 
 ## 定义与验证范围 {#定义与验证范围}
 
-`felis-api` 用 OpenAPI 3.1 描述两套接口，对应规范 §7、§14、§28 #7。同一个二进制提供内部、外部两个 `http.Handler`。每个操作通过 `x-felis-face` 区分接口侧（它是数组，因为 `/healthz` 同时属于两侧），通过 `x-felis-tier` 区分零信任等级：`public` / `service` / `app` / `admin`。
+`felis-api` 用 OpenAPI 3.1 描述两套接口，对应规范 §7、§14、§28 #7。同一个二进制提供内部、外部两个 `http.Handler`。每个操作通过 `x-felis-face` 区分接口侧（它是数组，因为 `/healthz` 同时属于两侧），通过 `x-felis-tier` 区分零信任等级：`public` / `service` / `app` / `admin` / `owner`。
 
 使用字段之前，需要区分自动验证和人工维护的范围：
 
@@ -27,8 +27,6 @@ title: API 定义
 * 命名响应模型会与处理器实际编码的 Go 结构逐字段比较，见 `internal/api/openapi_parity_test.go`。
 * 处理器测试发出的每个请求，在测试包运行后都会与定义核对，见 `internal/api/openapi_contract_test.go`：操作或 `x-felis-common-responses` 必须列出实际返回的状态码；JSON 响应必须满足对应模型，且不能携带模型未声明的属性；返回 2xx 的 JSON 请求必须满足 `requestBody`。测试未覆盖的状态码和请求、响应体仍由人工维护。
 
+主机运维接口同样在上述校验范围内。这些接口均属于外部接口，`x-felis-tier` 为 `owner`：`GET /api/v1/platform/host`（主机概览）、`POST /api/v1/platform/host/quiet`（暂停或恢复看门狗邮件）、`POST /api/v1/platform/offsite/key`（读取异地副本加密密钥）、`GET /api/v1/platform/audit-export`（导出审计日志）以及 `GET /api/v1/settings/node-control/tasks/{id}/artifact`（下载主机任务生成的文件，如诊断包）。除主机概览外，其余接口均要求近期完成身份复核。`POST /api/v1/settings/node-control/tasks` 的 `action` 除节点生命周期操作外，还包括面板在主控主机上执行的主机任务，例如 `db-backup`、`db-restore`、`offsite-configure`、`restore-host`、`domain-set`、`doctor` 与 `support-bundle`；请求体可携带 `params` 与只写的 `secrets`（仅传至主机，不随任务保存，也不会返回），任务记录包含 `result` 与 `artifact`。
+
 部署域（`RootDomain`，规范 §2）不会写入定义。`example.test` 是占位符，遵循禁止硬编码域名的约束。
-
----
-
-原文：[docs/openapi.yaml](https://github.com/FelisMC/Felis/blob/main/docs/openapi.yaml)。

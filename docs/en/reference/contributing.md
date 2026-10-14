@@ -27,6 +27,32 @@ The codebase is intentionally split by responsibility. Prefer changing the
 smallest owning module instead of adding broad abstractions or rebuilding nearby
 code.
 
+## Interface Copy {#interface-copy}
+
+Interface copy must use a formal documentation style: objective, concise, and
+precise. State the current condition, its cause or impact, and the available
+action. Describe confirmed facts only; avoid conversational phrasing,
+personification, and unsupported duration estimates. Chinese instructions should
+use explicit verbs such as “执行”, “选择”, “查看”, and “配置”, with operation names
+matching the actual UI labels. English and Chinese copy must retain the same
+meaning and degree of formality. Update existing translation entries rather than
+adding duplicate messages or components.
+
+## Panel Visual Style {#panel-visual-style}
+
+Reuse `PageHeader`, the `Card` family, and the shared form and button components.
+Card titles, borders, corner radii, spacing, and save footers follow their shared
+definitions; avoid redefining these styles in individual pages. Use white card
+backgrounds in the light theme, restrained semantic colors, and 16px functional
+icons. Use `CardFooter` for save actions and `Button` for interactive controls.
+Form labels use the shared `Label` style and 8px field spacing; single-line
+controls use the shared 36px height. Reuse `Textarea` and `Checkbox` for multiline
+fields and confirmations. Page-specific control classes should only adjust layout,
+code fonts, or semantic validation states.
+Tables, consoles, compact statistics, and status messages may retain spacing and
+colors suited to their content. Preserve the shared page margins and bottom
+spacing.
+
 ## Local Development {#local-development}
 
 You can do most day-to-day development on macOS or Linux without a full cluster.
@@ -255,7 +281,7 @@ acceptance environment, while keeping normal coding and quick tests local.
 
 ## Plugin Development {#plugin-development}
 
-Plugin docs live in `plugins/README.md`.
+Plugin docs live on the [Server-side plugins](/en/reference/plugins) page.
 
 The plugin modules intentionally use separate Gradle builds:
 
@@ -352,6 +378,53 @@ cd panel && npm run typecheck && npm test && npm run build
 
 If you cannot run a relevant check, say so explicitly in the handoff.
 
----
+## Brand icons {#brand-icons}
 
-Source: [CONTRIBUTING.md](https://github.com/FelisMC/Felis/blob/main/CONTRIBUTING.md). Installation and feature status are also synchronized with the main README and plugin documentation.
+The brand icons live in `assets/icons/` in the repository and were traced by hand
+from a reference image. The vector files use only paths, shapes, gradients and
+masks, with no embedded bitmaps. Every color export derives from
+`assets/felis-logo.svg`.
+
+| File | Purpose |
+| --- | --- |
+| `assets/felis-logo.svg` | Tightly cropped transparent vector master, 1040 × 640 |
+| `assets/felis-logo.png` | README image, kept at its existing 540 × 341 size |
+| `assets/icons/felis-reference.svg` / `.png` | The reference image's 1254 × 1254 composition on a white background |
+| `assets/icons/felis-icon.svg` | Centered square transparent icon |
+| `assets/icons/felis-app.svg` / `.png` | Light-green rounded app icon, 1024 × 1024 |
+| `assets/icons/felis-app-dark.svg` / `.png` | Dark-green rounded app icon, 1024 × 1024 |
+| `assets/icons/felis-maskable.svg` / `.png` | Opaque square background with the cat face inside the central safe circle |
+| `assets/icons/felis-monochrome.svg` | Tightly cropped black monochrome version with cut-out eyes and nose |
+| `assets/icons/felis-mask.svg` | Square monochrome version for Safari pinned tabs |
+| `assets/icons/png/icon-{size}.png` | Transparent icons: 16, 20, 24, 32, 40, 48, 64, 96, 128, 180, 192, 256, 512, 1024 px |
+| `assets/icons/felis.ico` | Multi-resolution Windows icon: 16, 24, 32, 48, 64, 128, 256 px |
+| `assets/icons/felis.icns` / `assets/icons/felis.iconset/` | macOS icon, plus 1× / 2× PNGs at 16, 32, 128, 256, 512 pt |
+| `assets/icons/preview.png` | Preview of the icon set |
+
+The web assets are in `panel/public/` and are referenced from `panel/index.html`:
+the SVG / ICO / PNG favicons, a 180 px Apple Touch Icon, the Safari pinned-tab
+icon, and regular and maskable icons at 192 / 512 px. `site.webmanifest` provides
+the app name and icon metadata; it does not provide offline caching.
+
+The panel references the white rounded-square icon through
+`panel/src/assets/felis-logo.svg`: 28 px in the desktop sidebar and mobile
+navigation, 44 px in the login and setup page headers. It keeps the composition of
+`felis-app.svg` from the set, with a white icon background. The build emits it under
+a content-hashed file name, and re-exporting updates this file as well.
+
+The favicons are shifted down separately to align their visual center, with the
+same position across SVG, PNG, ICO and the Safari pinned tab; the app icons keep
+their original composition. To re-export only the favicon assets, add
+`--favicons-only` to the command below.
+
+Re-export the icons after changing the vector master. This needs Node.js and
+`sharp`; the macOS ICNS export also uses the system `iconutil`. Run from the
+repository root:
+
+```sh
+NODE_PATH=/path/to/node_modules node scripts/generate-icons.cjs
+```
+
+`NODE_PATH` points to a `node_modules` directory that has `sharp` installed. The
+export tool adds no runtime dependency to the panel; on platforms other than macOS
+it still generates the remaining formats and the `iconset`.

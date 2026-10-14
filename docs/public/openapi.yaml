@@ -62,6 +62,13 @@ info:
   title: felis-api
   version: 4.1.0
   description: |
+    Staff on the operator console may manage the reserved login/lobby system
+    services through existing management routes, without player ownership rows.
+    Creating and claiming these reserved names remain prohibited. System patches
+    keep public autostart and idle stop disabled. Customization is persisted as
+    felis-experience.json using the existing file API. Staff may read and save
+    this startup-only config while system services run; restart to apply it.
+
     Control plane for the Felis Minecraft orchestration platform. The same binary
     exposes an internal face (per-caller service tokens, for velocity / backend
     callbacks, never Zero Trust) and an external face (the felis_session cookie, for
@@ -304,6 +311,146 @@ components:
               output: { type: string }
 
   schemas:
+    AuthSourceConfig:
+      type: object
+      additionalProperties: false
+      required: [tag, prefix, url, api_url, enabled]
+      properties:
+        tag:
+          type: string
+          description: Permanent UUID namespace; saved tags cannot be renamed or removed. mojang is reserved.
+        prefix:
+          type: string
+          pattern: '^[A-Za-z0-9]{1,4}$'
+          description: Unique case-insensitive display prefix.
+        url:
+          type: string
+          description: hasJoined endpoint; HTTPS required except for localhost or private literal IP addresses. No query or fragment.
+        api_url:
+          type: string
+          description: Optional Yggdrasil API base for role lookup; empty infers it from the standard hasJoined suffix.
+        enabled: { type: boolean }
+
+    StartupStatus:
+      type: object
+      required: [stage, logsAvailable]
+      properties:
+        stage: { type: string, enum: [creating, scheduling, preparing, booting, failed] }
+        reason: { type: string }
+        message: { type: string }
+        startedAt: { type: string, format: date-time }
+        logsAvailable: { type: boolean }
+
+    EntryPolicySettings:
+      type: object
+      required: [mode, defaultServer, requireAccountLink, offlineAction, waitingSpace, fallbackServer, revision]
+      properties:
+        mode: { type: string, enum: [lobby, direct, domain] }
+        defaultServer: { type: string, description: Required for direct mode; optional fallback destination for unmatched hostnames. }
+        requireAccountLink: { type: boolean, description: Require Limbo web sign-in and panel association in addition to proxy game identity authentication. }
+        offlineAction: { type: string, enum: [wake, fallback, disconnect] }
+        waitingSpace: { type: string, enum: [login, lobby], description: Web sign-in currently requires lobby waiting. }
+        fallbackServer: { type: string, description: Required for fallback action and distinct from the default server. }
+        revision: { type: string, description: Opaque revision; stale or concurrent writes return 409. }
+
+    WakePolicySettings:
+      type: object
+      required: [maxRunningServers, wakeCooldownSeconds, revision, managed]
+      properties:
+        maxRunningServers: { type: integer, minimum: 0, maximum: 10000 }
+        wakeCooldownSeconds: { type: integer, minimum: 0, maximum: 3600 }
+        revision: { type: string }
+        managed: { type: boolean }
+
+    ArchivePolicySettings:
+      type: object
+      description: >-
+        The backup and audit retention in force. source is panel when the Owner saved it
+        here, host when felis.toml's [archive] and [audit] stand.
+      required: [manualKeep, manualRetentionDays, manualCooldownMinutes, scheduledEveryHours, scheduledKeep, scheduledRetentionDays, releasedRetentionDays, maxStoreGiB, auditRetentionDays, source, revision]
+      properties:
+        manualKeep: { type: integer, minimum: 1, maximum: 100 }
+        manualRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
+        manualCooldownMinutes: { type: integer, minimum: 0, maximum: 1440 }
+        scheduledEveryHours: { type: integer, minimum: 0, maximum: 720, description: "0 turns the scheduled restore points off." }
+        scheduledKeep: { type: integer, minimum: 1, maximum: 100 }
+        scheduledRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
+        releasedRetentionDays: { type: integer, minimum: 1, maximum: 3650, description: How long the archive of a released world is kept. }
+        maxStoreGiB: { type: integer, minimum: 0, description: "The backup store's soft cap; 0 for none." }
+        auditRetentionDays: { type: integer, minimum: 0, maximum: 3650, description: "0 keeps every audit row; otherwise at least 30." }
+        source: { type: string, enum: [panel, host] }
+        revision: { type: string }
+
+    HeartbeatSettings:
+      type: object
+      description: >-
+        The watchdog's heartbeat URL as set in the panel. Only its scheme and host are
+        shown: the path is the check's key. With none set here, the watchdog pings the
+        host file's URL, if the installer wrote one.
+      required: [set, display, revision]
+      properties:
+        set: { type: boolean }
+        display: { type: string, description: "scheme://host/... of the saved URL; empty when none is set." }
+        revision: { type: string }
+
+    FailoverPolicySettings:
+      type: object
+      description: >-
+        The Owner's failover setting. automatic fails a lost node over without waiting for
+        the Owner once it has been gone afterMinutes (only while a controller is up and
+        exactly one node is lost); the node is a worker or, with controller high
+        availability, a controller. replicaMinutes is how often a world running on such a
+        node is copied live, so a failover loses little; 0 turns the copies off.
+      required: [automatic, afterMinutes, replicaMinutes, revision, managed]
+      properties:
+        automatic: { type: boolean }
+        afterMinutes: { type: integer, minimum: 10, maximum: 1440 }
+        replicaMinutes: { type: integer, minimum: 0, maximum: 1440, description: "0, or 15 to 1440." }
+        revision: { type: string }
+        managed: { type: boolean }
+
+    MailSettings:
+      type: object
+      required: [source, host, port, from, username, password_set, require_tls, max_per_hour, revision]
+      properties:
+        source: { type: string, enum: [panel, host, none] }
+        host: { type: string }
+        port: { type: integer }
+        from: { type: string }
+        username: { type: string }
+        password_set: { type: boolean }
+        require_tls: { type: boolean }
+        max_per_hour: { type: integer, description: "Install-wide hourly mail cap; 0 is the default." }
+        revision: { type: string, description: "Changes with every save; empty while the panel has no relay." }
+    MailSettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [host, port, from, username, require_tls, max_per_hour, revision]
+      properties:
+        host: { type: string }
+        port: { type: integer, enum: [25, 465, 587, 2525] }
+        from: { type: string }
+        username: { type: string }
+        password: { type: string, description: "Absent keeps the current password." }
+        require_tls: { type: boolean }
+        max_per_hour: { type: integer, minimum: 0 }
+        revision: { type: string }
+    AuthSourcesSettings:
+      type: object
+      required: [sources, revision, managed]
+      properties:
+        sources:
+          type: array
+          maxItems: 32
+          description: Third-party sources in priority order; built-in Mojang always precedes them and is immutable.
+          items: { $ref: '#/components/schemas/AuthSourceConfig' }
+        revision:
+          type: string
+          description: Opaque revision to send unchanged when saving; stale or concurrent writes return 409.
+        managed:
+          type: boolean
+          description: True when stored in platform_settings; false while using installation TOML defaults.
+
     Error:
       type: object
       description: Uniform error envelope emitted by every handler (internal/api/errors.go).
@@ -470,7 +617,7 @@ components:
 
     ExecutionNode:
       type: object
-      required: [name, role, ready, approved, addresses, architecture]
+      required: [name, role, ready, approved, addresses, architecture, k3sVersion, fenced]
       properties:
         name: { type: string }
         role: { type: string }
@@ -478,13 +625,17 @@ components:
         approved: { type: boolean }
         addresses: { type: array, items: { type: string } }
         architecture: { type: string }
+        k3sVersion: { type: string, description: "The node's k3s version." }
+        felisVersion: { type: string, description: "The felis build the node last installed; absent for a node enrolled before it was recorded." }
+        fenced: { type: boolean, description: "A lost worker taken out of service for a failover: cordoned, no longer approved, tainted out of service." }
+        lostSince: { type: string, format: date-time, description: "When an offline node stopped reporting ready." }
     WorldMigration:
       type: object
       required: [id, server, state, stage, sourceNode, targetNode, sourcePVC, targetPVC, backup, started, updated, switched, attempt]
       properties:
         id: { type: string }
         server: { type: string }
-        state: { type: string, enum: [backing_up, restoring, switching, succeeded, failed] }
+        state: { type: string, enum: [fencing, backing_up, restoring, switching, succeeded, failed, aborted] }
         stage: { type: string }
         sourceNode: { type: string }
         targetNode: { type: string }
@@ -502,12 +653,207 @@ components:
         switched: { type: boolean }
         attempt: { type: integer }
         error: { type: string }
+        kind: { type: string, enum: [failover], description: "failover for a failover; absent for a migration." }
+        resume: { type: string, description: "The desired state a failover gives the server back once it has switched." }
+
+    NodeControlRequest:
+      type: object
+      required: [action, confirmMaintenance]
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          enum: [enable, join, approve, upgrade, fence, unfence, enable-ha, join-controller, db-backup, db-verify, db-restore, offsite-sync, offsite-list, offsite-check-key, offsite-take-over, offsite-configure, offsite-disable, restore-host, backup-now, rotate-token, domain-check, domain-set, storage-configure, connection-configure, converge, doctor, support-bundle, host-settings, server-forwarding]
+          description: The node lifecycle actions (enable to join-controller) and the platform host tasks the panel runs on the controller host.
+        name: { type: string, description: Stable node name; required for every action except enable and enable-ha. }
+        sshTarget: { type: string, description: Verified root SSH alias or user@host; required for join, approve, upgrade and join-controller. }
+        externalIP: { type: string, description: Fixed node IP; required for enable, join and join-controller. }
+        peers:
+          type: array
+          maxItems: 100
+          items: { type: string }
+          description: Additional exact /32 or /128 peer addresses.
+        confirmMaintenance: { type: boolean, description: Required true for every node lifecycle action and for host tasks that disconnect players, restart the panel or replace data. }
+        params:
+          type: object
+          additionalProperties: { type: string }
+          description: The action's own inputs, kept with the task (for example bundle, kind, domain, mode).
+        secrets:
+          type: object
+          writeOnly: true
+          additionalProperties: { type: string }
+          description: Credentials the action needs (bucket keys, an API token). They reach the host only and are never stored with the task or returned, so a retry asks for them again.
+    NodeControlTask:
+      type: object
+      required: [id, request, actor, state, stage, startedAt]
+      properties:
+        id: { type: string }
+        request: { $ref: '#/components/schemas/NodeControlRequest' }
+        actor: { type: string }
+        state: { type: string, enum: [running, succeeded, failed] }
+        stage: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        error: { type: string }
+        log: { type: string, description: Most recent 64 KiB of host execution output; absent in task lists. }
+        result: { type: object, additionalProperties: true, description: What the action reports as data, such as the findings of a health check. }
+        artifact: { type: string, description: A file the action produced; download it from the task's artifact route. }
+
+    HostOverview:
+      type: object
+      description: The platform at a glance as the controller host reads it. It never carries a credential.
+      required: [host, at, version, disks, units, proxy, alerts, databaseBackups, offsite, settings, connection, storage, rootDomain]
+      properties:
+        host: { type: string }
+        at: { type: string, format: date-time }
+        version: { type: string }
+        disks:
+          type: array
+          items:
+            type: object
+            required: [path, total, available]
+            properties:
+              path: { type: string }
+              total: { type: integer, format: int64 }
+              available: { type: integer, format: int64 }
+        memory:
+          type: object
+          required: [total, available]
+          properties:
+            total: { type: integer, format: int64 }
+            available: { type: integer, format: int64 }
+        units:
+          type: array
+          items:
+            type: object
+            required: [name, active]
+            properties:
+              name: { type: string }
+              active: { type: string, description: What systemctl is-active says. }
+              next: { type: string, format: date-time, description: A timer's next trigger. }
+              last: { type: string, format: date-time, description: A timer's last trigger. }
+        proxy:
+          type: object
+          properties:
+            address: { type: string }
+            reachable: { type: boolean }
+        alerts:
+          type: array
+          description: The watchdog's open alerts.
+          items:
+            type: object
+            required: [key, severity, summary, summary_en, firstSeen]
+            properties:
+              key: { type: string }
+              severity: { type: string, enum: [warning, critical] }
+              summary: { type: string }
+              summary_en: { type: string }
+              hint: { type: string }
+              firstSeen: { type: string, format: date-time }
+              notified: { type: string, format: date-time }
+        alertsError: { type: string }
+        quietUntil: { type: string, format: date-time, description: The watchdog mails nothing until then. }
+        databaseBackups:
+          type: array
+          items:
+            type: object
+            required: [name, label, size, created]
+            properties:
+              name: { type: string }
+              label: { type: string }
+              size: { type: integer, format: int64 }
+              created: { type: string, format: date-time }
+        databaseBackupsError: { type: string }
+        offsite:
+          type: object
+          required: [configured, keyKept]
+          properties:
+            configured: { type: boolean }
+            endpoint: { type: string }
+            bucket: { type: string }
+            region: { type: string }
+            prefix: { type: string }
+            dbKeep: { type: integer }
+            keyKept: { type: boolean, description: This host keeps the key that seals the copies. }
+            status: { type: object, additionalProperties: true, description: The last off-site run as the host recorded it. }
+            error: { type: string }
+        settings:
+          type: object
+          required: [dbBackupTime, dbBackupKeep, velocityXmx]
+          properties:
+            dbBackupTime: { type: string, description: The daily database backup's HH:MM. }
+            dbBackupKeep: { type: integer }
+            velocityXmx: { type: string }
+        connection:
+          type: object
+          required: [mode, panelHost, adminHost]
+          properties:
+            mode: { type: string, enum: [local, reverse-proxy, cloudflare] }
+            panelHost: { type: string }
+            adminHost: { type: string }
+        storage:
+          type: object
+          required: [mode]
+          properties:
+            mode: { type: string, enum: [local, s3] }
+            endpoint: { type: string }
+            bucket: { type: string }
+            region: { type: string }
+        rootDomain: { type: string }
+
+    FailoverBackup:
+      type: object
+      required: [id, createdAt, sizeBytes]
+      properties:
+        id: { type: string }
+        createdAt: { type: string, format: date-time }
+        sizeBytes: { type: integer, format: int64 }
+    FailoverServer:
+      type: object
+      required: [name, desiredState, backup, operation]
+      properties:
+        name: { type: string }
+        desiredState: { type: string }
+        backup:
+          allOf: [{ $ref: '#/components/schemas/FailoverBackup' }]
+          nullable: true
+          description: The newest intact backup a failover would restore; null when there is none.
+        operation:
+          allOf: [{ $ref: '#/components/schemas/WorldMigration' }]
+          nullable: true
+          description: The migration or failover the server has underway; null when none.
+    FailoverPlan:
+      type: object
+      required: [node, lost, fenced, lostSince, servers, targets]
+      properties:
+        node: { type: string }
+        lost: { type: boolean, description: An offline worker (or, with controller high availability, controller), which may be failed over. }
+        fenced: { type: boolean }
+        lostSince: { type: string, format: date-time, nullable: true }
+        servers: { type: array, items: { $ref: '#/components/schemas/FailoverServer' } }
+        targets: { type: array, items: { type: string }, description: Online nodes that can take the worlds. }
+    FailoverSkip:
+      type: object
+      required: [name, reason]
+      properties:
+        name: { type: string }
+        reason: { type: string, enum: [no_backup, unknown_server, failed] }
+        error: { type: string }
+    FailoverResult:
+      type: object
+      required: [operations, skipped]
+      properties:
+        operations: { type: array, items: { $ref: '#/components/schemas/WorldMigration' } }
+        skipped: { type: array, items: { $ref: '#/components/schemas/FailoverSkip' } }
+        fenceTask: { $ref: '#/components/schemas/NodeControlTask' }
+        fenceError: { type: string, description: Why no fence task could be started now; it is retried in the background. }
 
     ServerInfo:
       type: object
       description: Status projection of one server (internal/api/cluster.go ServerInfo).
       required: [name, subdomain, phase, ready, playersOnline, playersMax, idleStopSeconds]
       properties:
+        startup: { $ref: '#/components/schemas/StartupStatus', description: Private runtime and startup diagnostics for authorized server managers. }
         nodeName: { type: string, description: Execution node; legacy servers report the observed node. }
         name: { type: string }
         subdomain: { type: string }
@@ -600,9 +946,9 @@ components:
               type: boolean
               description: >-
                 True for a platform-provisioned system service (the login gate, the
-                lobby). Their reserved names are rejected by every per-server route,
-                so the cockpit renders them read-only instead of offering actions
-                that would 400.
+                lobby). Staff can manage them through the existing server routes;
+                players see them read-only. Creating, claiming and deleting these
+                reserved names remain prohibited.
 
     RetireState:
       type: object
@@ -1304,6 +1650,40 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/servers/{name}/migrations/{id}/abort:
+    post:
+      operationId: abortWorldMigration
+      tags: [admin-servers]
+      summary: Give up a failed migration; the server stays on its source world and node.
+      description: >-
+        Only a failed migration that never switched can be aborted. Its Jobs and its
+        partial target world are removed and the maintenance lock is released, so the
+        server can start where it was. The safety backup stays as a restore point. The
+        target node does not need to be online.
+      x-felis-face: [external]
+      x-felis-tier: admin
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The aborted operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorldMigration'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   # ----------------------------------------------------------------- health ---
   /healthz:
     get:
@@ -1511,6 +1891,73 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/nodes/{node}/failover:
+    get:
+      operationId: failoverPlan
+      tags: [admin-servers]
+      summary: What failing a lost worker over would do (Owner).
+      description: >-
+        The user servers whose worlds are on the node, each with the newest intact backup
+        a failover would restore (so what it loses), and the online nodes that can take
+        the worlds. lost is true only for an offline worker.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: node, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The failover plan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FailoverPlan' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    post:
+      operationId: failOverNode
+      tags: [admin-servers]
+      summary: Fail a lost worker over to another node (Owner, fresh reauthentication).
+      description: >-
+        Starts a failover of every server on the node towards targetNode, each from its
+        newest intact backup, and asks the host node service to fence the node (cordon,
+        remove its approval, taint it out of service). A server already failing over keeps
+        its failover; one without an intact backup, or that cannot start, is reported in
+        skipped and left where it is. confirm must repeat the node's name.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: node, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetNode, confirm]
+              properties:
+                targetNode: { type: string }
+                confirm: { type: string, description: The node's name, typed by the Owner. }
+      responses:
+        '202':
+          description: The failovers started, and what was left.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FailoverResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The node is online or not a worker (node_not_lost), or a migration conflict.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
   /api/v1/internal/servers/{name}/ready:
     post:
       tags: [servers-internal]
@@ -1617,6 +2064,56 @@ paths:
           $ref: '#/components/responses/NoContent'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/internal/file-browser/{id}:
+    post:
+      tags: [files]
+      operationId: internalFileBrowser
+      summary: Exchange a read-only file Job's result for its next command.
+      description: >-
+        Internal face only. A random bearer token scopes the worker to one
+        world and a four-minute session; idle workers exit after 45 seconds.
+        The first request sends an empty object. Later requests return the
+        previous command's id and result or error. This endpoint dispatches
+        only reads already authorized by the external file API.
+      x-felis-face: [internal]
+      x-felis-tier: public
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: Authorization, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: { type: string }
+                result: { type: object }
+                error: { type: string }
+      responses:
+        '200':
+          description: The next authorized read command.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, op, path]
+                properties:
+                  id: { type: string }
+                  op: { type: string, enum: [list, read] }
+                  path: { type: string }
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/internal/exports/{id}:
     put:
@@ -2365,6 +2862,53 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/internal/servers/{name}/restore:
+    post:
+      tags: [account-internal]
+      operationId: internalRestoreLatest
+      summary: Restore a server's newest backup while rebuilding a host (service token; server must be stopped).
+      description: >-
+        felis restore-host POSTs here for each server it brings back from the
+        off-site copy. It restores the newest intact backup without a safety
+        snapshot, creating the world volume first when the server has never started
+        on this host, and is audited to "restore-host".
+      x-felis-face: [internal]
+      x-felis-tier: service
+      x-felis-callers: [ops]
+      security: [{ serviceToken: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '202':
+          description: Restore started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, backup_id]
+                properties:
+                  name: { type: string }
+                  backup_id: { type: string }
+        '400':
+          description: Invalid server name (bad_name).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Unknown server (not_found) or no restorable backup (no_backup).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: The server is not stopped (not_stopped), or a restore or another operation holds its world (restore_in_progress, maintenance_in_progress).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   # ----------------------------------------------------- external: servers ---
   /api/v1/servers/{name}/wake:
     post:
@@ -2437,12 +2981,99 @@ paths:
                 properties:
                   name: { type: string }
                   desiredState: { type: string, const: Stopped }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/servers/{name}/emergency-stop:
+    post:
+      tags: [servers]
+      operationId: emergencyStop
+      summary: Scale an owned game workload to zero independently of Operator and RCON.
+      description: Owner only; fresh authentication and exact name confirmation required. A 202 acknowledges scaling, not process exit. Normal Pod termination grace is retained.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                confirm: { type: string }
+      responses:
+        '202':
+          description: Stop intent persisted and workload scaled to zero; await Pod termination.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, desiredState]
+                properties:
+                  name: { type: string }
+                  desiredState: { type: string, const: Stopped }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/servers/{name}/restart:
+    post:
+      tags: [servers]
+      operationId: restart
+      summary: Restart your own running server, or a system service as staff.
+      description: >-
+        Records a durable request for the operator to gracefully recreate the
+        game pod. Desired state remains Running. A concurrent stop supersedes
+        the request; maintenance blocks admission.
+      x-felis-face: [external]
+      x-felis-tier: app
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '202':
+          description: Restart accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, desiredState]
+                properties:
+                  name: { type: string }
+                  desiredState: { type: string, const: Running }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Server is not running, is retiring, or maintenance is in progress.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/servers/{name}/claim:
     post:
@@ -2465,6 +3096,8 @@ paths:
                 properties:
                   name: { type: string }
                   claimed: { type: boolean, const: true }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3182,6 +3815,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ServerInfo' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3945,11 +4580,11 @@ paths:
     get:
       tags: [auth]
       operationId: ownerStatus
-      summary: Report whether an Owner has been bound on this install.
+      summary: Report whether an Owner has been created on this install.
       description: >-
         Public, pre-session probe the sign-in page reads on load. Until `felis setup`
-        binds an Owner, local sign-in is off and every login door answers 403
-        local_auth_disabled; the page then explains that no Owner exists and how to bind
+        creates an Owner, local sign-in is off and every login door answers 403
+        local_auth_disabled; the page then explains that no Owner exists and how to create
         one instead of offering the doors. It discloses only whether the install is
         still unclaimed, and claiming it needs root on the host. It is not gated on
         local_auth_enabled and does not draw on the login doors' per-address rate limit.
@@ -4127,23 +4762,726 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/settings/node-control:
+    get:
+      operationId: nodeTasks
+      summary: Read host node-service availability and persistent task history (Owner).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Availability and most recent task records; no credentials or logs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available, tasks]
+                properties:
+                  available: { type: boolean }
+                  tasks: { type: array, items: { $ref: '#/components/schemas/NodeControlTask' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Another node task is running or this task cannot be retried. }
+        '503': { description: Host node execution service is unavailable. }
+  /api/v1/settings/node-control/tasks:
+    post:
+      operationId: startNodeTask
+      summary: Execute fixed host node operation (Owner, fresh reauthentication).
+      description: Tasks are serialized, audited and persisted on the controller. The host verifies stopped workloads and SSH trust before enrollment or admission. Bootstrap credentials never cross the external API. Server starts fail closed during node operations and when the configured host service cannot report its state.
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NodeControlRequest' }
+      responses:
+        '202':
+          description: Persistent task created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeControlTask' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Another node task is running or this task cannot be retried. }
+        '503': { description: Host node execution service is unavailable. }
+  /api/v1/settings/node-control/tasks/{id}:
+    get:
+      operationId: nodeTask
+      summary: Read task stage, terminal error and bounded execution log (Owner).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Current task and recent output.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeControlTask' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Another node task is running or this task cannot be retried. }
+        '503': { description: Host node execution service is unavailable. }
+  /api/v1/settings/node-control/tasks/{id}/retry:
+    post:
+      operationId: retryNodeTask
+      summary: Create a new attempt from a failed task (Owner, fresh reauthentication).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '202':
+          description: New task created; original task is retained.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeControlTask' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Another node task is running or this task cannot be retried. }
+        '503': { description: Host node execution service is unavailable. }
+
+  /api/v1/settings/node-control/tasks/{id}/artifact:
+    get:
+      operationId: nodeTaskArtifact
+      summary: Download the file a finished host task produced, such as a support bundle (Owner, fresh reauthentication).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The file, as an attachment.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Host node execution service is unavailable. }
+  /api/v1/platform/host:
+    get:
+      operationId: hostOverview
+      summary: Read the platform at a glance as the controller host reports it (Owner).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Disks, memory, units, open alerts, database bundles, the off-site copy and the host settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HostOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Host node execution service is unavailable. }
+  /api/v1/platform/host/quiet:
+    post:
+      operationId: holdAlerts
+      summary: Hold the watchdog's mail until a time within the next seven days, or lift the hold (Owner, fresh reauthentication).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                until: { type: [string, 'null'], format: date-time, description: Null lifts the hold. }
+      responses:
+        '204': { description: The hold is in place or lifted. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Host node execution service is unavailable. }
+  /api/v1/platform/offsite/key:
+    post:
+      operationId: revealOffsiteKey
+      summary: Read the key that seals the off-site copies, to keep it somewhere other than this host (Owner, fresh reauthentication).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The key. Without it the copies in the bucket cannot be read.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key]
+                properties:
+                  key: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Host node execution service is unavailable. }
+  /api/v1/platform/audit-export:
+    get:
+      operationId: exportAudit
+      summary: Download the audit rows of a period as JSON lines (Owner, fresh reauthentication).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: since, in: query, required: false, schema: { type: string, format: date }, description: First day, inclusive. }
+        - { name: until, in: query, required: false, schema: { type: string, format: date }, description: Day to stop before, exclusive. }
+      responses:
+        '200':
+          description: One audit row per line.
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Audit export is not available. }
+
+  /api/v1/internal/settings/entry-policy:
+    get:
+      tags: [internal]
+      operationId: internalEntryPolicy
+      summary: Read player entry policy for the authenticated proxy and login gate.
+      x-felis-face: [internal]
+      x-felis-tier: service
+      x-felis-callers: [velocity, limbo]
+      security: [{ serviceToken: [] }]
+      responses:
+        '200':
+          description: Current policy; proxy snapshots it for each new connection.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryPolicySettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/settings/entry-policy:
+    get:
+      tags: [account]
+      operationId: getEntryPolicy
+      summary: Read player entry policy (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Current policy and revision; an unsaved deployment preserves its legacy routing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryPolicySettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [account]
+      operationId: setEntryPolicy
+      summary: Save player entry policy (Owner, fresh reauthentication).
+      description: Applies to new connections within the proxy's 15-second refresh interval. Does not change online-mode, autostart authorization or existing players, and does not stop system spaces automatically.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntryPolicySettings' }
+      responses:
+        '200':
+          description: Saved policy and revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryPolicySettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Selected server does not exist. }
+        '409': { description: Policy changed; reload before saving. }
+
+  /api/v1/settings/wake-policy:
+    get:
+      tags: [account]
+      operationId: getWakePolicy
+      summary: Read platform startup policy (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Current startup policy and revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WakePolicySettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [account]
+      operationId: setWakePolicy
+      summary: Save platform startup policy (Owner, fresh reauthentication).
+      description: Atomically persists an override shared by all replicas. The admission limit applies to panel, in-game and scheduled starts without restarting. It does not stop existing servers or reserve memory. Wake cooldown applies to panel and in-game wakes.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [maxRunningServers, wakeCooldownSeconds, revision]
+              properties:
+                maxRunningServers: { type: integer, minimum: 0, maximum: 10000 }
+                wakeCooldownSeconds: { type: integer, minimum: 0, maximum: 3600 }
+                revision: { type: string }
+      responses:
+        '200':
+          description: Saved policy and new revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WakePolicySettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The policy changed; reload before saving.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/settings/archive-policy:
+    get:
+      tags: [account]
+      operationId: getArchivePolicy
+      summary: Read the backup and audit retention (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The retention in force and its revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchivePolicySettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    put:
+      tags: [account]
+      operationId: setArchivePolicy
+      summary: Save the backup and audit retention (Owner, fresh reauthentication).
+      description: >-
+        Overrides felis.toml's [archive] and [audit] keys for felis-api, the backup Job
+        and the reaper. It takes effect within seconds on every felis-api replica and on
+        the next backup or reaper run.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manualKeep, manualRetentionDays, manualCooldownMinutes, scheduledEveryHours, scheduledKeep, scheduledRetentionDays, releasedRetentionDays, maxStoreGiB, auditRetentionDays, revision]
+              properties:
+                manualKeep: { type: integer, minimum: 1, maximum: 100 }
+                manualRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
+                manualCooldownMinutes: { type: integer, minimum: 0, maximum: 1440 }
+                scheduledEveryHours: { type: integer, minimum: 0, maximum: 720 }
+                scheduledKeep: { type: integer, minimum: 1, maximum: 100 }
+                scheduledRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
+                releasedRetentionDays: { type: integer, minimum: 1, maximum: 3650 }
+                maxStoreGiB: { type: integer, minimum: 0 }
+                auditRetentionDays: { type: integer, minimum: 0, maximum: 3650 }
+                revision: { type: string }
+      responses:
+        '200':
+          description: The saved retention and its new revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchivePolicySettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The retention changed; reload before saving.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      tags: [account]
+      operationId: clearArchivePolicy
+      summary: Hand the retention back to felis.toml (Owner, fresh reauthentication).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The retention now in force (felis.toml's).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArchivePolicySettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The retention changed meanwhile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/v1/settings/heartbeat:
+    get:
+      tags: [account]
+      operationId: getHeartbeat
+      summary: Read the watchdog heartbeat setting (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Whether a heartbeat URL is set here, and its revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HeartbeatSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [account]
+      operationId: setHeartbeat
+      summary: Save the watchdog heartbeat URL (Owner, fresh reauthentication).
+      description: The watchdog pings it on its next run, in preference to the host file's URL.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, revision]
+              properties:
+                url: { type: string, description: An http:// or https:// URL. }
+                revision: { type: string }
+      responses:
+        '200':
+          description: The saved setting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HeartbeatSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The setting changed; reload before saving.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [account]
+      operationId: clearHeartbeat
+      summary: Remove the panel's heartbeat URL (Owner, fresh reauthentication).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The setting, now unset.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HeartbeatSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The setting changed meanwhile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/settings/failover:
+    get:
+      tags: [account]
+      operationId: getFailoverPolicy
+      summary: Read the failover setting (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Current failover setting and revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FailoverPolicySettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [account]
+      operationId: setFailoverPolicy
+      summary: Save the failover setting (Owner, fresh reauthentication).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [automatic, afterMinutes, replicaMinutes, revision]
+              properties:
+                automatic: { type: boolean }
+                afterMinutes: { type: integer, minimum: 10, maximum: 1440 }
+                replicaMinutes: { type: integer, minimum: 0, maximum: 1440, description: "0, or 15 to 1440." }
+                revision: { type: string }
+      responses:
+        '200':
+          description: Saved setting and new revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FailoverPolicySettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The setting changed; reload before saving.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/settings/smtp:
+    get:
+      tags: [account]
+      operationId: getMailSettings
+      summary: Read the mail relay (Owner).
+      description: >-
+        The relay in force and where it comes from - panel (saved here), host (the
+        [smtp] relay felis setup wrote into felis.toml) or none. The password is never
+        returned; password_set says whether one is stored.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The relay in force.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MailSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    put:
+      tags: [account]
+      operationId: setMailSettings
+      summary: Save the mail relay (Owner, fresh reauthentication).
+      description: >-
+        Proves the relay accepts mail from the sender (a complete transaction delivering
+        one self-test message to the sender) and then saves it, overriding felis.toml's
+        relay for felis-api, the reaper, the watchdog and the break-glass console. It
+        takes effect without restarting. An absent password keeps the current one. Only
+        the submission ports 25, 465, 587 and 2525 are accepted.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MailSettingsRequest' }
+      responses:
+        '200':
+          description: The saved relay.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MailSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      tags: [account]
+      operationId: clearMailSettings
+      summary: Hand the mail relay back to felis.toml (Owner, fresh reauthentication).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The relay now in force.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MailSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/v1/settings/smtp/test:
+    post:
+      tags: [account]
+      operationId: testMailSettings
+      summary: Send a test message through an unsaved relay (Owner, fresh reauthentication).
+      description: >-
+        Sends one message to the caller's verified address, else to the sender itself,
+        and spends the install's mail budget like any other mail.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MailSettingsRequest' }
+      responses:
+        '200':
+          description: Where the test message went.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent_to]
+                properties:
+                  sent_to: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/v1/settings/auth-sources:
+    get:
+      tags: [account]
+      operationId: getAuthSources
+      summary: Read authentication sources (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Current third-party sources and their revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSourcesSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    put:
+      tags: [account]
+      operationId: setAuthSources
+      summary: Save authentication sources (Owner, fresh reauthentication).
+      description: >-
+        Atomically persists an override in platform_settings. It applies to the next
+        login and role lookup on every API replica without restarting; existing
+        players stay online. Tags identify permanent UUID namespaces; retain every
+        saved tag and disable unwanted sources. Mojang remains built-in and trusted,
+        while configured sources always remain third-party. Nano remains TOML-only.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sources, revision]
+              properties:
+                sources:
+                  type: array
+                  maxItems: 32
+                  items: { $ref: '#/components/schemas/AuthSourceConfig' }
+                revision: { type: string }
+      responses:
+        '200':
+          description: Saved configuration and new revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSourcesSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: auth_sources_changed or auth_source_tag_locked; reload instead of overwriting another Owner's changes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/v1/settings/auth-sources/test:
+    post:
+      tags: [account]
+      operationId: testAuthSource
+      summary: Probe a hasJoined endpoint (Owner).
+      description: >-
+        Checks an unsaved source with a fresh random serverId. A healthy endpoint
+        returns 204 for a session that never joined. Uses a five-second timeout,
+        verified TLS and no redirects. This tests connectivity and hasJoined
+        behavior, not launcher login or profile lookup. Does not save configuration.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuthSourceConfig' }
+      responses:
+        '200':
+          description: Probe result; non-204 status has ok=false.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, status, elapsed_ms]
+                properties:
+                  ok: { type: boolean }
+                  status: { type: integer }
+                  elapsed_ms: { type: integer, format: int64 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
   /api/v1/updates/window:
     get:
       tags: [admin-updates]
       operationId: getUpdateWindow
-      summary: Read the SysAdmin-set auto-update maintenance window (admin).
+      summary: Read the Owner-set auto-update maintenance window (Owner).
       description: >-
-        Advisory: Felis applies no update on its own. `felis update` on the
-        host reads this window, reports where now sits against it, and warns
-        before an apply outside it.
-        The single platform-wide maintenance window during which Felis may apply a
-        Scheduled component's update to itself (decision core internal/updates). An
-        unset window — never set, or explicitly cleared — reads back as
-        {start:null,end:null}. API+persistence only: nothing consumes the window
-        until the INTEGRATION runner and executors are wired, so setting it changes
-        no behavior yet.
+        Felis applies no update on its own. `felis update` checks versions and
+        prints an explicit apply command. `felis update --apply` reads this
+        platform-wide [start,end) window before backup and before installation,
+        refusing outside it unless `--now` explicitly starts manual maintenance.
+        An unreadable window is always a refusal, including with `--now` or
+        `--force`. An unset window reads back as {start:null,end:null}.
       x-felis-face: [external]
-      x-felis-tier: admin
+      x-felis-tier: owner
       security: [{ sessionCookie: [] }]
       responses:
         '200':
@@ -4159,7 +5497,7 @@ paths:
     put:
       tags: [admin-updates]
       operationId: setUpdateWindow
-      summary: Set or clear the SysAdmin auto-update maintenance window (admin).
+      summary: Set or clear the SysAdmin auto-update maintenance window (Owner).
       description: >-
         Persist the maintenance window as an absolute [start,end) interval. Both
         ends must be set with end strictly after start, or both null to clear the
@@ -4169,7 +5507,7 @@ paths:
         setting a window only permits an apply inside it; outside, a Scheduled
         component degrades to notify.
       x-felis-face: [external]
-      x-felis-tier: admin
+      x-felis-tier: owner
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
@@ -4195,14 +5533,14 @@ paths:
     get:
       tags: [admin-updates]
       operationId: getDBBackup
-      summary: Freshness of the newest control-plane database backup (admin).
+      summary: Freshness of the newest control-plane database backup (Owner).
       description: >-
         What the host's felis-db-backup.timer (or a manual `felis db backup`)
         last recorded in platform_settings. last is null before the first
         backup; stale is true then, and whenever the newest daily backup
         (last.daily_at) is missing or older than max_age_seconds. Read-only: backups run on the host, never through the API.
       x-felis-face: [external]
-      x-felis-tier: admin
+      x-felis-tier: owner
       security: [{ sessionCookie: [] }]
       responses:
         '200':
@@ -4220,7 +5558,7 @@ paths:
     get:
       tags: [admin-updates]
       operationId: getUpdateReport
-      summary: The newest recorded version check of every tracked component (admin).
+      summary: The newest recorded version check of every tracked component (Owner).
       description: >-
         What `felis update --record` last stored in platform_settings; the
         installer's felis-update-check.timer runs it daily on the host, where the
@@ -4228,7 +5566,7 @@ paths:
         stale is true then, and whenever the check is older than max_age_seconds.
         Read-only: Felis applies no update on its own.
       x-felis-face: [external]
-      x-felis-tier: admin
+      x-felis-tier: owner
       security: [{ sessionCookie: [] }]
       responses:
         '200':
@@ -4488,7 +5826,7 @@ paths:
         recorded when it was written as it streams; a mismatch cuts the
         download off short of its end. On the way out config/paper-global.yml
         (the cluster's forwarding secret) is left out and server.properties has
-        its rcon.password redacted, so the download carries no Content-Length.
+        its rcon.password and forwarding-secrets redacted, so the download carries no Content-Length.
         A user gets 404 for a backup outside their scope, as their list never
         shows it. One export per user at a time, 2 across the install, 6 per
         user per hour.
@@ -4818,10 +6156,11 @@ paths:
     get:
       tags: [files]
       operationId: readServerFile
-      summary: Read a file from a server's world volume (owner-or-admin; server must be stopped).
+      summary: Read a file from a server's world volume (owner-or-admin).
       description: >-
         Returns one file's bytes, base64-encoded, from inside the server's world
-        volume. Same stopped-gate and os.Root containment as the directory listing.
+        volume. Same stopped-gate and os.Root containment as the directory listing,
+        except staff may read login/lobby's felis-experience.json while running.
         Reads are capped at 1 MiB; a larger file is 413 rather than a truncated read,
         because a config editor that silently returned half a file would let a
         subsequent save destroy the other half.
@@ -4850,7 +6189,7 @@ paths:
                     type: string
                     pattern: '^[0-9a-f]{64}$'
                     description: >-
-                      SHA-256 of the file as stored (before the rcon.password redaction in
+                      SHA-256 of the file as stored (before secret redaction in
                       server.properties). Send it back as expect_sha256 on the next write.
                   content_sha256:
                     type: string
@@ -4874,7 +6213,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Server is not stopped (its world PVC is still mounted).
+          description: Server is not stopped (except startup-only system experience config).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4902,7 +6241,7 @@ paths:
     put:
       tags: [files]
       operationId: writeServerFile
-      summary: Write a file in a server's world volume (owner-or-admin; server must be stopped).
+      summary: Write a file in a server's world volume (owner-or-admin).
       description: >-
         Replaces a file's contents, creating the file if absent but never creating its
         parent directories. Content is base64 so arbitrary bytes (CRLF endings, a BOM)
@@ -4915,7 +6254,9 @@ paths:
         otherwise 409 file_changed. content_sha256 is the SHA-256 of the content:
         content that hashes otherwise changed on the way and is refused (400
         digest_mismatch) before a Job starts, and the Job checks the bytes it received
-        the same way before writing. Audited as file.write.
+        the same way before writing. Staff may save login/lobby's startup-only
+        felis-experience.json while running; restart to apply. That config cannot
+        be a symlink. Audited as file.write.
       x-felis-face: [external]
       x-felis-tier: app
       security: [{ sessionCookie: [] }]
@@ -5204,7 +6545,7 @@ paths:
         without one, with symbolic links, devices and sockets left out.
         config/paper-global.yml, the cluster's forwarding secret, is refused as
         a file and left out of a folder, and server.properties goes out with
-        its rcon.password redacted; both are matched by the file itself, so a
+        its rcon.password and forwarding-secrets redacted; both are matched by the file itself, so a
         link to either under another name is guarded too. The server cannot
         start until the download has ended. Two file downloads per user at a
         time, 4 across the install, 30 per user per hour, counted apart from
@@ -6457,6 +7798,104 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/account/link/sources:
+    get:
+      tags: [account]
+      operationId: linkSources
+      summary: List configured sources for staff game-role designation.
+      x-felis-face: [external]
+      x-felis-tier: admin
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Sources in game-authentication priority order; no upstream URLs are exposed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources]
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      required: [tag, lookup_available]
+                      properties:
+                        tag: { type: string }
+                        lookup_available: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/account/link/profile:
+    get:
+      tags: [account]
+      operationId: lookupProfile
+      summary: Look up a role by name or native UUID in a selected authentication source.
+      description: Staff-only preview; role lookup does not prove account ownership and creates no binding.
+      x-felis-face: [external]
+      x-felis-tier: admin
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: profile, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Role found. mc_uuid uses the exact same per-source mapping as game authentication.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source, name, profile_uuid, mc_uuid, auth_source]
+                properties:
+                  source: { type: string }
+                  name: { type: string }
+                  profile_uuid: { type: string }
+                  mc_uuid: { type: string, format: uuid }
+                  auth_source: { type: string, enum: [mojang, thirdparty] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No matching role in the selected source. }
+        '502': { description: Source returned an invalid or mismatched profile. }
+        '503': { description: Source unavailable. }
+    post:
+      tags: [account]
+      operationId: linkProfile
+      summary: Designate a role as the authenticated staff account's game identity.
+      description: Requires a fresh login factor. Re-queries the native UUID, maps it on the server, and binds only to the caller. Other users' bindings cannot be overwritten. Panel initialization does not require this operation.
+      x-felis-face: [external]
+      x-felis-tier: admin
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, profile_uuid]
+              properties:
+                source: { type: string }
+                profile_uuid: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Role linked, idempotently for the same user and UUID.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [linked, mc_uuid, auth_source]
+                properties:
+                  linked: { type: boolean }
+                  mc_uuid: { type: string, format: uuid }
+                  auth_source: { type: string, enum: [mojang, thirdparty] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Role no longer exists. }
+        '409': { description: Role already linked to another user, or reauthentication required. }
+        '502': { description: Source returned an invalid or mismatched profile. }
+        '503': { description: Source unavailable. }
 
   /api/v1/account/link/start:
     post:
