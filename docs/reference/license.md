@@ -14,4 +14,4 @@ title: 开源协议
 
 ---
 
-原文：[README.md](https://github.com/FelisMC/Felis/blob/main/README.md)、[LICENSE](https://github.com/FelisMC/Felis/blob/main/LICENSE)。
+原文：[LICENSE](https://github.com/FelisMC/Felis/blob/main/LICENSE)。

@@ -7,7 +7,7 @@ title: Build from source
 Felis is built with Go and Node.js:
 
 ```bash
-# Backend (Go 1.26+)
+# Backend (Go 1.27+)
 go build -o felis ./cmd/felis
 
 # Frontend (Node.js 22+)
@@ -20,6 +20,3 @@ docker build -t felis:custom .
 ```
 
 See [Contributing](/en/reference/contributing) for the development environment, tests and plugin builds.
----
-
-Source: [README_EN.md](https://github.com/FelisMC/Felis/blob/main/README_EN.md), [CONTRIBUTING.md](https://github.com/FelisMC/Felis/blob/main/CONTRIBUTING.md).

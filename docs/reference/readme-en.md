@@ -9,6 +9,7 @@ title: 项目说明
 单条命令完成部署，自动管理服务器生命周期、备份与安全。
 
 > [!CAUTION] 注意
+> **当前仅提供开发快照，已撤下公开 Release。仅供开发者在隔离的测试环境中验证，不建议普通用户部署。**<br>
 > **此项目仍处于早期开发阶段，您不该在任何生产环境使用该项目。若产生任何问题，贵用户的使用行为与 FelisMC 团队无任何民事刑事法律关系。**<br>
 
 <details>
@@ -30,19 +31,23 @@ title: 项目说明
   * 控制台（RCON）、白名单、封禁、OP 与 LuckPerms 权限管理
   * 文件管理：新建、删除、重命名、分片上传、下载，以及停服状态下解压 zip，可用于导入世界
   * 计划任务：按星期与时区定时执行命令、重启、停止、启动或备份，执行前在游戏内向玩家发送提醒
+  * 平台设置：Owner 可在面板中配置邮件服务（SMTP）、备份与审计保留策略及监控心跳，保存后立即生效，并优先于安装时的设置
+  * 主机运维：Owner 可在面板中完成访问方式、根域名、上传存储、凭据轮换、游戏代理内存、数据库备份计划、异地副本与系统服务器补全等主机操作，由主机上的 root 服务以对应命令执行，并要求身份复核和记录审计日志（参见 [运维手册第 9 节](/operations/#_9-running-the-host-from-the-panel-go-tested-sh-tested)）
 
 * **备份与恢复**：默认启用，归档 PVC 及其路径由安装器生成。
   * 手动备份：将服务器的完整数据卷（`/data`，含世界、配置、插件与模组）归档至集群内的归档存储，可回滚至任一备份点
-  * 每日恢复点：当天有玩家进入过的服务器在停止后自动生成恢复点，默认保留 7 个，保存期限 90 天；恢复点单独轮换，不影响手动备份
+  * 不停服备份：运行中的服务器无需停机即可备份，仅在同一节点复制世界的数秒内暂停保存，归档、校验与回读均基于副本完成，玩家可继续游戏
+  * 每日恢复点：当天有玩家进入过的服务器每日自动生成恢复点，运行中的服务器以不停服方式生成；默认保留 7 个，保存期限 90 天；恢复点单独轮换，不影响手动备份
   * 下载与导出：支持下载单个备份（附 sha256 校验）、删除单个备份及导出完整世界
   * 异地副本（可选）：备份在主机上加密后同步至 S3 兼容存储（AWS S3、Cloudflare R2、Backblaze B2、MinIO 等）
-  * 控制面数据库：存放账号、服务器归属、配额与存档索引的数据库每日自动备份，每次升级迁移前额外创建快照，故障时可通过 `felis db restore` 整库原子回滚；面板「维护与备份」页显示最近一次备份的时效（参见 [故障排查 §16](/operations/troubleshooting#_16-control-plane-database-backups-and-disaster-recovery)）
+  * 控制面数据库：存放账号、服务器归属、配额与存档索引的数据库每日自动备份，每次升级迁移前额外创建快照；Owner 可在面板「维护与备份 → 备份」中立即备份、校验备份并整库原子回滚，命令行入口为 `felis db restore`（参见 [故障排查 §16](/operations/troubleshooting#_16-control-plane-database-backups-and-disaster-recovery)）
+  * 整机重建：在新主机安装时设置 `FELIS_RESTORE_FROM_OFFSITE=1`，或安装后在面板「维护与备份 → 异地副本」中执行重建（命令行为 `sudo felis restore-host -yes`），即可从异地副本恢复数据库、镜像、上传文件、服务器及各服务器最新的世界；中断后重新执行将从中断处继续（参见 [故障排查 §16](/operations/troubleshooting#rebuild-on-a-new-host-the-old-one-is-gone)）
 
-* **运维诊断**
+* **运维诊断**：面板「维护与备份」页显示主机状态与未解决的告警，并提供健康检查、诊断包下载与审计日志导出；对应的命令行入口如下。
   * `sudo felis status`：汇总显示节点、控制面、游戏代理、各服务器、备份及未解决的告警
   * `sudo felis doctor`：执行全部健康检查，按模块列出问题及排查方向，执行过程中不发送邮件
   * `sudo felis support-bundle`：生成已脱敏的诊断包，供提交问题时附带（参见 [故障排查 §0](/operations/troubleshooting#_0-first-look-felis-status-felis-doctor-felis-support-bundle)）
-  * 看门狗：每 2 分钟执行一次巡检，异常持续时向平台所有者发送邮件告警，支持外部心跳监测
+  * 看门狗：每 2 分钟执行一次巡检，异常持续时向平台所有者发送邮件告警，支持外部心跳监测（心跳地址可在面板中设置）
 
 * **世界回收（可选）**：超过 15 天无人游玩的世界在备份后删除，以释放磁盘空间。安装时设置 `FELIS_WORLDS_HOST_PATH`（k3s 默认为 `/var/lib/rancher/k3s/storage`）即启用每日回收；未设置时不删除任何世界。过期备份的每日清理与此设置无关，始终执行。
 
@@ -54,21 +59,23 @@ title: 项目说明
   * Passkey 登录：支持指纹、面容识别及硬件密钥等无密码认证方式
   * 零信任访问：面板流量经 Cloudflare Access 保护，集群内部 API 不对公网开放
 
-* **多机部署（实验性，默认关闭）**：由一台主控节点统一下发指令，其余节点仅运行游戏服务器，已停止的服务器可迁移至其他节点。该功能目前仅位于 main 分支，尚未完成三机验收（参见 [多机部署](/guide/distributed)）。
+* **多机部署（实验性，默认关闭）**：由主控节点统一下发指令，其余节点运行游戏服务器；已停止的服务器可迁移至其他节点，失联节点上的世界可按最新备份手动或自动故障切换至其他节点。可选的主控高可用基于 k3s 嵌入式 etcd 与 Longhorn 复制存储，使控制面在多台主控之间转移。上述功能目前仅位于 main 分支，尚未完成多机验收（参见 [多机部署](/guide/distributed)）。
 
 ## 使用方式 {#getting-started}
 
-在已准备好的 Linux 主机上执行：
+开发测试需在已准备好的 Linux 测试主机上显式选择 `dev` 通道（跟随 `main`，从源码构建）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh | sudo FELIS_VERSION_BOOTSTRAP=dev bash
 ```
 
 脚本将安装 K3s，在 K3s 中部署 PostgreSQL 与控制平面，随后启动设置向导。设置完成后，通过浏览器访问所配置的域名即可进入控制面板。
 
-* **设置向导**：向导首先绑定平台所有者：以 Minecraft Java 版加入向导所示的地址，登录服务器会给出 8 位绑定码（10 分钟内有效），将其输入向导即可。该步骤可以跳过，之后再次执行 `sudo felis setup` 补做；绑定所有者之前，任何人均无法登录控制面板，登录页届时会说明原因并列出绑定步骤及连接地址。安装器仅在交互式终端中自动启动向导；输出重定向至日志或经由 cloud-init 安装时，请在安装结束后执行 `sudo felis setup`。设置 `FELIS_NO_SETUP=1` 时，安装器在输出摘要后直接结束。
+* **设置向导**：先完成面板访问方式与存储配置，再由主机管理员创建首位 Owner，终端将给出一次性网页设置链接（30 分钟内有效）。在浏览器中打开该链接、登记邮箱并创建通行密钥，即可进入面板，无需启动 Minecraft。角色关联可稍后在「账户」页完成：选择认证源，输入角色名或 UUID 并确认；普通玩家继续通过游戏绑定码验证身份。未完成网页登录或链接过期时，再次执行 `sudo felis setup` 将提供新链接；已设置登录凭证的账号不会被重置。登录服或大厅故障不影响面板初始化。「账户」页说明世界树（Yggdrasil）认证，并显示进服地址与登录服、大厅所需的 Java 版客户端版本；安装器将实际构建的版本写入 `[velocity].game_version`，使用自定义镜像时需自行填写，未配置时面板不推测版本。标准世界树接口可直接查询角色；`hasJoined` 地址不符合标准路径时，可通过 `[[auth_source]].api_url` 指定认证站的 API 根地址，游戏绑定码仍可作为替代方式。安装器仅在交互式终端中自动启动向导；输出重定向至日志或经由 cloud-init 安装时，请在安装结束后执行 `sudo felis setup`。设置 `FELIS_NO_SETUP=1` 时，安装器在输出摘要后直接结束。
 
-* **支持的系统**：CentOS Stream 9（aarch64）已在实机上验证；Ubuntu 24.04（x86_64）在每次推送时由 CI 执行全新安装、重复安装、升级及上述安装命令（参见 [运维手册 §1](/operations/#_1-supported-hosts)）。
+* **认证源管理**：Owner 可在左侧导航「平台 → 认证源」中添加、编辑、排序和停用第三方 Yggdrasil 认证站，并测试认证接口。保存后立即用于下一次登录和角色查询，无需重启；面板配置优先于安装配置。已保存的永久标识不能改名或删除，以保留玩家 UUID 与账号绑定；不再使用的认证源可以停用。Mojang 始终优先验证。Nano 继续使用 TOML 配置（参见 [运维手册 §7](/operations/#_7-authentication-sources)）。
+
+* **支持的系统**：CentOS Stream 9（aarch64）已在实机上验证；Ubuntu 24.04（x86_64）在每次推送时由 CI 验证开发构建的全新安装与重复安装（参见 [运维手册 §1](/operations/#_1-supported-hosts)）。
 
 * **安装前检查**：安装器在修改主机之前检查内存、磁盘、端口、网段冲突、已有的 Kubernetes 及外网连通性。发现问题时一次性列出全部问题并退出，主机保持原状（检查项参见 [运维手册 §1](/operations/#_1-supported-hosts)）。
 
@@ -77,6 +84,8 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 <details>
 <summary>安装来源与受限网络环境下的安装</summary>
 <br>
+
+以下说明发布机制；当前暂无公开 Release 附件，开发测试使用源码构建。
 
 安装发布版时，二进制文件、全部镜像及 Velocity 插件均取自该版本由 CI 预构建的 release 附件，逐一校验 `SHA256SUMS` 后导入。主机无需安装 Docker、Gradle 或 Go，也无需访问 Docker Hub。若某个附件缺失或校验失败，仅该镜像回退为本机构建，并输出提示（参见 [故障排查 §15c](/operations/troubleshooting#_15c-the-installer-builds-on-the-host-although-it-installs-a-release)）。
 
@@ -91,7 +100,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 本项目基于 Go 与 Node.js 开发：
 
 ```bash
-# 后端（Go 1.26+）
+# 后端（Go 1.27+）
 go build -o felis ./cmd/felis
 
 # 前端（Node.js 22+）
@@ -124,8 +133,3 @@ docker build -t felis:custom .
 * [TailwindCSS](https://tailwindcss.com/)：CSS 框架
 * [Bubble Tea](https://github.com/charmbracelet/bubbletea)：TUI 框架
 * [Minecraft](https://www.minecraft.net/)：本项目服务的游戏
-
-
----
-
-原文：[README.md](https://github.com/FelisMC/Felis/blob/main/README.md)。

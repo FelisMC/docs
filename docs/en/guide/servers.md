@@ -34,6 +34,3 @@ deadline for the whole start, applied on the RCON-probe branch.
 ---
 
 See [Troubleshooting](/en/operations/troubleshooting) for startup, connection, idle shutdown and file operations.
----
-
-Source: [README_EN.md](https://github.com/FelisMC/Felis/blob/main/README_EN.md), [docs/troubleshooting.md](https://github.com/FelisMC/Felis/blob/main/docs/troubleshooting.md).

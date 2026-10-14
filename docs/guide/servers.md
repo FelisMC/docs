@@ -31,7 +31,3 @@ title: 管理服务器
 ---
 
 完整的启动、连接、休眠和文件操作排查步骤见[故障排查](/operations/troubleshooting)。
-
----
-
-原文：[README.md](https://github.com/FelisMC/Felis/blob/main/README.md)、[docs/troubleshooting.md](https://github.com/FelisMC/Felis/blob/main/docs/troubleshooting.md)。
