@@ -49,7 +49,7 @@ html[lang='zh-CN'] { --vp-code-copy-copied-text-content: '已复制'; }
 ::selection { color: var(--vp-c-text-1); background: var(--vp-c-brand-soft); }
 :focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 4px; }
 .VPNavBarTitle .title { font-size: 21px; font-weight: 650; letter-spacing: -0.6px; }
-.VPNavBarTitle .logo { width: 36px; height: 36px; }
+.VPNavBarTitle .logo { width: auto; height: 30px; }
 .VPNavBarMenuLink { font-size: 13px; }
 .VPNavBarSearch .DocSearch-Button { border: 1px solid var(--vp-c-divider); border-radius: 5px; background: transparent; }
 .VPSocialLinks.VPNavBarSocialLinks.social-links { margin-right: 0; }
@@ -70,3 +70,10 @@ html[lang='zh-CN'] { --vp-code-copy-copied-text-content: '已复制'; }
 /* Table headers stay on one line, so a short column is never squeezed to one CJK
    character per line; a wide table scrolls inside its own box. */
 .vp-doc th { white-space: nowrap; }
+
+/* The home page shows the transparent logo on the page background, a little larger than
+   VitePress's square default because the cat is wider than tall. */
+.VPHero .image-bg { display: none; }
+@media (min-width: 960px) {
+  .VPHero .image-src { max-width: 400px; max-height: 400px; }
+}

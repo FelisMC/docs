@@ -8,7 +8,7 @@ hero:
   text: Minecraft server hosting
   tagline: Built on Kubernetes and k3s. One command deploys it; starting and stopping servers, backups and player access are managed automatically.
   image:
-    src: /felis-logo.png
+    src: /felis-logo.svg
     alt: Felis
   actions:
     - theme: brand

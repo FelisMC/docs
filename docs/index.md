@@ -8,7 +8,7 @@ hero:
   text: Minecraft 服务器托管平台
   tagline: 基于 Kubernetes 与 k3s，单条命令完成部署，自动管理服务器的启停、备份与玩家接入。
   image:
-    src: /felis-logo.png
+    src: /felis-logo.svg
     alt: Felis
   actions:
     - theme: brand
