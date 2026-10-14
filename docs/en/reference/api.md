@@ -1,70 +1,166 @@
 ---
-title: API definition
+title: API reference
+description: The faces, authentication, access tiers, shared behaviour and main endpoint groups of the Felis HTTP API.
 ---
 
-# API definition {#api-定义}
+# API reference {#api}
 
-[Download the complete OpenAPI 3.1 definition](/openapi.yaml).
+This page describes the structure of the Felis HTTP API: its two faces, authentication, access tiers, the behaviour every operation shares, and the main endpoint groups. It is for readers who write scripts, build integrations or contribute to Felis. The parameters, request bodies and response schemas of each operation are defined in the OpenAPI document.
 
-Control plane for the Felis Minecraft orchestration platform. The same binary
-exposes an internal face (per-caller service tokens, for velocity / backend
-callbacks, never Zero Trust) and an external face (the felis_session cookie, for
-people and the panel; Cloudflare Access, when present, is enforced at the edge).
-Admin-tier external operations additionally require a staff session on the
-operator console host. See `x-felis-face` / `x-felis-tier` on each operation.
+## Overview {#overview}
 
-Behaviour every operation shares, and so not repeated under each:
+felis-api is served by the `felis` binary and runs two faces at once:
 
-* Every response carries `X-Request-Id` (a well-formed inbound one is kept),
-  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
-  `Referrer-Policy: no-referrer` and `Content-Security-Policy: default-src 'none'`.
-  `Strict-Transport-Security` is added when the request came through the TLS
-  edge (`X-Forwarded-Proto: https`).
-* A path no operation serves is `404 not_found`; a path served under other
-  methods is `405 method_not_allowed` with an `Allow` header.
-* A POST/PUT/PATCH/DELETE a browser sends from another site (`Sec-Fetch-Site`
-  `same-site` or `cross-site`, or an `Origin` whose host is not the request's)
-  is `403 cross_site`, before authentication. Callers that send neither header
-  (the plugins, scripts) are unaffected.
-* A JSON body over 1 MiB is `413 too_large`. A request body must keep arriving:
-  after 30 s it has to average 16 KiB/s or the connection is closed.
-* Event streams (the console and build logs) tag each line with `id:` (unix
-  seconds); an EventSource that reconnects with `Last-Event-ID` within the hour
-  resumes from that second instead of the tailed backlog. The server re-checks
-  the caller every minute and ends the stream with `event: revoked` once the
-  session or the access is gone; a stream also closes after 30 minutes and on
-  server shutdown, and the client simply reconnects.
+| Face | Callers | Where it is reached | Authentication |
+| --- | --- | --- | --- |
+| Internal face | The game proxy, the login space, image build jobs, file and export jobs, some `felis` commands on the host | The in-cluster ClusterIP Service `felis-api-internal`, port `8081`, plain HTTP | A per-caller service token; one-time tokens for job transfers |
+| External face | The web panel and clients that use a session | The panel hostnames: the player console `console.<root_domain>` and the operator console `op.console.<root_domain>` | The `felis_session` session cookie |
 
-## Definition and verification scope {#定义与验证范围}
+The external face is served through the NodePort Service `felis-api` (port `443`), behind the access method chosen at install time; the panel pages and the API share the same host. The internal face is never wrapped in Zero Trust and is never published on a node's external address. The network policies of game servers block access to it, with the login space as the only exception; image build jobs reach it through their own egress policy; the game proxy reaches it from the host through the ClusterIP. See [Access and domains](/en/operations/access#access-methods) for the access methods.
 
-```text
-felis-api — OpenAPI 3.1 description of both faces (spec §7, §14, §28 #7).
+The complete OpenAPI 3.1 document is published at [/openapi.yaml](/openapi.yaml) and describes both faces. It uses these extension fields:
 
-ONE binary serves TWO http.Handlers (internal / external). This document
-describes both, distinguished per-operation by the `x-felis-face` extension
-(an array, because `/healthz` is served by both faces) and `x-felis-tier`
-(the Zero-Trust grade: public | service | app | admin).
+| Field | Where | Meaning |
+| --- | --- | --- |
+| `x-felis-face` | Every operation | The face it belongs to: `internal`, `external`, or both (such as `/healthz`) |
+| `x-felis-tier` | Every operation | The access tier, see [Access tiers](#access-tiers) |
+| `x-felis-callers` | Internal operations | The service-token callers allowed to call the operation |
+| `x-felis-setup-allowed` | External operations | Operations an account still in first-run setup may call, see [Setup lockdown](#setup-lockdown) |
+| `x-felis-common-responses` | Document root | Responses any operation can give under a stated condition, not repeated under each operation |
 
-VERIFIED vs. HAND-MAINTAINED — read before trusting a field:
-  * The {method, path} -> {x-felis-face set, x-felis-tier} mapping is
-    machine-checked. internal/api/openapi_test.go parses this file and asserts
-    EXACT bidirectional parity against the route tables the handlers are built
-    from (internalAPIRoutes / externalAPIRoutes in internal/api/api.go). A route
-    added, removed, re-faced, or re-tiered without updating this file fails
-    `go test ./...`. So path, method, face and tier are as trustworthy as the code.
-  * Which operations a setup-lockdown session may still use (x-felis-setup-allowed)
-    is checked the same way against the SetupAllowed flag in those tables.
-  * The named response schemas are compared field by field with the Go structs
-    the handlers encode (internal/api/openapi_parity_test.go).
-  * Every request the handler tests send is held to this file once the package
-    has run (internal/api/openapi_contract_test.go): the operation (or
-    x-felis-common-responses) must list the status that came back, a JSON response
-    must fit the schema for that status and carry no property it does not name,
-    and the JSON request behind a 2xx must fit the requestBody. Statuses and
-    bodies no test reaches are still hand-maintained.
+The server URLs in the document use the placeholder domain `example.test`. In a deployment, the external face lives under the panel hostnames and the internal face is reachable only inside the cluster.
 
-The deployment zone (RootDomain, spec §2) never appears here — `example.test`
-is a placeholder, per the no-hardcoded-domain red line.
-```
+## Authentication {#authentication}
 
-The host-operation endpoints are subject to the same checks. They are served on the external face with `x-felis-tier: owner`, a grade the definition uses in addition to the four named above: `GET /api/v1/platform/host` (host overview), `POST /api/v1/platform/host/quiet` (holding or releasing the watchdog's mail), `POST /api/v1/platform/offsite/key` (reading the off-site encryption key), `GET /api/v1/platform/audit-export` (audit log export) and `GET /api/v1/settings/node-control/tasks/{id}/artifact` (downloading a file a host task produced, such as a support bundle). All except the host overview require fresh reauthentication. Besides the node lifecycle actions, the `action` of `POST /api/v1/settings/node-control/tasks` includes the host tasks the panel runs on the controller host, for example `db-backup`, `db-restore`, `offsite-configure`, `restore-host`, `domain-set`, `doctor` and `support-bundle`; the request can carry `params` and write-only `secrets` (passed to the host only, never stored with the task or returned), and the task record includes `result` and `artifact`.
+### Service tokens {#service-tokens}
+
+The internal face authenticates with `Authorization: Bearer <service-token>`. Each caller holds its own token, and each operation accepts only the callers listed in `x-felis-callers`:
+
+| Caller | Secret (`felis` namespace) | Used by | Reaches |
+| --- | --- | --- | --- |
+| `velocity` | `felis-service-token` | The game proxy plugin | The server list, wake, claim, status, join events, the lobby menu, staff login approval, account linking, the blacklist, the player entry policy |
+| `limbo` | `felis-limbo-token`, with a replica in the `minecraft` namespace | The login space | Link codes, link status, the blacklist, the player entry policy |
+| `build` | `felis-build-token`, with a replica in the `felis-build` namespace | Image build jobs | A submission's build context |
+| `ops` | `felis-ops-token` | `felis backup-now` and `felis restore-host` on the host | World backups of stopped servers, world restores during a host rebuild |
+
+A missing or invalid token returns `401`; a valid token for a caller the operation does not list returns `403 wrong_caller`. The audit log records internal calls with the source `internal:<caller>`. Run `sudo felis rotate-token -yes <caller>` to replace a token; see the [Command-line reference](/en/reference/cli#rotate-token).
+
+### Sessions {#sessions}
+
+The external face accepts only the session cookie `felis_session`. The cookie is `HttpOnly`, `Secure` and `SameSite=Lax`, and is valid only for the host that issued it, so an operator console session is never sent to the player console. The server stores only the SHA-256 digest of the cookie.
+
+Sessions are issued by these passwordless sign-in methods:
+
+- passkey sign-in;
+- email code sign-in;
+- in-game bind code sign-in;
+- staff login (started on the operator console and approved by a staff member who is in the game);
+- the setup token in the first-run setup link (used to initialize the first Owner).
+
+When the installation sits behind Cloudflare Access, Access is enforced at the edge and felis-api does not read the Access token. The sign-in endpoints are rate-limited per source address; over the limit they return `429 rate_limited` with a `Retry-After` header.
+
+### Access tiers {#access-tiers}
+
+The `x-felis-tier` of each operation takes one of these values:
+
+| Tier | Face | Requirement |
+| --- | --- | --- |
+| `public` | Internal, external | No authentication. Covers the health checks, metrics, the sign-in endpoints and sign-out |
+| `service` | Internal | A valid service token whose caller is listed in `x-felis-callers` |
+| `app` | External | Any signed-in account. Operations on a server also check its ownership |
+| `admin` | External | A session of an Admin or the Owner that arrives through the operator console hostname |
+| `owner` | External | A session of the Owner that arrives through the operator console hostname |
+
+The operator console is open to staff only: any request from a User session on the operator console hostname returns `403 forbidden`. An Admin or the Owner signed in through the player console hostname has `app`-tier access only. See [Platform administration](/en/guide/administration#roles) for the roles.
+
+### Reauthentication {#reauthentication}
+
+Operations that add, remove or change a way into an account, and the host operations that change the host or read sensitive data (see [Host operation endpoints](#host-operations)), require the session to have proven a sign-in factor within the last 5 minutes; otherwise they return `403 reauth_required`. `GET /api/v1/account/reauth` lists the reauthentication methods available to the current account.
+
+- Signing in with a passkey, an email code, staff login or the setup token counts as reauthentication; signing in with a bind code does not.
+- Users reauthenticate with a passkey or an email code.
+- Admins and the Owner reauthenticate with a passkey or by signing in again; an email code alone is not a factor for staff.
+
+### Setup lockdown {#setup-lockdown}
+
+An account still in first-run setup (for example, a new Owner who has not verified an email address yet) may call only the operations marked `x-felis-setup-allowed`; every other operation returns `403 setup_required`. The restriction ends when the setup wizard is complete; see [Installation](/en/guide/deployment#setup-wizard).
+
+## Shared behaviour {#common-behaviour}
+
+The following applies to every operation and is not repeated under each one in the OpenAPI document:
+
+- **Response headers**: every response carries `X-Request-Id` (a well-formed inbound value is kept), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and `Content-Security-Policy: default-src 'none'`. `Strict-Transport-Security` is added when the request came through the TLS edge (`X-Forwarded-Proto: https`).
+- **Error format**: error responses use `{"error": {"code": "...", "message": "...", "request_id": "..."}}`. `code` is a stable machine-readable code; `request_id` matches `X-Request-Id` and locates the matching entry in the server log. The details of a `500` error are written only to the server log.
+- **Routing**: a path no operation serves returns `404 not_found`; a path served under other methods returns `405 method_not_allowed` with an `Allow` header.
+- **Cross-site writes**: a POST, PUT, PATCH or DELETE that a browser sends from another site returns `403 cross_site` before authentication. The request counts as cross-site when `Sec-Fetch-Site` is `same-site` or `cross-site`, or when the host in `Origin` differs from the request's host. Callers that send neither header, such as plugins and scripts, are unaffected.
+- **Request bodies**: a JSON body over 1 MiB returns `413 too_large`; an operation that takes a JSON body returns `415 unsupported_media_type` for any other `Content-Type`. A request body must keep arriving: after 30 seconds it has to average 16 KiB/s or the connection is closed.
+- **Event streams**: the console and the build logs use Server-Sent Events and tag each line with `id:` (Unix seconds). A client that reconnects with `Last-Event-ID` within the hour resumes from that second. The server re-checks the caller every minute and ends the stream with `event: revoked` once the session or the access is gone. A stream also closes after 30 minutes and on server shutdown; the client reconnects.
+
+## Endpoint groups {#endpoints}
+
+The tables below list the main endpoint groups. `{name}` in a path is the server name.
+
+### Internal face {#internal-endpoints}
+
+| Group | Path | Tier | Purpose |
+| --- | --- | --- | --- |
+| Health and metrics | `/healthz`, `/readyz`, `/metrics` | `public` | Liveness and readiness probes; Prometheus metrics. `/healthz` belongs to the external face as well |
+| Session verification | `/session/minecraft/hasJoined` | `public` | Multi-source session verification for the game proxy: asks the configured authentication sources in priority order, Mojang first |
+| Server lifecycle | `/api/v1/servers`, `/api/v1/internal/servers/{name}/…` | `service` | Server list, wake, status, claim, readiness callback, join events, lobby menu data |
+| Players | `/api/v1/internal/player/…` | `service` | Menu access decisions, the username-collision blacklist |
+| Account linking | `/api/v1/internal/account/…` | `service` | Link codes, link status, account migration |
+| Staff login | `/api/v1/internal/op-login/…` | `service` | Lists pending staff login requests and approves them in the game |
+| Player entry policy | `/api/v1/internal/settings/entry-policy` | `service` | The game proxy and the login space read the current policy |
+| Build context | `/api/v1/internal/submissions/{id}/context` | `service` | Build jobs read a submission's contents |
+| Host commands | `/api/v1/internal/servers/{name}/backup`, `…/restore` | `service` | World backups of stopped servers; world restores during a host rebuild |
+| Job transfers | `/api/v1/internal/file-uploads/{id}`, `/api/v1/internal/file-browser/{id}`, `/api/v1/internal/exports/{id}` | `public` | File and export jobs move data with a one-time token |
+
+### External face {#external-endpoints}
+
+| Group | Path | Tier | Purpose |
+| --- | --- | --- | --- |
+| Sign-in | `/api/v1/auth/…` | `public` | Passkey, email code, staff login, bind code, setup token, sign-out |
+| Current user | `/api/v1/me`, `/api/v1/me/servers` | `app` | Account details and the user's own servers |
+| Account | `/api/v1/account/…` | `app` | Account linking, email, passkeys, reauthentication, sessions, account migration |
+| Server actions | `/api/v1/servers/{name}/…` | `app` | Wake, stop, restart, claim, status, retirement, job records |
+| Console and players | `/api/v1/servers/{name}/console`, `…/command`, `…/access/…`, `…/allowlist` | `app` | The console event stream and RCON commands; whitelist, bans, kicks, OP, LuckPerms |
+| Files | `/api/v1/servers/{name}/files…`, `…/file` | `app` | Browse, edit, upload (including chunked uploads), download, unzip, rename |
+| Backups and exports | `/api/v1/backups`, `/api/v1/servers/{name}/backup`, `…/restore-backup`, `…/world/export`, `/api/v1/exports/…` | `app` | World backup list, backup now, restore, export and download |
+| Schedules | `/api/v1/servers/{name}/schedules…` | `app` | Create, change, delete and run scheduled tasks |
+| My submissions | `/api/v1/me/submissions…` | `app` | Modpack submissions and uploads |
+| Server administration | `POST /api/v1/servers`, `PATCH /api/v1/servers/{name}`, `/api/v1/fleet`, `/api/v1/nodes`, `/api/v1/servers/{name}/migrations…` | `admin` | Create and change servers, the platform-wide server list, execution nodes, server migration |
+| Images and builds | `/api/v1/images`, `/api/v1/images/build…` | `admin` | The image whitelist; builds, build logs, cancellation, security scans and SBOMs |
+| Submission review | `/api/v1/submissions…` | `admin` | Approve or reject submissions |
+| User administration | `/api/v1/users…` | `owner` | Users, quotas, sessions, passkeys, game profile links |
+| Platform settings | `/api/v1/settings/…`, `/api/v1/updates/…`, `/api/v1/platform/db-backup` | `owner` | Player entry policy, wake and archive policies, heartbeat, failover, mail relay, authentication sources, maintenance window, update report, database backup status |
+| Failover | `/api/v1/nodes/{node}/failover` | `owner` | Read the failover plan and fail over a lost node |
+| Emergency stop | `POST /api/v1/servers/{name}/emergency-stop` | `owner` | Stop a server immediately |
+| Host operations | See below | `owner` | Run maintenance tasks on the controller host |
+
+### Host operation endpoints {#host-operations}
+
+All host operation endpoints belong to the external face and have the tier `owner`. felis-api hands each task to `felis-node-control.service`, a root service on the host, which runs the same `felis` command or installer function as the command line. The panel location and command-line equivalent of each operation are listed in the [Operations overview](/en/operations/#panel-host-operations).
+
+| Method and path | Purpose | Reauthentication |
+| --- | --- | --- |
+| `GET /api/v1/platform/host` | Host overview: disks, memory, services and timers, open alerts, database bundles, the off-site copy, host settings | Not required |
+| `POST /api/v1/platform/host/quiet` | Hold the watchdog's mail until a time within the next seven days, or lift the hold | Required |
+| `POST /api/v1/platform/offsite/key` | Read the off-site encryption key | Required |
+| `GET /api/v1/platform/audit-export` | Export the audit log | Required |
+| `GET /api/v1/settings/node-control` | List host tasks | Not required |
+| `POST /api/v1/settings/node-control/tasks` | Start a host task | Required |
+| `GET /api/v1/settings/node-control/tasks/{id}` | Read a task's stage, error and recent execution log | Not required |
+| `POST /api/v1/settings/node-control/tasks/{id}/retry` | Create a new attempt from a failed task | Required |
+| `GET /api/v1/settings/node-control/tasks/{id}/artifact` | Download a file a task produced, such as a support bundle | Required |
+
+The request body that starts a task has these fields:
+
+| Field | Description |
+| --- | --- |
+| `action` | The operation. Node operations are `enable`, `join`, `approve`, `upgrade`, `fence`, `unfence`, `enable-ha` and `join-controller`; host tasks are `db-backup`, `db-verify`, `db-restore`, `offsite-sync`, `offsite-list`, `offsite-check-key`, `offsite-take-over`, `offsite-configure`, `offsite-disable`, `restore-host`, `backup-now`, `rotate-token`, `domain-check`, `domain-set`, `storage-configure`, `connection-configure`, `converge`, `doctor`, `support-bundle`, `host-settings` and `server-forwarding` |
+| `confirmMaintenance` | Required. Must be `true` for every node operation and for host tasks that disconnect players, restart the panel or replace data |
+| `name`, `sshTarget`, `externalIP`, `peers` | Node operation parameters: the node name, a verified root SSH target, the node's fixed address, additional peer addresses |
+| `params` | The operation's own inputs, kept with the task, such as a bundle name, a domain or a mode |
+| `secrets` | Credentials the operation needs, such as bucket keys or an API token. They reach the host only, are never stored with the task and are never returned; a retry asks for them again |
+
+A task record carries `state` (`running`, `succeeded`, `failed`), `stage`, `error`, the most recent 64 KiB of `log`, the data the operation reports in `result`, and the file it produced in `artifact`. One task runs at a time: starting another while one runs returns `409`. When the host service is unavailable, the endpoints return `503`.

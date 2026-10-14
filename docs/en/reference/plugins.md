@@ -1,407 +1,223 @@
 ---
-title: Server-side plugins
+title: Server plugins
+description: The Felis Velocity, Limbo and Paper plugins and the loader mods — what they do, Minecraft versions, building, dependency verification and deployment.
 ---
 
-# Felis server-side plugins {#felis-server-side-plugins}
+# Server plugins {#plugins}
 
-These are the in-cluster and edge plugins for Felis. The Velocity proxy and the three loader
-mods (these on a standalone online-mode server only, see the warning under the module table)
-ship the in-game first leg of the §10 account-link flow: a player who is already online
-(so Mojang has verified their UUID) runs `/link`; the plugin asks felis-api to
-mint a one-time code for that UUID and shows it in chat. The player then enters
-the code on the web console → **Account** page (the second leg), which binds the
-code to their logged-in account. The web side is already built.
+This page describes the Java plugins and mods in the repository's `plugins/` directory: what each module does, the Minecraft versions it supports, the identity trust model, the game proxy's routing behaviour, the lobby menu, and how to build, verify and deploy them by hand. It is for developers and for operators who deploy plugins manually. The installer builds and deploys the plugins the game proxy, the login space and the lobby need.
 
-The **limbo** module reaches the same felis-api endpoint without a command: it is the login
-gate, so it mints the code on join for anyone not yet linked and holds them until they redeem
-it. The **paper** lobby ships neither — see below.
+## Overview {#overview}
 
-The **Velocity** module additionally carries the §11 domain-autostart routing
-loop — recognizing each server's subdomain, registering backends dynamically,
-waking a sleeping target and holding the player until it is ready. It is a full
-proxy plugin, not just `/link`; see **[Velocity routing](#velocity-routing-§11)**
-below. The Fabric / Forge / NeoForge mods are `/link`-only.
+| Module | Platform | Compiles against | Jar | Built by the installer |
+| --- | --- | --- | --- | --- |
+| `velocity/` | Velocity proxy plugin | velocity-api 3.5.1 (Java 21 bytecode) | `felis-velocity-0.1.0.jar` | Yes |
+| `limbo/` | LOOHP/Limbo plugin (login space) | Limbo API 2026.0.3-ALPHA (Java 17 bytecode) | `felis-limbo-0.1.0.jar` | Yes |
+| `paper/` | Paper plugin (lobby) | paper-api 26.3.build.40-alpha | `felis-paper-0.1.0.jar` | Yes |
+| `fabric/` | Fabric server mod | MC 1.20.1 / fabric-loader 0.16.5 / fabric-api 0.92.2+1.20.1 | `felis-fabric-0.1.0.jar` | No |
+| `forge/` | Forge server mod | MC 1.20.1 / Forge 47.3.0 | `felis-forge-0.1.0.jar` | No |
+| `neoforge/` | NeoForge server mod | MC 1.20.4 / NeoForge 20.4.251 | `felis-neoforge-0.1.0.jar` | No |
+| `shared/` | Not built on its own | — | Source compiled into each module | Source only |
 
-The **Paper** module is different in kind: it is the §12 lobby UI face. It ships
-**no** `/link` and holds **no** felis-api token — it only paints the `/menu`
-(and `/server`) chest GUI and speaks the `felis:control` plugin-message channel
-to Velocity, which is the only side that ever talks to felis-api. See
-**[Lobby menu](#lobby-menu-§12)** below.
+What each module does:
 
-| Module             | Platform                    | Compiles against                         | Jar                          | Built by the installer |
-| ------------------ | --------------------------- | ---------------------------------------- | ---------------------------- | ---------------------- |
-| `velocity/`        | Velocity proxy plugin       | velocity-api 3.5.1 (Java 21 bytecode)    | `felis-velocity-0.1.0.jar`   | yes                    |
-| `limbo/`           | LOOHP/Limbo plugin (login)  | Limbo API 2026.0.3-ALPHA (Java 17 bytecode) | `felis-limbo-0.1.0.jar`   | yes                    |
-| `paper/`           | Paper server plugin (lobby) | paper-api 26.3.build.40-alpha            | `felis-paper-0.1.0.jar`      | yes                    |
-| `fabric/`          | Fabric server mod           | MC 1.20.1 / fabric-loader 0.16.5 / fabric-api 0.92.2+1.20.1 | `felis-fabric-0.1.0.jar` | no          |
-| `forge/`           | Forge server mod            | MC 1.20.1 / Forge 47.3.0                 | `felis-forge-0.1.0.jar`      | no                     |
-| `neoforge/`        | NeoForge server mod         | MC 1.20.4 / NeoForge 20.4.251            | `felis-neoforge-0.1.0.jar`   | no                     |
-| `shared/`          | *(not built on its own)*    | —                                        | source compiled into each    | source only            |
+- **The Velocity plugin** (plugin ID `felis-link`) is a full proxy plugin: it recognizes servers by subdomain, registers backends dynamically, wakes sleeping servers and holds players until they are ready, routes by the [player entry policy](/en/guide/players#entry-policy), provides the `/link`, `/felis` and `/invite` commands, and approves staff logins in the game. It reaches felis-api directly through the internal face; see [Velocity routing](#velocity-routing).
+- **The Limbo plugin** turns the login space into the authentication gate: it serves a readiness endpoint, mints a bind code for players who have not linked an account, and holds them until they complete the link in the panel. See [Login space image](/en/reference/limbo).
+- **The Paper plugin** provides the lobby's `/menu` chest interface and the lobby protection rules. It holds no felis-api token and talks to the game proxy only over the `felis:control` plugin-message channel; see [Lobby menu](#lobby-menu).
+- **The Fabric, Forge and NeoForge mods** provide `/link` only, for standalone online-mode servers outside the Felis network.
 
-The installer's three versions are the builds `deploy/game-stack.lock` installs (Velocity
-`VELOCITY_VERSION`, Limbo `LIMBO_VERSION`, the Paper jar in `PAPER_JAR_URL`), and
-`go test .` fails when a pin and the lock drift apart; see
-[Dependency verification](#dependency-verification).
+`/link` is the in-game step of account linking: a player who is already online runs `/link`, the plugin asks felis-api to mint a one-time code for the player's verified UUID and shows it in chat, and the player enters the code on the panel's **Account** page to complete the link. The login space needs no command: it mints the code when the player arrives. See [Player access](/en/guide/players#account-linking) for the linking flow.
 
-### Minecraft versions {#minecraft-versions}
+The Velocity, Limbo and Paper versions the installer uses are the builds pinned in `deploy/game-stack.lock`: Velocity is `VELOCITY_VERSION`, Limbo is `LIMBO_VERSION`, and Paper is the build in `PAPER_JAR_URL`. The repository's Go tests fail when a compile dependency and the lock disagree; see [Dependency verification](#dependency-verification).
 
-| Module     | Runs on                                   | Minecraft                                        |
-| ---------- | ----------------------------------------- | ------------------------------------------------ |
-| `velocity` | the Felis proxy (Velocity 3.5.1)          | whatever clients the proxy accepts: 26.3 natively, older clients through the ViaVersion stack bootstrap installs |
-| `limbo`    | the Felis login gate (Limbo)              | 26.3 only — Limbo speaks exactly one protocol, the lock's `MC_VERSION` |
-| `paper`    | the Felis lobby (Paper 26.3)              | 26.3, the lock's `MC_VERSION`                    |
-| `fabric`   | a standalone Fabric server                | 1.20.1 (`fabric.mod.json` declares `~1.20.1`)    |
-| `forge`    | a standalone Forge server                 | 1.20.1 (`mods.toml` declares `[1.20.1,1.20.2)`)  |
-| `neoforge` | a standalone NeoForge server              | 1.20.4 (`mods.toml` declares `[1.20.4,1.20.5)`)  |
+::: warning The loader mods are for standalone servers only
+Inside a Felis network, the game proxy's `/link` serves every backend and takes precedence over a backend's own command of the same name, so user game servers need no mod. A mod answers `/link` only when its server runs `online-mode=true`. The installer does not deploy these mods; build them with the commands under [Building](#building) and install them by hand.
+:::
 
-The Felis network itself runs Minecraft 26.3. The loader mods target the older 1.20.x
-modding lines and belong on a standalone server outside the network; they load on no
-26.x server, and nothing in a Felis install loads them.
+::: danger The token a mod holds is a real credential
+A mod's token can mint a bind code for any UUID. Anyone who can read that server's files (its operator, any plugin or mod on it, the holder of a copied backup) can bind a not-yet-linked player's account to their own panel account. Install a mod only on a server whose operator you trust with that, and give it the `limbo` token: it opens only the link-code, link-status and blacklist endpoints. The `velocity` token can also approve staff logins and wake or claim servers for any player; keep it on the proxy host. To replace a leaked token, run `sudo felis rotate-token -yes limbo`: the login space restarts with the new value; update the mod's `felis-link.properties` by hand, and the mod picks up the new value on its next call without a restart.
+:::
 
-"Built by the installer" is what `deploy/bootstrap.sh` produces, and it is the same set
-`bootstrap_asset.go` embeds into the felis binary for the TUI install path, which has no source
-checkout to build from. **The three loader mods are not in that set** — a finished install has
-no `felis-fabric`/`felis-forge`/`felis-neoforge` jar anywhere. They build from this checkout with
-the commands under [Building](#building) and are deployed by hand; the account-link flow they
-carry works, but nothing installs them for you.
+## Minecraft versions {#minecraft-versions}
 
-> **The loader mods are for a standalone server only.** Inside a Felis network the proxy's
-> `/link` already serves every backend and shadows a backend's own, so user game servers need
-> no mod. A mod answers `/link` only when its server runs `online-mode=true`: an offline-mode
-> server is either behind a proxy (whose `/link` applies) or cracked, where the UUID is
-> whatever the client claims.
->
-> **The token a mod holds is a real credential.** It mints a link code for any UUID the mod
-> asks about, so whoever can read that server's files — its operator, any plugin or mod on
-> it, a copied backup — can bind a not-yet-linked player's Minecraft account to their own web
-> account. Put a mod only on a server whose operator you would trust with that, and give it
-> the `limbo` token: it opens the link-code, link-status and blacklist routes and nothing
-> else. The `velocity` token also approves op-logins and wakes or claims servers for any
-> player; it stays on the proxy host. `sudo felis rotate-token limbo` replaces a leaked
-> token (the login gate restarts onto the new value; copy it into the mod's
-> `felis-link.properties` by hand; the mod takes it on its next call, without a restart).
+| Module | Runs on | Minecraft |
+| --- | --- | --- |
+| `velocity` | The Felis game proxy (Velocity 3.5.1) | The client versions the proxy accepts: 26.3 natively, older clients through the ViaVersion components the installer deploys |
+| `limbo` | The Felis login space (Limbo) | 26.3 only; Limbo speaks exactly one protocol, the lock's `MC_VERSION` |
+| `paper` | The Felis lobby (Paper 26.3) | 26.3, the lock's `MC_VERSION` |
+| `fabric` | A standalone Fabric server | 1.20.1 (`fabric.mod.json` declares `~1.20.1`) |
+| `forge` | A standalone Forge server | 1.20.1 (`mods.toml` declares `[1.20.1,1.20.2)`) |
+| `neoforge` | A standalone NeoForge server | 1.20.4 (`mods.toml` declares `[1.20.4,1.20.5)`) |
 
-## Whose identity each path trusts {#whose-identity-each-path-trusts}
+The Felis network itself runs Minecraft 26.3. The loader mods target the 1.20.x modding lines and belong on standalone servers outside the network; they load on no 26.x server, and a Felis installation never loads them.
 
-Only the **Velocity path** is protected against a forged identity. The proxy runs
-`online-mode=true` (bootstrap writes it), so Velocity checks every login with Mojang, and
-everything downstream takes its identity from that login:
+## Identity trust {#identity}
 
-- the proxy's own `/link`, `/felis` and `/invite` use the UUID of the verified connection;
-- the lobby's `felis:control` frames are attributed to the backend connection they arrived
-  on, and the `player` field a lobby writes is ignored (see
-  [Lobby menu](#lobby-menu-§12));
-- the login gate and the lobby run offline-mode behind the proxy and accept only logins
-  carrying Velocity's modern-forwarding signature (the shared forwarding secret), so a
-  client that bypasses the proxy cannot claim a UUID.
+Only the paths through the game proxy are protected against forged identities. The game proxy runs with `online-mode=true` (the installer writes it), so every login is verified with Mojang or a configured authentication source, and everything downstream uses that verified identity:
 
-A proxy started with `online-mode=false` refuses to route (it logs an error and turns
-routing off); its `/link` then sees only name-derived offline UUIDs, which never equal a
-Mojang account's.
+- The proxy's own `/link`, `/felis` and `/invite` use the UUID of the verified connection.
+- The `felis:control` frames a lobby sends are attributed to the backend connection they arrive on, and the `player` field the lobby writes is ignored; see [Lobby menu](#lobby-menu).
+- The login space and the lobby run in offline mode behind the proxy and accept only logins that carry Velocity's modern forwarding signature (the shared forwarding secret), so a client that bypasses the proxy cannot claim a UUID.
 
-The **loader mods** are outside that protection. A mod trusts the UUID its own server
-reports (`getUUID()`), so it is exactly as trustworthy as that server: the mod refuses
-`/link` unless the server runs `online-mode=true`, and whoever operates the server holds
-a token that can mint a code for any UUID (see the warning above).
+A game proxy started with `online-mode=false` turns routing off and logs an error; its `/link` then sees only name-derived offline UUIDs, which never match a genuine account's UUID.
+
+The loader mods are outside this protection. A mod trusts the UUID its server reports, so it is exactly as trustworthy as that server: the mod refuses `/link` unless the server runs `online-mode=true`, and whoever operates the server holds a token that can mint a code for any UUID (see the warning under [Overview](#overview)).
 
 ## Architecture {#architecture}
 
-Each platform is an **independent** Gradle build with its own `settings.gradle`,
-not one root project mixing loader plugins (the loader Gradle plugins have
-conflicting Gradle-version requirements — see below). The platform-neutral link
-core lives in `shared/src/main/java` and is pulled into every module via:
+Each platform is an independent Gradle build with its own `settings.gradle`; the loader Gradle plugins have conflicting Gradle version requirements, so there is no shared root project. The platform-neutral core lives in `shared/src/main/java`, and each module compiles it in with:
 
 ```groovy
 sourceSets { main { java { srcDir '../shared/src/main/java' } } }
 ```
 
-The core (`best.lolicon.felis.link`) has **zero third-party dependencies** — it
-uses the JDK's `java.net.http.HttpClient` and a small hand-written JSON parser —
-so there is nothing to shade and each jar is self-contained.
+The core package `best.lolicon.felis.link` has no third-party dependencies: it uses the JDK's `java.net.http.HttpClient` and a small JSON parser, so every jar is self-contained and nothing needs shading.
 
-- `LinkClient` — `POST {apiBaseUrl}/api/v1/internal/account/link/code` with
-  `Authorization: Bearer <service-token>` and body `{"mc_uuid":"<uuid>"}`;
-  `201 → {code, expires_at}`, otherwise the `{error:{code,message}}` envelope.
-- `LinkConfigLoader` — reads `FELIS_API_BASE_URL` / `FELIS_SERVICE_TOKEN` (env
-  wins) or a `felis-link.properties` file written as a commented template on
-  first run. **The API URL and service token are deployment inputs and are never
-  compiled in.** Two optional keys bound each call, in whole seconds from 1 to 120
-  (default 10): `connect-timeout-seconds` / `FELIS_API_CONNECT_TIMEOUT_SECONDS`
-  for opening the connection, `request-timeout-seconds` /
-  `FELIS_API_REQUEST_TIMEOUT_SECONDS` for the whole call. Anything else fails the
-  load with the key named.
-- `FelisApiClient` — the routing client. A GET that failed on a dropped
-  connection or a 502/503/504 is tried once more after a 100–400 ms jittered
-  pause; a GET that timed out, and every POST (wake, claim, join-event,
-  approvals), is never repeated.
+- **Link client**: calls `POST {apiBaseUrl}/api/v1/internal/account/link/code` with `Authorization: Bearer <service-token>` and the body `{"mc_uuid":"<uuid>"}`. Success returns `201` with `{code, expires_at}`; failure returns the `{error:{code,message}}` envelope.
+- **Configuration loader**: reads the environment variables `FELIS_API_BASE_URL` and `FELIS_SERVICE_TOKEN`, or a commented `felis-link.properties` template written on first run; the environment wins. The API URL and the service token are deployment inputs and are never compiled in. Two optional keys bound each call, in whole seconds from 1 to 120, default 10: `connect-timeout-seconds` (`FELIS_API_CONNECT_TIMEOUT_SECONDS`) for opening the connection, and `request-timeout-seconds` (`FELIS_API_REQUEST_TIMEOUT_SECONDS`) for the whole call. Any other value fails the load and names the key.
+- **Routing client**: a GET that failed on a dropped connection or a `502`, `503` or `504` is retried once after a random pause of 100–400 ms. A GET that timed out, and every POST (wake, claim, join event, approval), is never retried.
 
-Threading: the command runs on the server thread; the HTTP call is dispatched to
-a daemon single-thread executor and the reply is hopped back onto the server
-thread, so a slow felis-api never stalls the tick loop. If config is missing the
-plugin loads but never registers `/link`, so the server runs un-crippled.
+Commands run on the server thread; the HTTP call goes to a single-thread daemon executor, and the reply is handed back to the server thread, so a slow felis-api never stalls the tick loop. When the configuration is missing, the plugin still loads but does not register `/link`, and the server runs normally.
 
-All three mods use **official Mojang mappings**, so the MC class/method names are
-identical across Fabric/Forge/NeoForge and the command handler is uniform; only
-the `@Mod`/event-bus/config-dir glue differs per loader.
+All three mods use the official Mojang mappings, so class and method names are identical across Fabric, Forge and NeoForge and the command handler is the same; only the mod declaration, event bus and configuration directory glue differs per loader.
 
-## Velocity routing (§11) {#velocity-routing-§11}
+## Velocity routing {#velocity-routing}
 
-Velocity sits on the player-facing edge, off-cluster, so it is where
-domain-autostart routing lives. Beyond `/link`, the Velocity plugin recognizes
-each felis server by its subdomain, registers backends into Velocity's dynamic
-server registry, and decides — per join — whether to send the player straight in,
-wake a sleeping server and park them, or ask them to reconnect. It drives §9 wake
-and §11 routing over the felis-api **internal** face (service-token auth), and
-additionally terminates the `felis:control` plugin-message channel that backs the
-§12 lobby menu — translating each lobby frame into the same wake/claim/status
-calls, against the player's connection-derived identity rather than anything the
-lobby claims. See **[Lobby menu](#lobby-menu-§12)** below.
+The game proxy sits on the player-facing edge, outside the cluster. Besides `/link`, the Velocity plugin recognizes Felis servers by subdomain, registers backends in Velocity's dynamic server registry, and decides on each join whether to send the player straight in, wake a sleeping server and hold the player, or ask the player to reconnect later. It drives wake and routing over the felis-api internal face (service-token authentication), and receives the `felis:control` frames from the lobby and the login space, translating them into the same wake, claim, status and release calls.
 
-Two preconditions gate routing, **each fails safe** (routing turns off, `/link`
-keeps working):
+Two preconditions gate routing. If either is missing, routing turns off safely and `/link` keeps working:
 
-- **online mode** — `online-mode=true` in `velocity.toml`. The autostartPolicy
-  and allowlist gates trust Mojang-verified UUIDs; under offline mode the plugin
-  refuses to route on spoofable identities and logs an error.
-- **root-domain** — the deployment zone (e.g. `mc.example.net`). This is the only
-  place the zone enters the proxy and is **never compiled in**; without it,
-  host-based routing has nothing to match and stays off.
+- **Online mode**: `online-mode=true` in `velocity.toml`. The autostart policy and whitelist checks trust verified UUIDs; in offline mode the plugin refuses to route on spoofable identities and logs an error.
+- **Root domain**: the deployment's root domain, such as `mc.example.net`. This is the only place the root domain enters the proxy, and it is never compiled in; without it, hostname routing has nothing to match and stays off.
 
-What it does when routing is active:
+With routing active:
 
-| Surface | Behavior |
-| ------- | -------- |
-| Backend registry | Polls `GET /api/v1/servers` every 15 s and reconciles Velocity's dynamic registry. A failed poll **keeps existing registrations** — a control-plane blip never deregisters live backends. The API advertises each backend Service's host-routable ClusterIP, avoiding cluster-DNS names on the host-run proxy. |
-| Join (`PlayerChooseInitialServerEvent`) | Resolves `subdomain.<root-domain>` and remembers the target, but every fresh connection still enters `login`. When the login gate requests its post-auth lobby transfer, Velocity re-checks link status: a ready remembered target is selected immediately; an asleep target is woken and queued from the lobby. |
-| Waiting queue | One scheduled drain every 2 s polls status once per distinct waited-on server. A waiter stays while its server is on the way up (starting, or Failed inside the operator's restart backoff), hears a progress line each minute, and drops out on transfer, on the player leaving, when the start is given up (`startGaveUp`) or the server is stopped, after 120 s without an answer from felis-api, or at a one-hour backstop. |
-| Wake gate | The wake is `POST /api/v1/internal/servers/{name}/wake` keyed on the player's online-mode UUID. **403** (policy refused) tells the player and stops; **429** (wake already in flight) keeps waiting. |
-| Server-list ping (`ProxyPingEvent`) | Answers from the cached lifecycle view with a phase-aware MOTD (online / starting / sleeping) — **read-only, never wakes** anything. Mirroring each backend's own MOTD by background-pinging ready servers is a later slice. |
-| Join report (`ServerConnectedEvent`) | Reports real joins to a felis backend via `POST …/join-event`, so the reaper sees activity and the player is auto-added to the server allowlist. |
-| `/felis`, `/felis list` | Operator status: online-mode, root-domain, lobby, and the known server set with phase/ready. |
-| `/felis lobby`, `/felis go <lobby>` | Moves the player back to the lobby from any backend. Nothing is woken, and a wait already queued still moves them when its server is ready. Kept under `/felis` so a user server's own `/lobby` or `/hub` is not shadowed by the proxy. |
-| `/server` | Velocity's own `/server` is removed so the command reaches the backend: the lobby's server menu there, a user server's own `/server` anywhere else. It listed the login gate, the lobby and every running server to every player. A `/server` another proxy plugin registered is kept. With routing off the built-in stays, since it is then the one way to switch servers. |
+| Feature | Behaviour |
+| --- | --- |
+| Backend registry | Requests `GET /api/v1/servers` every 15 seconds, reconciles Velocity's dynamic registry and refreshes the player entry policy. A failed request keeps the existing registrations and the last policy, so a brief control-plane outage never deregisters running backends. The API returns each backend Service's host-routable ClusterIP, so the proxy does not depend on cluster DNS. |
+| Proxy restart while the API is down | The proxy routes on the last server list it received, `/opt/felis/velocity/plugins/felis-link/last-servers.json`, until a refresh succeeds. |
+| Join | Resolves `<subdomain>.<root-domain>` and remembers the target. When a panel account link is required, a new connection enters `login` first; when the login space asks for the player's release, the proxy confirms the link again: a ready remembered target is joined directly, and a sleeping target is woken from the lobby and queued. While felis-api restarts, players whose link was confirmed within the last 10 minutes still get through. |
+| Waiting queue | One pass every 2 seconds queries the status of each distinct target server once. A player keeps waiting while the server is starting, or failed but inside the operator's restart backoff, and hears a progress line every minute. The wait ends on transfer, when the player leaves, when the start is given up, when the server is stopped, after 120 seconds without an answer from felis-api, or at a one-hour limit. |
+| Wake check | Calls `POST /api/v1/internal/servers/{name}/wake` with the player's online-mode UUID. `403` means the policy refused, which the player is told before the wait ends; `429` means a wake is already in progress, and the wait continues. |
+| Server-list ping | Answers from the cached lifecycle view with a phase MOTD (online, starting, start failed, sleeping) and the cached player counts. The ping is read-only: it never wakes a server and never contacts a backend. |
+| Join report | Reports each real join to a Felis backend through `POST …/join-event`, so world cleanup sees the activity and the player is added to the server's allowlist automatically. |
+| `/felis`, `/felis list` | Shows the operational state: online mode, root domain, lobby, and the known servers with their phase and readiness. |
+| `/felis lobby`, `/felis go <lobby>` | Moves the player back to the lobby from any backend without waking anything; a wait already queued still moves the player when its server is ready. The command lives under `/felis` so that a user server's own `/lobby` or `/hub` is not shadowed. |
+| `/server` | Velocity's built-in `/server` is removed so the command reaches the backend: the server menu in the lobby, a user server's own `/server` elsewhere. A `/server` registered by another proxy plugin is kept. With routing off, the built-in command stays, because it is then the way to switch servers. |
 
-Velocity-only config keys (read from the same `felis-link.properties` / env as
-`/link`; env wins):
+Other commands: `/felis claim` claims a server, `/felis migrate` is used for account migration, `/felis web op approve` approves a staff login in the game, `/invite <player>` invites an online player to the server you are on, and `/invite accept` and `/invite deny` answer an invitation.
 
-| Key | Env | Meaning |
-| --- | --- | ------- |
-| `root-domain`  | `FELIS_ROOT_DOMAIN`  | Routing zone, e.g. `mc.example.net`. Unset → routing off. |
-| `login-server` | `FELIS_LOGIN_SERVER` | The system auth gate every fresh connection must pass. Defaults to `login`. |
-| `lobby-server` | `FELIS_LOBBY_SERVER` | The distinct post-auth holding server used while a backend wakes. Defaults to `lobby`; it must not equal `login-server`. |
+Velocity-only configuration keys are read from the same `felis-link.properties` or environment as `/link`; the environment wins:
 
-Load bounds on the proxy: felis-api calls run on a pool of 8 threads with 64
-waiting slots. Past that a call is refused at once — the player reads "busy", a
-lobby frame gets a `busy` error, and a dropped join-event is logged at warn —
-rather than piling up threads while felis-api is slow. The registration refresh
-(15 s) and the waiting-queue poll (2 s) skip a run that falls due while the last
-one is still going. Acting commands (`/link`, `/felis claim`, migrate, op
-approve) share a per-player budget of 5 then one per 5 s; felis:control frames
-from the lobby are metered per player and menu status answers are cached.
+| Key | Environment variable | Meaning |
+| --- | --- | --- |
+| `root-domain` | `FELIS_ROOT_DOMAIN` | The root domain routing uses, such as `mc.example.net`. Routing is off when unset |
+| `login-server` | `FELIS_LOGIN_SERVER` | The authentication gate every new connection passes, default `login` |
+| `lobby-server` | `FELIS_LOBBY_SERVER` | The post-authentication waiting server used while a backend wakes, default `lobby`; it must differ from `login-server` |
+| `panel-hostname` | `FELIS_PANEL_HOSTNAME` | The player console hostname, default `console.<root-domain>` |
+| `admin-hostname` | `FELIS_ADMIN_HOSTNAME` | The operator console hostname, default `op.console.<root-domain>` |
 
-Health on the proxy: every 10 minutes that saw any activity the proxy logs one
-info line, `Felis: last 10 min: felis-api calls=… (no answer=…, 4xx=…, 5xx=…,
-retried=…), avg=… ms, max=… ms, busy refusals=…, join-events failed=…,
-join-events dropped=…, transfers failed=…, server-list refreshes failed=…,
-waiting now=…`, with only that window's counts. `/felis` run from the console
-adds the same felis-api counts since start, the waiting count and the failure
-totals. A server-list refresh that keeps failing warns once when it starts, then
-every 5 minutes with the running count, and logs at info when it recovers; the
-login gate treats its link-status polls the same way.
+**Load limits**: felis-api calls run on 8 threads with 64 waiting slots. Beyond that a call is refused at once: the player sees a "busy" message, a lobby frame gets a `busy` error, and a dropped join event is logged as a warning. The registry refresh (15 seconds) and the queue poll (2 seconds) skip a run while the previous one is still going. Acting commands (`/link`, `/felis claim`, migration, staff approval) share a per-player budget of 5, then one more every 5 seconds. `felis:control` frames from the lobby are also limited per player, and menu status answers are cached.
 
-## Lobby menu (§12) {#lobby-menu-§12}
+**Health log**: every 10-minute window with any activity produces one info line with only that window's counts:
 
-The `paper/` module is the lobby's player-facing face for §27 scenario 10
-(`/menu → plugin msg → velocity → api → shared waiting queue → Connect when ready`). It runs
-on the Paper lobby server and gives players a chest GUI instead of a command
-line: `/menu` (alias `/server`, which the proxy passes through with routing active) opens a grid of one tile per server the proxy routes,
-and clicking a tile wakes, claims, or joins that backend.
-
-**Pure UI face.** The lobby holds no felis-api token, opens no HTTP connection,
-and keeps no waiting queue. Every action it takes is a single frame on the
-`felis:control` plugin-message channel; every piece of state it shows arrives as
-a frame on the same channel. Velocity (the `ControlChannel`, above) is the only
-side that talks to felis-api. This is enforced **physically** by the build, not
-just by convention: the module's `sourceSets` include-filter compiles in only the
-paper package plus the three codec classes, so the lobby jar contains exactly
-these classes —
-
-```
-best/lolicon/felis/link/Control.class        (channel framing)
-best/lolicon/felis/link/ControlFrame.class   (the frame model)
-best/lolicon/felis/link/Json.class           (codec)
-best/lolicon/felis/paper/FelisPaperPlugin.class (+ $1)
-best/lolicon/felis/paper/LobbyGuard.class
-best/lolicon/felis/paper/MenuHolder.class
-best/lolicon/felis/paper/MenuTiles.class     (+ $Kind, $Tile)
+```text
+Felis: last 10 min: felis-api calls=… (no answer=…, 4xx=…, 5xx=…, retried=…), avg=… ms, max=… ms, busy refusals=…, join-events failed=…, join-events dropped=…, transfers failed=…, server-list refreshes failed=…, waiting now=…
 ```
 
-— and **no** `FelisApiClient`, `LinkClient`, or token-config class. If a codec
-class ever grew a dependency on the API client, compilation would fail here
-rather than silently widen the lobby's reach.
+Running `/felis` from the proxy console also shows the felis-api call counts since start, the number of waiting players and the failure totals. A server-list refresh that keeps failing logs a warning when it starts, then every 5 minutes with the running count, and an info line when it recovers. The login space handles its link-status polls the same way.
 
-**Frames.** Upstream (lobby → velocity) carries `ListRequest`, `WakeRequest`,
-`ClaimRequest` and `StatusQuery`; downstream (velocity → lobby) carries `ListUpdate`,
-`StatusUpdate`, `TransferReady` and `Error`. `/menu` sends a `ListRequest`, and the
-proxy answers with a `ListUpdate` naming every user server it routes, built from the
-registry it routes by, so a server created in the panel appears without anyone editing
-the lobby. The list leads with the player's own servers and carries, per server,
-felis-api's verdict for this player (`GET /api/v1/internal/player/menu-access/{uuid}`,
-one call per menu open): `owner`, `wake`, `owner_only`, `allowlist`, `retiring` or
-`start_failed`. When felis-api cannot answer, the names go out alone and the tiles
-fall back to the wake's own judgement. The menu then paints a grey "loading" tile per server (45 per page, arrows
-in the bottom row) and fires a `StatusQuery` for each; the proxy answers with
-`StatusUpdate` frames that repaint each tile by phase + ownership.
+## Lobby menu {#lobby-menu}
 
-**Anti-spoof (§14).** The `player` field a lobby puts in a frame is **not**
-trusted. Velocity derives the acting player and UUID from the `ServerConnection`
-the plugin message arrived on, and the server-side autostartPolicy / ownership
-gates authorize against that verified identity. The frame's `server` field is the
-trusted payload — it only names *which* tile was clicked. A fully compromised
-lobby therefore cannot act as another player or reach the API directly.
+The `paper/` module provides the lobby's player interface. `/menu` (alias `/server`, which the proxy passes through to the lobby when routing is active) opens a chest interface with one tile per server the proxy routes; clicking a tile wakes, claims or joins that backend.
 
-**Button rules** (`MenuTiles`: the last `StatusUpdate` plus the player's verdict, first match wins):
+**The lobby is interface only.** It holds no felis-api token, opens no HTTP connection and keeps no waiting queue. Each action it takes is one frame on the `felis:control` plugin-message channel, and every piece of state it shows arrives on the same channel; only the game proxy talks to felis-api. The build enforces this: the module's source include rules compile only the paper package and four shared classes, `Control`, `ControlFrame`, `Json` and `ExperienceConfig`, so the lobby jar contains no API client or token configuration class. If a shared class ever gained a dependency on the API client, the lobby build would fail.
 
-| Tile state | Label | Frame sent |
-| ---------- | ----- | ---------- |
-| up (`ready`), any verdict         | **Join** (green)          | `WakeRequest{server}` |
-| ownerless (`claimable`)           | **Claim & Start** (gold)  | `ClaimRequest{server}` |
-| `retiring` / `start_failed` / `owner_only` / `allowlist` | **Can't start** (grey, reason in the lore) | nothing; the reason goes to chat and the menu stays open |
-| anything else (`owner`, `wake`, no verdict) | **Start** (red) | `WakeRequest{server}` |
+**Frames.** The lobby sends `ListRequest`, `WakeRequest`, `ClaimRequest` and `StatusQuery` to the proxy; the proxy sends `ListUpdate`, `StatusUpdate`, `TransferReady` and `Error` to the lobby. The login space asks for a player's release with a `LoginRelease` frame. The proxy accepts `felis:control` frames only from the lobby and the login space, and each only with its own frames.
 
-The player's own servers are marked ★ and "Your server". The status line shows the
-phase in the player's language (Running, Starting, Stopping,
-Stopped, Failed to start, Unknown). "Join" and "Start" are the
-**same** upstream frame (`WakeRequest`): the proxy joins a server that is already up,
-and every linked player may join one. A refusal comes back as an `Error` frame (`not_linked` / `quota_exceeded` /
-`already_claimed` → a friendly message), which is the only place a claim/quota/
-policy failure surfaces to the player; readiness arrives as `TransferReady` just
-before the proxy Connects them.
+`/menu` sends a `ListRequest`, and the proxy answers with a `ListUpdate` built from the registry it routes by, naming every user server, so a server created in the panel appears without editing the lobby. The list leads with the player's own servers and carries felis-api's decision for the player on each one: `owner`, `wake`, `owner_only`, `allowlist`, `retiring` or `start_failed`. The decision comes from `GET /api/v1/internal/player/menu-access/{uuid}`, called once per menu open; when felis-api cannot answer, only the server names are sent and the tiles leave the decision to the actual wake request. The menu first paints a grey "loading" tile per server (45 per page, with page arrows in the bottom row), then sends a `StatusQuery` for each server, and the proxy answers with `StatusUpdate` frames that repaint each tile by phase and ownership.
 
-> **Status.** This slice is **code-complete and compile-verified** (paper jar
-> builds green on a Java-25 toolchain; the velocity end compiles the full shared
-> tree; the wire codec round-trips; the fabric/forge/neoforge mods compile through
-> their vendored wrappers and boot real dedicated servers with `/link` registered —
-> all of it gated by CI). It is **not** client-verified:
-> no real game client has joined through the stack, so §27 scenario 10 stays
-> **FAIL (live-unverified)** until such a join is exercised. The client-independent
-> faces (proxy edge, subdomain MOTD, login boundary, backend registration) are
-> exercised on a live deployment.
+**Spoofing protection.** The `player` field in a lobby frame is not trusted. The proxy derives the acting player and UUID from the backend connection the plugin message arrived on, and the server-side autostart policy and ownership checks use that verified identity. The frame's `server` field only names the tile that was clicked. A fully compromised lobby therefore cannot act as another player or reach the API directly.
+
+**Button rules**: based on the latest `StatusUpdate` and the player's access decision; the first match wins.
+
+| Tile state | Button | Frame sent |
+| --- | --- | --- |
+| Ready (`ready`), any decision | **Join** (green) | `WakeRequest{server}` |
+| Ownerless (`claimable`) | **Claim & Start** (gold) | `ClaimRequest{server}` |
+| `retiring`, `start_failed`, `owner_only`, `allowlist` | **Can't start** (grey, with the reason in the description) | None; the reason goes to chat and the menu stays open |
+| Anything else (`owner`, `wake` or no decision) | **Start** (red) | `WakeRequest{server}` |
+
+The player's own servers are marked ★ and "Your server". The status line shows the phase in the player's language: Running, Starting, Stopping, Stopped, Failed to start or Unknown. "Join" and "Start" send the same `WakeRequest`: when the server is already running, the proxy joins the player directly, and any linked player may join. A refusal comes back as an `Error` frame (for example `not_linked`, `quota_exceeded` or `already_claimed`) and is shown as a readable message; this is where claim, quota and policy failures reach the player. When the server is ready, the proxy sends `TransferReady` and then transfers the player.
 
 ## Building {#building}
 
-Every module builds through its own vendored Gradle wrapper, and each wrapper pins its
-distribution's sha256 (`distributionSha256Sum`), so a tampered or swapped Gradle download
-fails before it runs. The platforms need different Gradle versions (a real, measured
-constraint):
+Each module builds through its own Gradle wrapper. Every wrapper pins the SHA-256 of its distribution (`distributionSha256Sum`), so a tampered or swapped Gradle download fails before it runs. The platforms need different Gradle versions:
 
-| Module      | Gradle | JDK | Why                                                          |
-| ----------- | ------ | --- | ------------------------------------------------------------ |
-| `velocity`  | 9.8.1  | ≥ 21 runs it, emits Java 21 | plain `java` plugin; velocity-api 3.5.1 declares `jvm.version = 21` |
-| `paper`     | 9.8.1  | **25 toolchain** | paper-api 26.3 is published as a Java-25 artifact, so the module declares a `JavaLanguageVersion.of(25)` toolchain |
-| `limbo`     | 9.8.1  | ≥ 21 runs it, emits Java 17 | current LOOHP/Limbo releases ship class-file major 65, so the compiler JDK must be ≥ 21 to read them; `release 17` bytecode loads on any Limbo running Java 17+ |
-| `fabric`    | 8.8    | 17 | loom 1.7.4 uses `Problems.forNamespace`, removed in Gradle 9 |
-| `forge`     | 8.8    | 17 | ForgeGradle 6 is Gradle-8-only                               |
-| `neoforge`  | 8.14   | 17 | NeoGradle 7.1.38 requires Gradle API ≥ 8.14                  |
+| Module | Gradle | JDK | Reason |
+| --- | --- | --- | --- |
+| `velocity` | 9.8.1 | 21 or newer runs it; emits Java 21 bytecode | velocity-api 3.5.1 declares `jvm.version = 21` |
+| `paper` | 9.8.1 | Java 25 toolchain | paper-api 26.3 is published as a Java 25 artifact, so the module declares a `JavaLanguageVersion.of(25)` toolchain |
+| `limbo` | 9.8.1 | 21 or newer runs it; emits Java 17 bytecode | Current LOOHP/Limbo releases ship class-file version 65, so the compiling JDK must be 21 or newer to read them; `release 17` bytecode loads on any Limbo running Java 17 or newer |
+| `fabric` | 8.8 | 17 | loom 1.7.4 uses a Gradle API that Gradle 9 removed |
+| `forge` | 8.8 | 17 | ForgeGradle 6 supports Gradle 8 only |
+| `neoforge` | 8.14 | 17 | NeoGradle 7.1.38 requires Gradle API 8.14 or newer |
 
-The three plugins the installer bakes in (`velocity`, `paper`, `limbo`) are built with
-Gradle 9.8.1 everywhere: through the wrapper locally and in CI, and inside the image
-`gradle:9.8.1-jdk25@sha256:…` in the lobby and limbo Dockerfiles and bootstrap's
-Velocity build. `bootstrap_asset_test.go` fails when the image, its digest or the
-wrapper version drift apart.
+The three plugins the installer uses are built with Gradle 9.8.1 on every path: through the wrapper locally and in CI, and in the digest-pinned `gradle:9.8.1-jdk25` image in the lobby and login space Dockerfiles and the installer's Velocity build.
+
+Run from the repository root:
 
 ```bash
 # Velocity and Paper
 plugins/velocity/gradlew -p plugins/velocity build
 plugins/paper/gradlew    -p plugins/paper    build
 
-# limbo compiles against the LOOHP/Limbo API release the login gate bundles, which has
-# to be named: pass deploy/game-stack.lock's LIMBO_VERSION, exactly as bootstrap does.
+# Limbo must name the Limbo API version the login space runs: deploy/game-stack.lock's LIMBO_VERSION
 plugins/limbo/gradlew -p plugins/limbo build -PlimboVersion="$(sed -n 's/^LIMBO_VERSION=//p' deploy/game-stack.lock)"
 
-# Fabric / Forge / NeoForge. Nothing installs these; the jar you want is the one this
-# produces.
+# Fabric, Forge, NeoForge (the installer does not deploy these; use the jars built here)
 plugins/fabric/gradlew   -p plugins/fabric   build
 plugins/forge/gradlew    -p plugins/forge    build
 plugins/neoforge/gradlew -p plugins/neoforge build
 ```
 
-The first build of each mod downloads and remaps/decompiles Minecraft, so it takes a few
-minutes; subsequent builds are fast. Jars land in each module's `build/libs`. CI runs
-both gates: `bash plugins/test.sh` (JDK 25 — the install-time plugins, the
-codec/invite/server-list tests, and the proxy routing tests that drive ServerRegistry,
-WaitingRouter and ControlChannel against the real velocity-api; run those alone with
-`plugins/velocity/gradlew -p plugins/velocity routingTest`. It also runs the lobby menu
-test that drives LobbyMenu against the real paper-api (`plugins/paper/gradlew -p
-plugins/paper lobbyTest`), the login gate test that drives LoginFlow against a stub
-felis-api on virtual ticks (`plugins/limbo/gradlew -p plugins/limbo
--PlimboVersion=<lock's LIMBO_VERSION> loginTest`), and ModLinkTest for the `/link` the
-loader mods share) and `bash plugins/test-mods.sh` (JDK 17 — the three loader mods,
-via the wrappers above).
+The jars are written to each module's `build/libs`. The first build of each mod downloads Minecraft and remaps or decompiles it, which can take a few minutes; later builds are faster. See [Building from source](/en/guide/building#tests) for running the plugin tests.
 
-### Dependency verification {#dependency-verification}
+## Dependency verification {#dependency-verification}
 
-Every dependency version is exact: paper-api is the API of the Paper build
-`deploy/game-stack.lock` installs (`paper-26.3-40.jar` → `26.3.build.40-alpha`), limbo
-compiles against the lock's `LIMBO_VERSION`, velocity-api is the lock's
-`VELOCITY_VERSION`, and ForgeGradle is `6.0.54`. The installer's three modules also
-carry `gradle/verification-metadata.xml`, the sha256 of every artifact their build
-resolves, and Gradle refuses any artifact whose bytes differ. The Limbo API entry is
-the very jar the login gate runs (its sha256 equals the lock's `LIMBO_JAR_SHA256`).
+Every dependency version is exact: paper-api is the API of the Paper build `deploy/game-stack.lock` installs (`paper-26.3-40.jar` corresponds to `26.3.build.40-alpha`), Limbo compiles against the lock's `LIMBO_VERSION`, velocity-api is the lock's `VELOCITY_VERSION`, and ForgeGradle is pinned to `6.0.54`. The installer's three modules also carry `gradle/verification-metadata.xml`, the SHA-256 of every artifact their build resolves, and Gradle refuses any artifact whose bytes differ. The Limbo API entry is the jar the login space actually runs; its SHA-256 equals the lock's `LIMBO_JAR_SHA256`.
 
-After `deploy/update-game-stack-lock.sh` moves Paper, Limbo or Velocity, bring the pins
-along and regenerate the checksums, then review the diff:
+After `deploy/update-game-stack-lock.sh` moves Paper, Limbo or Velocity, update the pins, regenerate the verification files and review the diff:
 
-```bash
-# 1. set paper-api in plugins/paper/build.gradle to the new build (paper-<mc>-<n>.jar → <mc>.build.<n>-<channel>)
-# 2. regenerate the three verification files (JDK 25) from an EMPTY Gradle home: with a
-#    warm cache Gradle skips the BOMs and parent POMs it already holds, and the image
-#    builds, which start empty, then refuse them
-rm -f plugins/{velocity,paper,limbo}/gradle/verification-metadata.xml
-export GRADLE_USER_HOME="$(mktemp -d)"
-plugins/velocity/gradlew -p plugins/velocity --write-verification-metadata sha256 build
-plugins/paper/gradlew    -p plugins/paper    --write-verification-metadata sha256 build
-plugins/limbo/gradlew    -p plugins/limbo    --write-verification-metadata sha256 build \
-  -PlimboVersion="$(sed -n 's/^LIMBO_VERSION=//p' deploy/game-stack.lock)"
-unset GRADLE_USER_HOME
-# 3. go test . fails until the pins, the checksums and the lock agree
-```
+1. Set paper-api in `plugins/paper/build.gradle` to the new build (`paper-<mc>-<n>.jar` corresponds to `<mc>.build.<n>-<channel>`).
+2. With JDK 25, regenerate the three verification files from an empty Gradle home. With a warm cache, Gradle skips the BOMs and parent POMs it already holds, and the image builds, which start empty, then refuse those unrecorded artifacts.
 
-The loader mods pin exact plugin and dependency versions and their wrappers' sha256,
-but carry no verification file: loom, ForgeGradle and NeoGradle fetch and remap
-Minecraft through their own downloaders (checked against Mojang's manifest hashes), and
-nothing installs these jars.
+   ```bash
+   rm -f plugins/{velocity,paper,limbo}/gradle/verification-metadata.xml
+   export GRADLE_USER_HOME="$(mktemp -d)"
+   plugins/velocity/gradlew -p plugins/velocity --write-verification-metadata sha256 build
+   plugins/paper/gradlew    -p plugins/paper    --write-verification-metadata sha256 build
+   plugins/limbo/gradlew    -p plugins/limbo    --write-verification-metadata sha256 build \
+     -PlimboVersion="$(sed -n 's/^LIMBO_VERSION=//p' deploy/game-stack.lock)"
+   unset GRADLE_USER_HOME
+   ```
+
+3. Run `go test .` in the repository root. It fails until the pins, the verification files and the lock agree.
+
+The loader mods also pin exact plugin and dependency versions and their wrappers' SHA-256, but carry no verification file: loom, ForgeGradle and NeoGradle fetch and remap Minecraft through their own downloaders, checked against the hashes in Mojang's manifest.
 
 ## Deploying {#deploying}
 
-Drop the matching jar into the server/proxy mods or plugins directory, start
-once to generate `config/felis-link.properties` (or `plugins/felis-link/…` on
-Velocity), then set `api-base-url` and `service-token` — or provide
-`FELIS_API_BASE_URL` and `FELIS_SERVICE_TOKEN` in the environment, which take
-precedence. The token is one of felis-api's per-caller internal tokens: the
-Velocity proxy uses the `velocity` token (Secret `felis/felis-service-token`), the
-login gate the `limbo` token (`felis-limbo-token`), and each serves only its own
-routes (a token on another caller's route gets `403 wrong_caller`). A loader mod
-takes the `limbo` token, on a standalone online-mode server only (see the warning
-under the module table). Treat it as a secret; `sudo felis rotate-token <caller>`
-replaces it. A token read from this file follows the file: the proxy or mod
-presents a new `service-token` from its next call to felis-api (it re-reads the
-file at most once a second), logs `service-token reloaded from … (fingerprint …)`, and keeps its
-players. A token from `FELIS_SERVICE_TOKEN` is fixed until the process restarts.
+The installer deploys the Velocity, Limbo and Paper plugins automatically. The following steps apply to manual deployment, such as installing a loader mod on a standalone server or running a lobby yourself:
 
-On **Velocity**, also set `root-domain` (and optionally `lobby-server`) in the
-same file to turn on §11 routing, and make sure `online-mode=true` in
-`velocity.toml` — without either, the proxy still serves `/link` but routing
-stays off (see **[Velocity routing](#velocity-routing-§11)**). The config dir is
-`plugins/felis-link/` because the plugin id is `felis-link` (kept stable across
-the 0.1 → 0.2 jar so existing config carries over).
+1. Put the matching jar into the server's or proxy's `mods` or `plugins` directory.
+2. Start it once to generate `config/felis-link.properties` (`plugins/felis-link/felis-link.properties` on Velocity).
+3. Set `api-base-url` and `service-token`, or provide the environment variables `FELIS_API_BASE_URL` and `FELIS_SERVICE_TOKEN`, which take precedence.
 
-On the **Paper lobby** there is no token to set, because the lobby never talks to
-felis-api, and no server list to keep: the menu shows the servers the proxy routes,
-which the proxy sends over `felis:control` (a `servers:` list left in
-`plugins/FelisPaper/config.yml` by an older version is ignored, and the plugin says so
-at startup). The lobby must sit behind the same Velocity proxy as the backends — it
-reaches the control plane only through the proxy's `felis:control` terminus — so it
-needs no `api-base-url` and no `service-token` of its own. The installer builds and
-bakes this jar into the lobby image; installing it by hand is for a lobby you run
-yourself.
+The token is one of felis-api's per-caller internal tokens: the game proxy uses the `velocity` token (Secret `felis/felis-service-token`), the login space the `limbo` token (`felis-limbo-token`), and each token reaches only its own endpoints; on another caller's endpoint it gets `403 wrong_caller`. A loader mod uses the `limbo` token, on a standalone online-mode server only. Treat the token as a secret; `sudo felis rotate-token -yes <caller>` replaces it (see the [Command-line reference](/en/reference/cli#rotate-token)).
+
+A token read from the file follows the file: the proxy or mod re-reads the file at most once a second, presents the new `service-token` from its next call to felis-api, logs `service-token reloaded from … (fingerprint …)`, and keeps its connected players. A token from the environment variable `FELIS_SERVICE_TOKEN` stays fixed until the process restarts.
+
+**Velocity**: also set `root-domain` (and optionally `lobby-server`) in the same file, and make sure `velocity.toml` has `online-mode=true`, to turn routing on. Without either, the proxy still serves `/link` but routing stays off; see [Velocity routing](#velocity-routing). The plugin ID is `felis-link`, so the configuration directory is `plugins/felis-link/`. On an installed host, the proxy configuration is `/opt/felis/velocity/plugins/felis-link/felis-link.properties`.
+
+**Paper lobby**: there is no token to set and no server list to maintain. The menu shows the servers the proxy routes, which the proxy sends over `felis:control`; a `servers:` list in `plugins/FelisPaper/config.yml` is ignored, and the plugin says so at startup. The lobby must sit behind the same Velocity proxy as the backends and reaches the control plane only through the proxy, so it needs no `api-base-url` or `service-token` of its own. The installer packages the plugin into the lobby image; see [Lobby image](/en/reference/lobby).

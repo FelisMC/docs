@@ -1,131 +1,58 @@
 ---
 title: Contributing
+description: The Felis repository layout, local development workflow, tests and checks, code and interface standards, commit conventions and brand icons.
 ---
 
-# Felis Contributor Guide {#felis-contributor-guide}
+# Contributing {#contributing}
 
-This document is the practical entry point for contributors. It focuses on how to
-run, test, and reason about the project while keeping changes small and aligned
-with the current codebase.
+This page explains how to take part in Felis development: the repository layout, the local development workflow, the tests and checks a change must pass, the code and interface copy standards, the panel visual style, commit conventions, and how the brand icons are maintained. Toolchain versions and build commands are covered in [Building from source](/en/guide/building).
 
-## Project Shape {#project-shape}
+## Repository layout {#layout}
 
-Felis is a Kubernetes-native Minecraft server control plane. The repository has
-four main areas:
+| Path | Contents |
+| --- | --- |
+| `cmd/felis/` | The entry point of the `felis` binary: every subcommand (such as `api`, `operator`, `migrate`, `reaper`, `setup`, `manifests`, `backup-now`, `db`, `update`) and the setup wizard |
+| `internal/` | The backend packages; see the table below |
+| `api/openapi.yaml` | The OpenAPI definition of the HTTP API, published at [/openapi.yaml](/openapi.yaml) |
+| `panel/` | The React and Vite web panel; `panel/dev/` is the local mock API, `panel/e2e/` holds the browser tests |
+| `plugins/` | The Velocity, Limbo and Paper plugins and the loader mods; see [Server plugins](/en/reference/plugins) |
+| `deploy/` | The installer `bootstrap.sh`, the uninstall script `uninstall.sh`, the system server image Dockerfiles (`limbo/`, `lobby/`, `paper/`), the game component lock `game-stack.lock`, the alert rules `alerts/`, the CRD definitions `crd/`, the release asset script and the end-to-end test scripts |
+| `assets/` | Brand icons; see [Brand icons](#brand-icons) |
+| `scripts/` | Development helper scripts, such as the icon export script `generate-icons.cjs` |
+| `Dockerfile` | The control-plane image |
+| `bootstrap_asset.go` | Embeds the installer, the CRD and the sources the game images need into the `felis` binary, for installation paths without a source checkout |
+| `.github/workflows/` | `ci.yml` (checks on pull requests and `main`), `e2e.yml` (end-to-end installation on a fresh host), `release.yml` (releases) |
 
-- `cmd/felis/`: the single Go CLI binary. It dispatches subcommands such as
-  `api`, `operator`, `migrate`, `reaper`, `restore`, `manifests`, and
-  `breakGlass`.
-- `internal/`: backend packages for API handlers, store migrations, Kubernetes
-  rendering, operator reconciliation, build, backup, restore, and related domain
-  logic.
-- `panel/`: the React/Vite web control panel.
-- `plugins/`: Minecraft-side plugins and mods for Velocity, Paper, Fabric,
-  Forge, and NeoForge.
+The main packages in `internal/`:
 
-The codebase is intentionally split by responsibility. Prefer changing the
-smallest owning module instead of adding broad abstractions or rebuilding nearby
-code.
+| Package | Responsibility |
+| --- | --- |
+| `internal/api` | HTTP handlers, the route tables of both faces, authentication and access tiers |
+| `internal/operator` | Reconciles `MinecraftServer` resources and creates the servers' workloads |
+| `internal/apis/felis` | The type definitions of the `MinecraftServer` custom resource |
+| `internal/platform` | Control-plane cluster objects: workloads, RBAC, network policies, the high-availability layout |
+| `internal/store` | The business database and its embedded migrations |
+| `internal/nodecontrol` | Host tasks and node operations requested from the panel |
+| `internal/build`, `internal/submit` | Image builds and submissions |
+| `internal/backup`, `internal/backupjob`, `internal/restore`, `internal/dbbackup`, `internal/offsite` | World backup and restore, database bundles, the off-site copy |
+| `internal/panel` | The embedded web panel |
 
-## Interface Copy {#interface-copy}
+The code is split by responsibility. Change the smallest module that owns the behaviour, and avoid adding broad abstractions or rewriting nearby code.
 
-Interface copy must use a formal documentation style: objective, concise, and
-precise. State the current condition, its cause or impact, and the available
-action. Describe confirmed facts only; avoid conversational phrasing,
-personification, and unsupported duration estimates. Chinese instructions should
-use explicit verbs such as “执行”, “选择”, “查看”, and “配置”, with operation names
-matching the actual UI labels. English and Chinese copy must retain the same
-meaning and degree of formality. Update existing translation entries rather than
-adding duplicate messages or components.
+## Local development {#development}
 
-## Panel Visual Style {#panel-visual-style}
+Most day-to-day development works on macOS or Linux without a full cluster. The complete product needs PostgreSQL and Kubernetes, but unit tests and frontend work run locally. See [Toolchain requirements](/en/guide/building#requirements) for the tools.
 
-Reuse `PageHeader`, the `Card` family, and the shared form and button components.
-Card titles, borders, corner radii, spacing, and save footers follow their shared
-definitions; avoid redefining these styles in individual pages. Use white card
-backgrounds in the light theme, restrained semantic colors, and 16px functional
-icons. Use `CardFooter` for save actions and `Button` for interactive controls.
-Form labels use the shared `Label` style and 8px field spacing; single-line
-controls use the shared 36px height. Reuse `Textarea` and `Checkbox` for multiline
-fields and confirmations. Page-specific control classes should only adjust layout,
-code fonts, or semantic validation states.
-Tables, consoles, compact statistics, and status messages may retain spacing and
-colors suited to their content. Preserve the shared page margins and bottom
-spacing.
+### Backend {#backend-development}
 
-## Local Development {#local-development}
-
-You can do most day-to-day development on macOS or Linux without a full cluster.
-The full product needs Postgres and Kubernetes, but unit tests and frontend work
-run locally.
-
-Recommended local tools:
-
-- Go matching `go.mod`
-- Node.js and npm for `panel/`
-- Optional: JDK/Gradle for plugin work
-- Optional integration environment: a clean Linux VM or server with Docker,
-  k3s, and Postgres
-
-Check tool versions:
-
-```bash
-go version
-node --version
-npm --version
-java -version
-```
-
-## Backend Commands {#backend-commands}
-
-Run these from the repository root:
-
-```bash
-cd /path/to/Felis
-```
-
-Run all Go tests:
-
-```bash
-go test ./...
-```
-
-Run a focused package:
-
-```bash
-go test ./internal/api
-go test ./cmd/felis
-```
-
-The hermetic suites run against in-memory fakes; the business stores' SQL is
-verified separately against a real Postgres, on a throwaway database whose name
-must contain `pgint` (the harness drops and recreates its schema and replays the
-embedded migrations):
-
-```bash
-FELIS_TEST_PG_URL='postgres://felis:***@127.0.0.1:5432/felis_pgint?sslmode=disable' \
-  go test -tags pgint ./internal/pgint/ -v
-```
-
-Run it after touching anything under `internal/api/pgrepo.go`, `internal/submit`,
-`internal/build` or `internal/dbbackup` that speaks SQL: the fakes encode the
-contract, and this suite exists to catch the drift between the fakes and the real
-queries. The `felis db backup` and `restore` tests also run `pg_dump`, `pg_restore`
-and `psql`, which must be the server's major version. For a server in a container,
-run them in it, as production does in felis-postgres:
-
-```bash
-FELIS_TEST_PG_EXEC='docker exec -i <container>' FELIS_TEST_PG_URL=... go test -tags pgint ./internal/pgint/
-```
-
-Build the CLI:
+Build the command-line tool from the repository root:
 
 ```bash
 go build -o /tmp/felis-dev ./cmd/felis
 /tmp/felis-dev help
 ```
 
-Render Kubernetes manifests without contacting a cluster:
+Render the Kubernetes manifests without contacting a cluster:
 
 ```bash
 /tmp/felis-dev manifests \
@@ -133,21 +60,14 @@ Render Kubernetes manifests without contacting a cluster:
   --velocity-cidr 10.0.0.5/32
 ```
 
-`felis api`, `felis operator`, `felis migrate up`, and `felis reaper` are real
-runtime commands. They need external services such as Postgres and/or a
-Kubernetes config, so they are not the first choice for quick local iteration.
+`felis api`, `felis operator`, `felis migrate up` and `felis reaper` are the real service commands. They need PostgreSQL or a Kubernetes configuration and are not suited to quick local iteration.
 
-## Frontend Commands {#frontend-commands}
+### Panel {#panel-development}
 
-Run these from the frontend workspace:
+Install the dependencies in `panel/`:
 
 ```bash
-cd /path/to/Felis/panel
-```
-
-Install dependencies:
-
-```bash
+cd panel
 npm ci
 ```
 
@@ -163,232 +83,122 @@ Run with the local mock API:
 npm run dev:mock
 ```
 
-The mock dev server prints its accounts, link code, and reset command when it
-starts. Use it for frontend work when you do not have the Go API and cluster
-running.
+The mock server prints its sign-in methods and the reset command when it starts. Use it for frontend work when the Go API and a cluster are not running.
 
-Common frontend checks:
+### Mock API {#mock-api}
 
-```bash
-npm run typecheck
-npm test
-npm run build
-```
+The mock API lives in `panel/dev/` and is loaded only by `npm run dev:mock`. Its data has three accounts: `owner` (the Owner, with a linked game profile), `user` (a User, not linked) and `linked` (a User, linked). Every sign-in method is passwordless:
 
-## Mock API {#mock-api}
-
-The frontend mock API lives under `panel/dev/` and is loaded only by
-`npm run dev:mock`. It must not leak into production code or business
-components.
-
-Run mock commands from the frontend workspace:
-
-```bash
-cd /path/to/Felis/panel
-npm run dev:mock
-```
-
-Current mock accounts:
-
-| Username | Password | Scenario |
+| Sign-in method | Input | Signs in as |
 | --- | --- | --- |
-| `owner` | `devpassword` | admin, linked |
-| `user` | `devpassword` | normal user, not linked |
-| `linked` | `devpassword` | normal user, linked |
-| `setup` | `devpassword` | admin, first-login password change |
+| Email code | Any email address, code `123456` | `owner` |
+| Bind code | `LINK1234` | `linked` |
+| Passkey | Any assertion | `owner` |
+| Staff login | Any email address, code `123456`; approved automatically after about 9 seconds; an address starting with `expire` lapses after 20 seconds | `owner` |
 
-Mock Minecraft link code:
-
-```text
-LINK1234
-```
-
-Reset mock state:
+Reset the mock state:
 
 ```bash
 curl -X POST http://127.0.0.1:5173/api/v1/__mock/reset
 ```
 
-Mock rules:
+Mock code follows these rules:
 
-- Keep mock-only logic in `panel/dev/`.
-- Do not import mock code from `panel/src/`.
-- Keep response shapes aligned with `panel/src/lib/types.ts` and the Go API
-  handlers.
-- Prefer realistic error codes over happy-path-only mocks.
-- Do not present mock data as live production data.
+- Mock-only logic stays in `panel/dev/`; `panel/src/` never imports mock code.
+- Response shapes match `panel/src/lib/types.ts` and the Go API handlers.
+- Cover realistic error codes, not only the success path.
+- Never present mock data as live production data. When a new feature has no backend endpoint yet, show an explicit placeholder.
 
-## Full Integration Environment {#full-integration-environment}
+### Integration environment {#integration-environment}
 
-Run integration/deploy commands from the repository root on the Linux host:
+For a complete integration and acceptance environment, use a clean Linux virtual machine or a disposable server, and keep normal coding and quick tests local. On that host, run the installer on the `dev` channel to build from the `main` branch:
 
 ```bash
-cd /path/to/Felis
+curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh | sudo FELIS_VERSION_BOOTSTRAP=dev bash
 ```
 
-The setup TUI is intended for a clean Linux host, not a typical macOS
-development machine:
+Common development variables:
 
-```bash
-sudo felis setup
-```
+| Variable | Effect |
+| --- | --- |
+| `FELIS_VERSION_BOOTSTRAP=dev` | Builds the `main` branch; the default is the newest release |
+| `FELIS_REPO_URL` | Builds from the given git URL (such as your fork); effective only when the installer script runs directly through `curl` |
+| `FELIS_REF` | Pins the branch, tag or commit to build, overrides the channel and forces a source build |
+| `FELIS_GITHUB_TOKEN` | For private forks only: a GitHub token with read access to the fork |
 
-Useful overrides:
+`sudo` resets the environment, so variables exported before `sudo` do not reach the installer. Put the variables on the `sudo` line, or use `sudo -E`. See [Installation](/en/guide/deployment#channels) for the channels and installer behaviour, and the [Configuration reference](/en/reference/configuration#installer-variables) for every installer variable.
 
-```bash
-export FELIS_REPO_URL=<your fork url>
-export FELIS_REF=<your branch>          # pins the build; overrides the channel below
-export FELIS_IMAGE=felis:dev
-export FELIS_ROOT_DOMAIN=<node-ip>.nip.io
-```
+`sudo felis setup` reconfigures the host only with the binary already installed on it and cannot switch channels; to use another channel, run the installer again with `FELIS_VERSION_BOOTSTRAP`.
 
-By default the installer builds the newest **published GitHub release**. Building the
-development tip needs an opt-in, and installing from a private fork additionally needs a
-token for the release lookup and the clone:
+The channel determines the version stamped into the binary, which `felis update` compares with upstream. When testing update features, build through the installer or with the Dockerfile's `FELIS_VERSION` build argument; an unstamped `go build` reports `dev` and has update reporting disabled. See [Backend](/en/guide/building#backend).
 
-```bash
-export FELIS_VERSION_BOOTSTRAP=dev      # build main instead of the newest release
-export FELIS_GITHUB_TOKEN=<token>       # private forks only: read access to the fork
-```
+## Tests and checks {#testing}
 
-`dev` is also the escape hatch before the first `vX.Y.Z` tag exists: with no published
-release the default channel has nothing to resolve and stops with that instruction.
+Continuous integration (`.github/workflows/ci.yml`) runs these checks on pull requests and on the `main` branch, and the release workflow runs the same checks first. Before opening a pull request, run the checks related to your change locally:
 
-A release install downloads that tag's CI-built binary, images and Velocity plugin, verifies
-`SHA256SUMS`, and imports them; the panel is embedded in the same binary (`internal/panel`).
-`dev` clones and compiles from source. Missing or unusable release assets fall back to a
-host build of **the same tag**, with a warning for the affected component. The installer
-never silently changes commits. `FELIS_REF` forces the source path. See
-[Installation and deployment](/en/guide/deployment) and
-[Where the binary and images come from](/en/operations/#where-the-binary-and-the-images-come-from)
-for the current installation behavior.
+| Check | Command |
+| --- | --- |
+| Go formatting | `gofmt -l .` must list no files |
+| Go static analysis | `go vet ./...`; staticcheck (version pinned in `ci.yml`) |
+| Go tests | `go test -race ./...` |
+| Go vulnerability check | `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
+| PostgreSQL integration tests | `go test -race -tags pgint -count=1 ./internal/pgint/`, against PostgreSQL 13 and 18 |
+| Shell scripts | Syntax check with the interpreter each script's shebang names; shellcheck 0.11.0 (`-S warning`); the shell tests in `deploy/` |
+| Alert rules | `promtool check rules` and `promtool test rules` |
+| Panel | `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:e2e` |
+| API types | After `npm run gen:api`, `panel/src/lib/openapi.gen.ts` must show no difference |
+| Plugins | `bash plugins/test.sh` (JDK 25) |
+| Loader mods | `bash plugins/test-mods.sh` (JDK 17) |
 
-The channel decides the version stamp linked into the binary (`felis version`), which is
-what `felis update` compares against upstream — release builds stamp the tag, dev builds
-stamp `<latest-tag>+g<short-sha>`, and a pinned `FELIS_REF` stamps `v0.0.0+g<short-sha>`
-because skipping channel resolution also skips the tag lookup. An unstamped build reports
-`dev` and update reporting
-is disabled for it, so build through `bootstrap.sh` (or the Dockerfile's `FELIS_VERSION`
-build arg) rather than a bare `go build` when testing that path.
+See [Running the tests](/en/guide/building#tests) for how to run each suite. Also note:
 
-The setup flow wraps the host bootstrap, then continues to Owner account setup
-and optional Cloudflare edge setup in the same command. The raw
-`deploy/bootstrap.sh` script remains available for low-level host provisioning
-when debugging the installer itself.
+- After changing `api/openapi.yaml`, run `npm run gen:api` and commit the regenerated `panel/src/lib/openapi.gen.ts`. The paths, methods, faces and access tiers in the OpenAPI definition must match the server's route tables, or the Go tests fail.
+- After changing code that speaks SQL (such as `internal/api/pgrepo.go`, `internal/submit`, `internal/build` or `internal/dbbackup`), run the PostgreSQL integration tests. The unit tests use in-memory fakes; the integration tests catch drift between the fakes and the real queries.
+- Before handing off a change, run at least the smallest set of checks directly related to it. If you cannot run a relevant check, say so explicitly in the pull request.
 
-Use a VM or disposable Linux server for this. Treat it as an integration and
-acceptance environment, while keeping normal coding and quick tests local.
+## Code standards {#code-standards}
 
-## Plugin Development {#plugin-development}
-
-Plugin docs live on the [Server-side plugins](/en/reference/plugins) page.
-
-The plugin modules intentionally use separate Gradle builds:
-
-```bash
-# cwd: repository root
-cd /path/to/Felis
-
-bash plugins/velocity/gradlew -p plugins/velocity build
-bash plugins/paper/gradlew -p plugins/paper build
-bash plugins/fabric/gradlew -p plugins/fabric build
-bash plugins/forge/gradlew -p plugins/forge build
-bash plugins/neoforge/gradlew -p plugins/neoforge build
-```
-
-Notes:
-
-- Fabric/Forge/NeoForge use module wrappers.
-- Velocity, Paper and Limbo also use their module wrappers.
-- Java and Minecraft version requirements are listed in the [plugin version table](/en/reference/plugins#minecraft-versions).
-- Paper currently needs a Java 25 toolchain; use the requirements of each module.
-- First builds may be slow because Minecraft dependencies are downloaded and
-  remapped.
-
-## Frontend Status {#frontend-status}
-
-The panel is still in early development. It currently offers server lists and status,
-wake/stop/claim, console and RCON, file management, account linking,
-whitelist/ban/OP/LuckPerms management, scheduled tasks, and backup and restore.
-The current feature scope follows the [Project README](/en/reference/readme-en#features)
-and the relevant backend endpoints. The mock API is for local frontend development.
-
-Keep UI state accurate when adding features. An endpoint that does not exist should have
-an explicit placeholder, never fake live data. Interaction depth and component/browser
-test coverage still need work.
-
-## i18n Notes {#i18n-notes}
-
-This section concerns the **Felis control panel**; the documentation site has its own language switch.
-Panel i18n is not yet established as a full system. User-facing strings are currently
-mostly inline in TSX and helper functions.
-
-Good first targets:
-
-- Error messages mapped from stable API error codes
-- Navigation labels
-- Page titles and primary actions
-- Phase/status labels
-- Empty/loading/error states
-
-Recommended initial approach:
-
-```text
-panel/src/i18n/
-  index.ts
-  en.ts
-  zh-CN.ts
-```
-
-Use a small typed dictionary first. Add a larger library such as
-`i18next/react-i18next` only when the project needs runtime language switching,
-pluralization rules, external translation workflows, or more complex
-localization behavior.
-
-Do not translate code comments, internal logs, or mock-only terminal messages
-unless there is a clear contributor need.
-
-## Contribution Style {#contribution-style}
-
-Follow the existing code. Keep changes narrow and easy to review.
-
-Guidelines:
+Follow the existing code, and keep changes narrow and easy to review:
 
 - Prefer minimal changes over rewrites.
-- Do not add a new abstraction unless it removes real duplication or names a
-  strong local concept.
-- Keep frontend mock code out of business components.
-- Keep backend tests close to the package that owns the behavior.
-- Preserve public API and persistence shapes unless the change explicitly needs a
-  contract update.
-- Do not commit generated build output such as `panel/dist/`, `node_modules/`,
-  Gradle build directories, or local binaries.
+- Introduce a new abstraction only when it removes real duplication or names a clear local concept.
+- Keep mock code out of business components.
+- Keep backend tests in the package that owns the behaviour.
+- Preserve public API and persistence shapes unless the change explicitly needs a contract update.
+- Do not commit build output, such as `panel/dist/`, `node_modules/`, Gradle build directories or local binaries.
 
-AI-assisted work is welcome, but the contributor is responsible for the result.
-Do not submit a PR that is entirely AI-generated and not personally reviewed.
-Low-quality AI dumps, broad rewrites that ignore the current design, unverified
-changes, or code the author cannot explain will not be accepted.
+AI-assisted work is welcome, but the contributor is responsible for the result. A pull request generated entirely by AI and not reviewed by its author is not accepted; neither are low-quality AI output, broad rewrites that ignore the current design, unverified changes, or code the author cannot explain.
 
-Before handing off a change, run the smallest meaningful checks:
+## Interface copy {#interface-copy}
 
-```bash
-go test ./...
-cd panel && npm run typecheck && npm test && npm run build
-```
+Interface copy uses a formal documentation style: objective, concise and precise. State the current condition, its cause or impact, and the available action. Describe confirmed facts only; avoid conversational phrasing, personification and unsupported duration estimates. Chinese instructions use explicit verbs such as “执行”, “选择”, “查看” and “配置”, and operation names match the actual interface labels. English and Chinese copy keep the same meaning and degree of formality.
 
-If you cannot run a relevant check, say so explicitly in the handoff.
+The panel's interface copy lives in JSON files grouped by feature under `panel/src/i18n/resources/zh-CN/` and `panel/src/i18n/resources/en-US/`. Update both languages together; change existing entries and avoid duplicate messages or components.
+
+## Panel visual style {#panel-visual-style}
+
+- Reuse `PageHeader`, the `Card` family, and the shared form and button components. Card titles, borders, corner radii, spacing and save footers follow their shared definitions; do not redefine these styles in individual pages.
+- The light theme uses white card backgrounds, restrained semantic colors and 16px functional icons.
+- Use `CardFooter` for save actions and `Button` for interactive controls.
+- Form labels use the shared `Label` style and 8px field spacing; single-line controls use the shared 36px height. Reuse `Textarea` and `Checkbox` for multiline fields and confirmations.
+- Page-specific control styles only adjust layout, code fonts or semantic validation states.
+- Tables, consoles, compact statistics and status messages may keep the spacing and colors their content needs.
+- Keep the shared page margins and bottom spacing.
+
+## Commits {#commits}
+
+- Commit titles use the one-line form `type(scope): summary`, as in the repository history. Common types are `feat`, `fix`, `docs`, `refactor`, `test`, `build` and `style`; `scope` names the affected module, such as `api`, `panel` or `deploy`, and may be omitted.
+- Each commit contains one related change.
+- A pull request describes the change and the checks that were run.
 
 ## Brand icons {#brand-icons}
 
-The brand icons live in `assets/icons/` in the repository and were traced by hand
-from a reference image. The vector files use only paths, shapes, gradients and
-masks, with no embedded bitmaps. Every color export derives from
-`assets/felis-logo.svg`.
+The brand icons live in the repository's `assets/icons/` and were traced by hand from a reference image. The vector files use only paths, shapes, gradients and masks, with no embedded bitmaps. Every color export derives from `assets/felis-logo.svg`.
 
 | File | Purpose |
 | --- | --- |
 | `assets/felis-logo.svg` | Tightly cropped transparent vector master, 1040 × 640 |
-| `assets/felis-logo.png` | README image, kept at its existing 540 × 341 size |
+| `assets/felis-logo.png` | The image on the repository's front page, kept at 540 × 341 |
 | `assets/icons/felis-reference.svg` / `.png` | The reference image's 1254 × 1254 composition on a white background |
 | `assets/icons/felis-icon.svg` | Centered square transparent icon |
 | `assets/icons/felis-app.svg` / `.png` | Light-green rounded app icon, 1024 × 1024 |
@@ -401,30 +211,16 @@ masks, with no embedded bitmaps. Every color export derives from
 | `assets/icons/felis.icns` / `assets/icons/felis.iconset/` | macOS icon, plus 1× / 2× PNGs at 16, 32, 128, 256, 512 pt |
 | `assets/icons/preview.png` | Preview of the icon set |
 
-The web assets are in `panel/public/` and are referenced from `panel/index.html`:
-the SVG / ICO / PNG favicons, a 180 px Apple Touch Icon, the Safari pinned-tab
-icon, and regular and maskable icons at 192 / 512 px. `site.webmanifest` provides
-the app name and icon metadata; it does not provide offline caching.
+The web assets are in `panel/public/` and are referenced from `panel/index.html`: the SVG, ICO and PNG favicons, a 180 px Apple Touch Icon, the Safari pinned-tab icon, and regular and maskable icons at 192 / 512 px. `site.webmanifest` provides the app name and icon metadata; it does not provide offline caching.
 
-The panel references the white rounded-square icon through
-`panel/src/assets/felis-logo.svg`: 28 px in the desktop sidebar and mobile
-navigation, 44 px in the login and setup page headers. It keeps the composition of
-`felis-app.svg` from the set, with a white icon background. The build emits it under
-a content-hashed file name, and re-exporting updates this file as well.
+The panel references the white rounded-square icon through `panel/src/assets/felis-logo.svg`: 28 px in the desktop sidebar and mobile navigation, 44 px in the sign-in and setup page headers. It keeps the composition of `felis-app.svg` from the set, with a white background. The build emits it under a content-hashed file name, and re-exporting updates this file as well.
 
-The favicons are shifted down separately to align their visual center, with the
-same position across SVG, PNG, ICO and the Safari pinned tab; the app icons keep
-their original composition. To re-export only the favicon assets, add
-`--favicons-only` to the command below.
+The favicons are shifted down separately to align their visual center, with the same position across SVG, PNG, ICO and the Safari pinned tab; the app icons keep their original composition.
 
-Re-export the icons after changing the vector master. This needs Node.js and
-`sharp`; the macOS ICNS export also uses the system `iconutil`. Run from the
-repository root:
+Re-export the icons after changing the vector master. This needs Node.js and `sharp`; the macOS ICNS export also uses the system's `iconutil`. Run from the repository root:
 
 ```sh
 NODE_PATH=/path/to/node_modules node scripts/generate-icons.cjs
 ```
 
-`NODE_PATH` points to a `node_modules` directory that has `sharp` installed. The
-export tool adds no runtime dependency to the panel; on platforms other than macOS
-it still generates the remaining formats and the `iconset`.
+`NODE_PATH` points to a `node_modules` directory that has `sharp` installed. To re-export only the favicons, add `--favicons-only` to the command. The export tool adds no runtime dependency to the panel; on platforms other than macOS it still generates every format except ICNS, and the `iconset`.

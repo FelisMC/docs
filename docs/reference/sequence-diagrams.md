@@ -1,12 +1,17 @@
 ---
 title: 时序图
+description: Felis 进服唤醒、服务器认领和账号绑定三个流程的时序图。
 ---
 
-# 时序图 {#felis-sequence-diagrams}
+# 时序图 {#sequence-diagrams}
 
-本文收录规范第 28 节要求、且不由 OpenAPI 定义覆盖的时序图。
+本页以时序图展示 Felis 中跨越多个组件的三个流程：玩家进服时唤醒休眠服务器、在面板中认领无主服务器，以及游戏账号与面板账户的绑定。各接口的请求与响应结构见 [API 参考](/reference/api)。面向需要了解组件之间消息顺序的开发者。
 
-## 第 28 节 #9：查询 → 进服 → 唤醒 → 就绪 → 传送 {#section-28-9-ping-to-join-to-wake-to-ready-to-teleport}
+## 进服与唤醒 {#join-and-wake}
+
+玩家查询服务器列表时，游戏代理只读取缓存，不会唤醒服务器。玩家加入时，游戏代理按主机名找到目标服务器：服务器已就绪时直接连接；未就绪时，游戏代理请求唤醒，让玩家在大厅等待，并轮询服务器状态，就绪后把玩家传送过去并上报进服事件。未配置大厅时，玩家会被断开并提示稍后重连，唤醒请求仍会发出。
+
+下图从玩家已通过认证之后开始；尚未绑定账户的玩家先经过登录空间，见[登录空间镜像](/reference/limbo#login-flow)。
 
 ```mermaid
 sequenceDiagram
@@ -63,7 +68,9 @@ sequenceDiagram
     end
 ```
 
-## 第 28 节 #11：认领事务 {#section-28-11-claim-transaction}
+## 认领服务器 {#claim}
+
+玩家在面板中认领无主服务器时，felis-api 先确认该账户已绑定游戏角色，再按服务器的实际规格检查四项配额（服务器数量、CPU、内存、存储）。认领在单个数据库事务中完成：事务按用户加锁，锁定服务器记录，重新执行配额检查，并且只在服务器仍无主时写入归属。最终结果以事务内的检查为准，事务之前的配额检查只用于尽早返回错误。
 
 ```mermaid
 sequenceDiagram
@@ -107,7 +114,9 @@ sequenceDiagram
     end
 ```
 
-## 第 28 节 #12：账号绑定与 /link 流程 {#section-28-12-account-binding-link-flow}
+## 账号绑定 {#account-link}
+
+玩家在游戏中执行 `/link` 时，插件读取已验证的 online-mode UUID，请求 felis-api 生成一次性的 8 位绑定码并显示在聊天中。未提供认证来源时，felis-api 根据 UUID 的版本推导：版本 3 的 UUID 视为第三方认证源，其余视为 Mojang。玩家随后在面板中提交绑定码；felis-api 去掉首尾空白并转为大写后核对。绑定码有效时写入绑定关系并删除绑定码；同一用户重复验证不会产生重复记录，已停用或已删除用户的绑定会被接管。玩家使用方式见[玩家接入](/guide/players#account-linking)。
 
 ```mermaid
 sequenceDiagram
@@ -131,10 +140,10 @@ sequenceDiagram
     LinkClient-->>Game: LinkCode
     Game-->>Player: 在聊天中显示一次性绑定码
 
-    Player->>Panel: open Account link flow
+    Player->>Panel: 打开账号绑定页面
     Panel->>APIExternal: POST /api/v1/account/link/start
     APIExternal->>Repo: IsLinked(user_id)
-    Repo-->>APIExternal: linked status
+    Repo-->>APIExternal: 绑定状态
     APIExternal-->>Panel: 返回状态和“运行 /link”的提示
 
     Player->>Panel: 提交绑定码
