@@ -108,7 +108,7 @@ The Owner can run the host operations of day-to-day running on the operator cons
 | Host status: disks, memory, services and timers, the game proxy | **Maintenance & Backups → Status** → **Host status** | `felis status` |
 | Watchdog alerts; holding alert mail for 1, 4 or 24 hours during planned work | **Maintenance & Backups → Status** → **Host status** → **Watchdog alerts**: **Hold alert mail**, **Resume alert mail** | `/run/felis/watchdog-quiet-until` |
 | Database backup now | **Maintenance & Backups → Backups** → **Control-plane database backup** → **Back up now** | `felis db backup` |
-| Verifying and restoring a database bundle | **Maintenance & Backups → Backups** → **Database backups on this host** → **Verify**, **Restore** | `felis db verify`, `felis db restore`, `felis migrate up` |
+| Verifying, restoring and deleting a database bundle | **Maintenance & Backups → Backups** → **Database backups on this host** → **Verify**, **Restore**, the bin icon | `felis db verify`, `felis db restore`, `felis db delete`, `felis migrate up` |
 | Daily database backup time and number kept | **Maintenance & Backups → Backups** → **Database backups on this host** → **Daily backup schedule** | `FELIS_DB_BACKUP_TIME`, `FELIS_DB_BACKUP_KEEP`, installer re-run |
 | World backup now, live or with the servers stopped first | **Maintenance & Backups → Backups** → **Back up worlds now** | `felis backup-now` |
 | Audit log export | **Maintenance & Backups → Backups** → **Audit log export** | `felis db audit-export` |

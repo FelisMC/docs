@@ -321,6 +321,31 @@ sudo k3s kubectl -n minecraft get pods -l felis.lolicon.best/server=<server>
    移除 `reap@` 锁也会取消本次世界清理：世界清理保留该世界，次日再试（见[世界清理](/operations/backup#world-cleanup)）。
 4. 对于 `not_stopped`，待该服务器的 Pod 列表为空后重试。
 
+### 登录空间或正式大厅不存在 {#system-servers-missing}
+
+**原因**
+
+- 登录空间与正式大厅由安装向导创建。安装向导未完成，或系统服务器已被删除时，两者均不存在，玩家无法通过游戏代理进入。
+
+**排查**
+
+「登录与大厅」页面提示登录空间或正式大厅尚未创建。在主机上执行：
+
+```bash
+sudo k3s kubectl -n minecraft get minecraftservers login lobby
+```
+
+**解决**
+
+1. 以所有者身份在「登录与大厅」页面选择「重新创建」。该任务也可在「平台设置 → 访问与安全 → 系统服务器补全」中执行。
+2. 或在主机上执行：
+
+   ```bash
+   sudo felis converge
+   ```
+
+缺失的服务器将按安装时配置的镜像创建，并自动启动。
+
 ## 玩家与路由 {#player-problems}
 
 ### 玩家无法进入服务器 {#players-cannot-join}
@@ -1504,6 +1529,7 @@ felis-api 每 15 秒检查一次计划任务，并在「计划任务」页面记
 | 服务器卡在 `Starting`；`PodNotReady`、`RconNotReachable` | [服务器卡在启动中](#server-stuck-starting) |
 | 服务器处于 `Failed`；`StartupTimeout`、`ReadinessTimeout` | [服务器进入 Failed](#server-failed)、[新版本引入的设置未应用到现有服务器](#system-server-fields) |
 | 服务器无法停止 | [服务器无法停止](#server-wont-stop) |
+| 「登录与大厅」页面提示登录空间或正式大厅尚未创建 | [登录空间或正式大厅不存在](#system-servers-missing) |
 | 服务器无人时不停止；在线人数始终为 0；`PlayersCounted` 为 `False` | [服务器无人时不自动停止](#idle-stop) |
 | 玩家无法进服或被送到错误位置；唤醒被拒绝 | [玩家无法进服](#players-cannot-join) |
 | 路由未启用 | [路由未启用](#routing-disabled) |

@@ -32,7 +32,7 @@ On some distributions, `sudo` uses a `secure_path` that omits `/usr/local/bin`. 
 | [`felis doctor`](#doctor) | Run every health check once | Yes | **Maintenance & Backups → Diagnostics** |
 | [`felis support-bundle`](#support-bundle) | Collect a redacted diagnostics archive | Yes | **Maintenance & Backups → Diagnostics** |
 | [`felis backup-now`](#backup-now) | Back up every world now | Yes | **Maintenance & Backups → Backups** |
-| [`felis db`](#db) | Back up, verify, list, check and restore the database; export the audit log | Yes | **Maintenance & Backups → Backups** |
+| [`felis db`](#db) | Back up, verify, list, check, delete and restore database bundles; export the audit log | Yes | **Maintenance & Backups → Backups** |
 | [`felis migrate up`](#migrate) | Apply pending database migrations | Yes | Part of **Restore the database** |
 | [`felis offsite`](#offsite) | Inspect, check and fetch the off-site copy | Yes | **Maintenance & Backups → Off-site copy** |
 | [`felis restore-host`](#restore-host) | Rebuild this host from the off-site copy | Yes | **Maintenance & Backups → Off-site copy** |
@@ -213,12 +213,13 @@ sudo felis backup-now -yes survival    # back up one server
 
 ### felis db {#db}
 
-Backs up, verifies, lists, checks and restores the control-plane database, and exports the audit log.
+Backs up, verifies, lists, checks, deletes and restores the control-plane database bundles, and exports the audit log.
 
 ```text
 felis db backup       [-config path] [-dir dir] [-label name] [-keep n] [-state-dir dir] [-no-servers] [-metrics-file path]
 felis db restore      [-config path] [-dir dir] [-yes] [-force] [-no-safety-backup] <bundle>
 felis db verify       [-dir dir] <bundle>
+felis db delete       [-dir dir] <bundle>
 felis db list         [-dir dir]
 felis db check        [-dir dir] [-max-age 26h]
 felis db audit-export [-config path] [-since date] [-until date] [-out file]
@@ -237,6 +238,7 @@ A bundle contains every secret kept in `/etc/felis`. Protect bundles as you prot
 | `backup` | Writes a new bundle. `-label` defaults to `manual`; manual bundles are never pruned. `-keep` sets how many bundles of the label are kept; the defaults are `daily` 14, `pre-migrate` 10, `pre-restore` 5 and `offsite` 1. `-state-dir` (default `/etc/felis`, `""` for none) is the host state included. `-no-servers` leaves the MinecraftServer objects out. `-metrics-file` names a node-exporter textfile rewritten on success. Exits with status 1 when the bundle was written without the MinecraftServer objects. |
 | `restore` | Replaces every table of the database with the bundle's contents. Without `-yes` it prints what the bundle holds and stops. It first takes a `pre-restore` bundle of the current database unless `-no-safety-backup` is given, and refuses while other clients are connected unless `-force` is given. |
 | `verify` | Checks a bundle's checksums and prints when it was taken, the Felis version, the schema version, the row counts and its members. |
+| `delete` | Deletes a bundle and its `.sha256` file. The newest bundle cannot be deleted, as it is the latest restore point. A copy in the off-site bucket is not affected. |
 | `list` | Lists the bundles with label, size and age. |
 | `check` | Exits with status 1 when the newest `daily` bundle is missing or older than `-max-age` (default `26h`). |
 | `audit-export` | Writes audit rows as JSON lines, oldest first. `-since` (inclusive) and `-until` (exclusive) take a day (`2026-01-31`, midnight UTC) or an RFC 3339 instant. `-out` names a file created with mode 0600 and never overwritten; without it, rows go to standard output. |
@@ -258,7 +260,7 @@ sudo k3s kubectl -n felis scale deployment felis-api felis-operator --replicas=1
 
 **Root**: Required: the bundle directory and the host configuration are root-only.
 
-**Panel**: **Maintenance & Backups → Backups**: back up now, verify and restore a bundle, set the daily backup schedule, export the audit log.
+**Panel**: **Maintenance & Backups → Backups**: back up now, verify, restore and delete a bundle, set the daily backup schedule, export the audit log.
 
 **See also**: [Database bundles](/en/operations/backup#database-backups), [Restoring the database](/en/operations/backup#restore-database), [Audit log](/en/guide/administration#audit-log).
 
@@ -492,6 +494,7 @@ Fills in specification fields that newer releases added and that already install
 sudo felis converge [-user-rcon] [-config path]
 ```
 
+- It creates the login space or the lobby when either is missing, with the Secrets their pods mount, as `felis setup` creates them.
 - For the login space and the lobby, it fills fields that are missing (such as `spec.rcon` and `spec.startup.healthHTTPPort`) and adds derived settings that are missing. A value that is already set is never overwritten.
 - It gives every user server that has no idle setting the default idle stop: stop after 600 seconds without players.
 - It lists the user servers that have no RCON. `-user-rcon` turns RCON on for them; the change applies at each server's next start.

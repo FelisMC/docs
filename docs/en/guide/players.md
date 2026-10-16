@@ -119,7 +119,7 @@ Authentication sources decide which game identities the game proxy accepts. Moja
 
    | Field | Description |
    | --- | --- |
-   | Permanent source ID | A unique ID without colons or surrounding spaces. It becomes permanent when saved and cannot be renamed or removed, which preserves player UUIDs and account links. |
+   | Permanent source ID | A unique ID without colons or surrounding spaces. It becomes permanent when saved, which preserves player UUIDs and account links. |
    | Name collision prefix | 1–4 letters or digits, unique regardless of case. When a player of this source has the name of an official account, their in-game name becomes `<prefix>_<name>`. |
    | Authentication endpoint (hasJoined) | The full `hasJoined` URL. HTTPS is required; HTTP is allowed only for localhost or private IPs. No query or fragment. |
    | Role lookup API root (optional) | Leave empty for a standard `hasJoined` URL; for a custom path, enter the Yggdrasil API root so roles can be looked up by name or UUID. |
@@ -130,10 +130,11 @@ Authentication sources decide which game identities the game proxy accepts. Moja
 
 A saved configuration applies to the next login and role lookup without a restart, and online players stay connected. The configuration saved in the panel takes precedence over the `[[auth_source]]` list of the installation configuration, which the page imports when it is first opened. Felis-nano keeps using its TOML configuration.
 
-### Identities and disabling {#auth-identities}
+### Identities, disabling and deleting {#auth-identities}
 
 - Official players keep their Mojang UUIDs. Players of a third-party source get UUIDs in a namespace of their own, keyed by the permanent source ID, so identities of different sources never collide.
 - Clearing **Enabled** and saving stops accepting that source's logins. The ID stays reserved, and enabling the source again restores the same player identities.
+- The bin icon on a saved source deletes it after a confirmation; the deletion applies with **Save & apply**. Its players can no longer sign in, and their account links, server data and bans are kept. The ID stays reserved for the endpoint the source used: a source added again with the same ID and the same endpoint restores those identities, and the ID cannot be used with another endpoint.
 - Changing a source's endpoint changes who verifies the identities in its namespace; keep it pointed at the same trusted service.
 - Players' launchers must use the same provider.
 - If the database cannot be read, new authentication is refused; Felis never falls back to an outdated or disabled source.

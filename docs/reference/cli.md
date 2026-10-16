@@ -32,7 +32,7 @@ description: 面向运维人员的全部 felis 子命令：用法、主要参数
 | [`felis doctor`](#doctor) | 执行一次全部健康检查 | 是 | 「维护与备份 → 诊断」 |
 | [`felis support-bundle`](#support-bundle) | 收集已脱敏的诊断归档 | 是 | 「维护与备份 → 诊断」 |
 | [`felis backup-now`](#backup-now) | 立即备份所有世界 | 是 | 「维护与备份 → 备份」 |
-| [`felis db`](#db) | 备份、校验、列出、检查和恢复数据库；导出审计日志 | 是 | 「维护与备份 → 备份」 |
+| [`felis db`](#db) | 备份、校验、列出、检查、删除和恢复数据库备份包；导出审计日志 | 是 | 「维护与备份 → 备份」 |
 | [`felis migrate up`](#migrate) | 应用待执行的数据库迁移 | 是 | 「恢复数据库」的一部分 |
 | [`felis offsite`](#offsite) | 查看、检查和取回异地副本 | 是 | 「维护与备份 → 异地副本」 |
 | [`felis restore-host`](#restore-host) | 从异地副本重建本主机 | 是 | 「维护与备份 → 异地副本」 |
@@ -213,12 +213,13 @@ sudo felis backup-now -yes survival    # 备份一台服务器
 
 ### felis db {#db}
 
-备份、校验、列出、检查和恢复控制面数据库，并导出审计日志。
+备份、校验、列出、检查、删除和恢复控制面数据库备份包，并导出审计日志。
 
 ```text
 felis db backup       [-config path] [-dir dir] [-label name] [-keep n] [-state-dir dir] [-no-servers] [-metrics-file path]
 felis db restore      [-config path] [-dir dir] [-yes] [-force] [-no-safety-backup] <bundle>
 felis db verify       [-dir dir] <bundle>
+felis db delete       [-dir dir] <bundle>
 felis db list         [-dir dir]
 felis db check        [-dir dir] [-max-age 26h]
 felis db audit-export [-config path] [-since date] [-until date] [-out file]
@@ -237,6 +238,7 @@ felis db audit-export [-config path] [-since date] [-until date] [-out file]
 | `backup` | 写入一个新备份包。`-label` 默认为 `manual`，手动备份包永不清理。`-keep` 指定该标签保留的备份包数量，默认值为 `daily` 14、`pre-migrate` 10、`pre-restore` 5、`offsite` 1。`-state-dir`（默认 `/etc/felis`，`""` 表示不包含）指定纳入的主机状态。`-no-servers` 不包含 MinecraftServer 对象。`-metrics-file` 指定成功后重写的 node-exporter 文本文件。备份包写入时缺少 MinecraftServer 对象则以状态码 1 退出。 |
 | `restore` | 用备份包内容替换数据库中的每张表。未指定 `-yes` 时只输出备份包内容并停止。默认先为当前数据库创建 `pre-restore` 备份包，指定 `-no-safety-backup` 时跳过；有其他客户端连接时拒绝执行，指定 `-force` 时除外。 |
 | `verify` | 校验备份包的校验和，并输出创建时间、Felis 版本、schema 版本、行数统计和成员文件。 |
+| `delete` | 删除备份包及其 `.sha256` 文件。最新的一份备份包是最近的恢复点，不能删除。异地存储桶中的副本不受影响。 |
 | `list` | 列出备份包及其标签、大小和创建至今的时长。 |
 | `check` | 最新的 `daily` 备份包不存在或早于 `-max-age`（默认 `26h`）时以状态码 1 退出。 |
 | `audit-export` | 以 JSON Lines 格式按时间从旧到新输出审计记录。`-since`（含）和 `-until`（不含）接受日期（`2026-01-31`，UTC 零点）或 RFC 3339 时间点。`-out` 指定的文件以权限 0600 创建，且不会覆盖已有文件；未指定时输出到标准输出。 |
@@ -258,7 +260,7 @@ sudo k3s kubectl -n felis scale deployment felis-api felis-operator --replicas=1
 
 **root**：需要，备份包目录和主机配置仅 root 可读。
 
-**面板**：「维护与备份 → 备份」：立即备份、校验和恢复备份包、设置每日备份计划、导出审计日志。
+**面板**：「维护与备份 → 备份」：立即备份、校验、恢复和删除备份包、设置每日备份计划、导出审计日志。
 
 **另见**：[数据库备份包](/operations/backup#database-backups)、[恢复数据库](/operations/backup#restore-database)、[审计日志](/guide/administration#audit-log)。
 
@@ -492,6 +494,7 @@ sudo felis rotate-token [-yes] <credential>
 sudo felis converge [-user-rcon] [-config path]
 ```
 
+- 登录空间或正式大厅不存在时，按 `felis setup` 的方式创建，并复制其 Pod 挂载的 Secret。
 - 对登录空间和大厅，补全缺少的字段（如 `spec.rcon`、`spec.startup.healthHTTPPort`），并补回缺少的派生设置。已有值的字段从不覆盖。
 - 为每台没有空闲设置的用户服务器设置默认的空闲停止：无玩家 600 秒后停止。
 - 列出未启用 RCON 的用户服务器。`-user-rcon` 为这些服务器启用 RCON，更改在各服务器下次启动时生效。

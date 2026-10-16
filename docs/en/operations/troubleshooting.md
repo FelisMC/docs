@@ -452,6 +452,31 @@ with their result.
    tries again the next day (see [World cleanup](/en/operations/backup#world-cleanup)).
 4. For `not_stopped`, retry once the pod list for the server is empty.
 
+### The login space or the lobby is missing {#system-servers-missing}
+
+**Cause**
+
+- The setup wizard creates the login space and the lobby. An installation whose wizard never finished, or whose system servers were deleted, has neither, and players cannot get past the game proxy.
+
+**Diagnosis**
+
+The **Login & lobby** page reports that the login space or the lobby does not exist. On the host:
+
+```bash
+sudo k3s kubectl -n minecraft get minecraftservers login lobby
+```
+
+**Resolution**
+
+1. As the Owner, select **Create again** on the **Login & lobby** page. The same task runs from **Platform settings → Access and security → System server completion**.
+2. Alternatively, run on the host:
+
+   ```bash
+   sudo felis converge
+   ```
+
+The missing servers are created from the images configured at installation and start on their own.
+
 ## Players and routing {#player-problems}
 
 ### Players cannot join {#players-cannot-join}
@@ -1765,6 +1790,7 @@ Act on the detail in the table. Timing rules that explain unexpected run times:
 | Server stuck in `Starting`; `PodNotReady`, `RconNotReachable` | [A server is stuck starting](#server-stuck-starting) |
 | Server in `Failed`; `StartupTimeout`, `ReadinessTimeout` | [A server is in Failed](#server-failed), [A newer setting never reaches an existing server](#system-server-fields) |
 | A server does not stop | [A server does not stop](#server-wont-stop) |
+| The **Login & lobby** page reports that the login space or the lobby does not exist | [The login space or the lobby is missing](#system-servers-missing) |
 | Server never stops when empty; player count always 0; `PlayersCounted` is `False` | [A server never stops when empty](#idle-stop) |
 | Players cannot join or land in the wrong place; wake refused | [Players cannot join](#players-cannot-join) |
 | Routing disabled | [Routing is disabled](#routing-disabled) |

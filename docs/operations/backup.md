@@ -397,6 +397,16 @@ sha256sum -c felis-db-20260924T033012Z-daily.tar.sha256    # on a copy, without 
 
 `verify` 检查校验文件、按清单核对每个成员，并确认没有缺失或未列出的成员，不会改动数据库。数据库本身不可用时，见[故障排查](/operations/troubleshooting#database-unavailable)。
 
+### 删除备份包 {#delete-bundle}
+
+写入新备份包时，各类备份包按数量自动清理；手动备份包一直保留，直到手动删除。要删除备份包，在「本机数据库备份」卡片中选择其旁的删除图标并确认，或执行：
+
+```bash
+sudo felis db delete felis-db-20260924T033012Z-manual.tar
+```
+
+该备份包及其 `.sha256` 文件将从本机删除。最新的一份备份包是最近的恢复点，不能删除。异地存储桶中的副本不受影响。
+
 ## 恢复数据库 {#restore-database}
 
 恢复操作用备份包的内容替换所有数据表，用于在原主机上撤销误操作。世界数据卷和归档不在备份包中，保持不变；备份包创建之后新建的服务器保留其世界数据卷，但会失去所有者记录。回滚升级请按[回滚](/operations/upgrade#rollback)操作。

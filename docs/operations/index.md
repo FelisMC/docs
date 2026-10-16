@@ -108,7 +108,7 @@ API 中断较久时，代理日志依次出现 `server list refresh failed ... k
 | 主机状态：磁盘、内存、服务与定时任务、游戏代理 | 「维护与备份 → 状态」→「主机状态」 | `felis status` |
 | 查看看门狗告警；计划维护期间暂停告警邮件 1、4 或 24 小时 | 「维护与备份 → 状态」→「主机状态」→「看门狗告警」：「暂停告警邮件」「恢复告警邮件」 | `/run/felis/watchdog-quiet-until` |
 | 立即备份数据库 | 「维护与备份 → 备份」→「控制面数据库备份」→「立即备份」 | `felis db backup` |
-| 校验和恢复数据库备份包 | 「维护与备份 → 备份」→「本机数据库备份」→「校验」「恢复」 | `felis db verify`、`felis db restore`、`felis migrate up` |
+| 校验、恢复和删除数据库备份包 | 「维护与备份 → 备份」→「本机数据库备份」→「校验」「恢复」、删除图标 | `felis db verify`、`felis db restore`、`felis db delete`、`felis migrate up` |
 | 每日数据库备份时间和保留数量 | 「维护与备份 → 备份」→「本机数据库备份」→「每日备份计划」 | `FELIS_DB_BACKUP_TIME`、`FELIS_DB_BACKUP_KEEP`，重新运行安装器 |
 | 立即备份世界，不停服或先停止服务器 | 「维护与备份 → 备份」→「立即备份世界」 | `felis backup-now` |
 | 导出审计日志 | 「维护与备份 → 备份」→「导出审计日志」 | `felis db audit-export` |

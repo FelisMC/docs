@@ -157,7 +157,7 @@ The request body that starts a task has these fields:
 
 | Field | Description |
 | --- | --- |
-| `action` | The operation. Node operations are `enable`, `join`, `approve`, `upgrade`, `fence`, `unfence`, `enable-ha` and `join-controller`; host tasks are `db-backup`, `db-verify`, `db-restore`, `offsite-sync`, `offsite-list`, `offsite-check-key`, `offsite-take-over`, `offsite-configure`, `offsite-disable`, `restore-host`, `backup-now`, `rotate-token`, `domain-check`, `domain-set`, `storage-configure`, `connection-configure`, `converge`, `doctor`, `support-bundle`, `host-settings` and `server-forwarding` |
+| `action` | The operation. Node operations are `enable`, `join`, `approve`, `upgrade`, `fence`, `unfence`, `enable-ha` and `join-controller`; host tasks are `db-backup`, `db-verify`, `db-delete`, `db-restore`, `offsite-sync`, `offsite-list`, `offsite-check-key`, `offsite-take-over`, `offsite-configure`, `offsite-disable`, `restore-host`, `backup-now`, `rotate-token`, `domain-check`, `domain-set`, `storage-configure`, `connection-configure`, `converge`, `doctor`, `support-bundle`, `host-settings` and `server-forwarding` |
 | `confirmMaintenance` | Required. Must be `true` for every node operation and for host tasks that disconnect players, restart the panel or replace data |
 | `name`, `sshTarget`, `externalIP`, `peers` | Node operation parameters: the node name, a verified root SSH target, the node's fixed address, additional peer addresses |
 | `params` | The operation's own inputs, kept with the task, such as a bundle name, a domain or a mode |

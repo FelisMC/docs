@@ -157,7 +157,7 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 
 | 字段 | 说明 |
 | --- | --- |
-| `action` | 操作名称。节点操作包括 `enable`、`join`、`approve`、`upgrade`、`fence`、`unfence`、`enable-ha`、`join-controller`；主机任务包括 `db-backup`、`db-verify`、`db-restore`、`offsite-sync`、`offsite-list`、`offsite-check-key`、`offsite-take-over`、`offsite-configure`、`offsite-disable`、`restore-host`、`backup-now`、`rotate-token`、`domain-check`、`domain-set`、`storage-configure`、`connection-configure`、`converge`、`doctor`、`support-bundle`、`host-settings`、`server-forwarding` |
+| `action` | 操作名称。节点操作包括 `enable`、`join`、`approve`、`upgrade`、`fence`、`unfence`、`enable-ha`、`join-controller`；主机任务包括 `db-backup`、`db-verify`、`db-delete`、`db-restore`、`offsite-sync`、`offsite-list`、`offsite-check-key`、`offsite-take-over`、`offsite-configure`、`offsite-disable`、`restore-host`、`backup-now`、`rotate-token`、`domain-check`、`domain-set`、`storage-configure`、`connection-configure`、`converge`、`doctor`、`support-bundle`、`host-settings`、`server-forwarding` |
 | `confirmMaintenance` | 必填。所有节点操作，以及会断开玩家、重启面板或替换数据的主机任务，都必须为 `true` |
 | `name`、`sshTarget`、`externalIP`、`peers` | 节点操作的参数：节点名称、已验证的 root SSH 目标、节点固定地址、额外的对等地址 |
 | `params` | 操作自身的输入，随任务保存，例如备份包名称、域名或模式 |

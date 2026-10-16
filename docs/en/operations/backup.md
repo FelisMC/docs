@@ -397,6 +397,16 @@ sha256sum -c felis-db-20260924T033012Z-daily.tar.sha256    # on a copy, without 
 
 `verify` checks the sidecar, every member against the manifest, and that nothing is missing or unlisted. It does not touch the database. When the database itself is unavailable, see [Troubleshooting](/en/operations/troubleshooting#database-unavailable).
 
+### Delete a bundle {#delete-bundle}
+
+Bundles of each label are pruned automatically when a new one is written; manual bundles are kept until you delete them. To delete a bundle, select the bin icon next to it on the **Database backups on this host** card and confirm, or run:
+
+```bash
+sudo felis db delete felis-db-20260924T033012Z-manual.tar
+```
+
+The bundle and its `.sha256` file are removed from this host. The newest bundle cannot be deleted, as it is the latest restore point. A copy in the off-site bucket is not affected.
+
 ## Restore the database {#restore-database}
 
 A restore replaces every table with the contents of a bundle. Use it to undo a mistake on the same host. World volumes and archives are not part of the bundle and are left as they are; a server created after the bundle was taken keeps its world volume but loses its owner record. To roll back an upgrade, follow [Rollback](/en/operations/upgrade#rollback).
