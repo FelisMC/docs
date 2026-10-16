@@ -42,6 +42,7 @@
   --vp-c-text-2: #a3a3a3;
   --vp-c-text-3: #737373;
   --vp-c-divider: #262626;
+  --vp-custom-block-warning-bg: var(--vp-c-warning-soft);
 }
 
 body { -webkit-font-smoothing: antialiased; }
