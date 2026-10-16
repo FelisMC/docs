@@ -114,7 +114,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 这些值不能包含引号、反斜杠或换行。重跑时不提供这些变量，则保留现有的 `[offsite]` 配置节和 `offsite.env`。另见[异地副本](/operations/backup#offsite)和[加密密钥](/operations/backup#offsite-key)。
 
-::: danger
+::: danger 危险
 `FELIS_OFFSITE_KEY` 应保存在本主机以外的地方。没有它，存储桶中的任何内容都无法读取。
 :::
 
@@ -350,7 +350,7 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 | `bootstrap.done` | 标记安装已完成。 | 安装器 | — |
 | `system-server-images`、`velocity.fingerprint`、`previous-felis-image` | 安装器的记录：登录空间和大厅的构建、游戏代理上次启动所依据的内容，以及用于回退的上一个控制面镜像。 | 安装器 | — |
 
-::: danger
+::: danger 危险
 标记为密钥的文件以及每个数据库备份包都可用于完全控制本安装。切勿将其复制到不可信的位置，也切勿把其内容粘贴到求助信息中；[`felis support-bundle`](/reference/cli#support-bundle) 会自动移除这些值。
 :::
 
@@ -411,7 +411,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
   | sudo FELIS_VELOCITY_XMX=3G bash
 ```
 
-::: warning
+::: warning 注意
 保存每日备份计划时会立即执行一次备份。修改代理内存上限（无论通过面板还是安装器）都会重启游戏代理，所有玩家断开连接。
 :::
 

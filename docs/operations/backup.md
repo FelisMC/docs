@@ -141,7 +141,7 @@ Felis 分别保护三类数据：
 - 每位用户同一时间最多进行一个导出，全平台最多两个，每位用户每小时最多六个；超出时返回 `429 export_busy` 及 `Retry-After`。下载准备就绪后，浏览器须在 90 秒内开始下载。
 - 恢复、备份、导出或文件修改占用世界期间，该服务器的唤醒及其他世界操作均返回 `409 maintenance_in_progress`。
 
-::: danger
+::: danger 危险
 未勾选安全快照的恢复会永久覆盖当前世界。没有其他备份的数据无法找回。
 :::
 
@@ -157,7 +157,7 @@ sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U post
    WHERE id = '<backup id>' AND status = 'expired'"
 ```
 
-::: danger
+::: danger 危险
 世界回收写入的归档可能是已移除世界仅存的副本。回收任务删除该归档后，数据无法找回。
 :::
 
@@ -192,7 +192,7 @@ sudo felis backup-now -yes alpha bravo   # only these servers
 
 全部有数据卷的世界均归档成功时，命令以 0 退出；有备份失败、跳过了正在启动或停止的服务器或任务被中断时以 1 退出；指定的名称不是用户服务器时以 2 退出。
 
-::: warning
+::: warning 注意
 使用 `-stop`（「先停止运行中的服务器」）时，所有运行中服务器上的玩家都会被断开，服务器在从面板重新启动前保持停止。
 :::
 
@@ -221,7 +221,7 @@ sudo felis backup-now -yes alpha bravo   # only these servers
 - 配置了异地副本时，世界还会保留到其归档确认存在于存储桶中为止。此时任务记录 `world archived, kept until the archive's off-site copy is confirmed`，并在之后的运行中移除该世界。
 - 归档保留 `retention` 指定的时间：默认 90 天，对应面板中的「已移除世界的归档保留天数」。
 
-::: warning
+::: warning 注意
 闲置计时依赖游戏代理向 felis-api 报告玩家加入。加入事件未送达时，每天都有人游玩的世界也会在 15 天后满足移除条件。启用闲置世界移除前，应确认加入事件正常上报（见[指标](/operations/monitoring#metrics)），并认领或豁免需要保留的无所有者服务器。
 :::
 
@@ -279,7 +279,7 @@ FELIS_OFFSITE_ACCESS_KEY=... FELIS_OFFSITE_SECRET_KEY=... \
 
 主机密钥与存储桶密钥不一致时（例如重装时丢失了 `offsite.env` 并生成了新密钥），每次同步都会在复制或清理任何内容之前停止：安装器以 `OFF-SITE COPY STOPPED` 结束，`felis offsite status` 以 1 退出，面板提示密钥不一致，看门狗立即通知所有者。处理方法：将 `/etc/felis/offsite.env` 中的 `FELIS_OFFSITE_KEY` 改为存储桶的密钥，再执行 `sudo systemctl start felis-offsite.service`；或为 `[offsite]` 指定空的存储桶或前缀，然后重新运行安装器。
 
-::: danger
+::: danger 危险
 请将加密密钥保存在密码管理器或其他主机以外的位置。主机与密钥同时丢失时，存储桶中的任何内容都无法恢复。
 :::
 
@@ -325,7 +325,7 @@ sudo systemctl start felis-offsite.service
 
 不带 `-yes` 时，命令显示存储桶记录的主机及其最近写入时间，并以 4 退出。被替代的主机从下一次同步起不再复制，其 `status` 以 1 退出，其看门狗通知所有者 `the off-site copy has stopped`。演练机误接管存储桶时，在生产主机上执行 `sudo felis offsite take-over -yes` 收回。
 
-::: warning
+::: warning 注意
 仅在本机永久替代原写入主机时接管存储桶。原主机在下一次同步时即停止复制。
 :::
 
@@ -370,7 +370,7 @@ rsync -a root@felis-host:/var/lib/felis/db-backups/ /backups/felis-db/
 
 按标签分别保留：`daily` 14 份（`FELIS_DB_BACKUP_KEEP`），`pre-migrate` 10 份，`pre-restore` 5 份，`offsite` 1 份，`manual` 永不自动清理。
 
-::: danger
+::: danger 危险
 备份包包含整套安装的全部机密，包括异地加密密钥。备份包及其副本应与 `/etc/felis` 同等保护。
 :::
 
@@ -401,7 +401,7 @@ sha256sum -c felis-db-20260924T033012Z-daily.tar.sha256    # on a copy, without 
 
 恢复操作用备份包的内容替换所有数据表，用于在原主机上撤销误操作。世界数据卷和归档不在备份包中，保持不变；备份包创建之后新建的服务器保留其世界数据卷，但会失去所有者记录。回滚升级请按[回滚](/operations/upgrade#rollback)操作。
 
-::: danger
+::: danger 危险
 备份包创建之后写入数据库的全部内容都会丢失，包括新账户、归属变更和审计记录。恢复期间面板与 operator 停止运行，完成后所有用户需重新登录。恢复操作事先创建的 `pre-restore` 备份包可用于撤销本次恢复。
 :::
 
@@ -508,7 +508,7 @@ sudo felis restore-host -yes -take-over      # rebuild, then make this host writ
 
 参数：`-yes`（不带时只打印步骤，不做任何修改）、`-bundle <name>`、`-take-over`、`-force`、`-dir`（默认 `/var/lib/felis/restore-host`）和 `-config`（默认 `/etc/felis/felis.toml`）。数据库尚未恢复时，以不同的 `-bundle` 重跑会改用该备份包；数据库恢复后，重跑会拒绝并指出数据库来源的备份包。删除 `/var/lib/felis/restore-host/state.json` 可重新开始。
 
-::: danger
+::: danger 危险
 `-force`（「覆盖现有服务器」）会用异地副本替换当前安装的数据库和服务器，当前安装原有的全部内容都会丢失。
 :::
 
@@ -627,7 +627,7 @@ sudo felis domain check                 # every name, the certificate and the tu
 - 不要改动 Cloudflare 隧道：在生产隧道上增加第二个连接器会分走部分真实访问。通过备用机器自身的地址访问（第 10 步将其迁移到 `nip.io` 域名）。此时 `felis domain check` 的隧道检查项会失败，这在演练机上属于预期结果。
 - 按[检查重建结果](#rebuild-checks)确认：以邮件验证码登录，恢复一个世界并加入。
 
-::: warning
+::: warning 注意
 演练机不得接管存储桶。一旦接管，生产主机会停止复制；此时在生产主机上执行 `sudo felis offsite take-over -yes` 收回存储桶。
 :::
 
@@ -635,7 +635,7 @@ sudo felis domain check                 # every name, the certificate and the tu
 
 计划迁移即在原主机仍可提供最终副本的情况下执行重建。迁移需要异地存储桶，世界归档经由存储桶传送到新主机。从第 1 步开始平台停止服务，直到新主机提供服务为止。
 
-::: warning
+::: warning 注意
 第 1 步会断开所有玩家，此后原主机上的服务器均无法启动。
 :::
 

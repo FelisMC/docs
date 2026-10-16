@@ -17,7 +17,7 @@ description: 面向运维人员的全部 felis 子命令：用法、主要参数
 - 退出状态：成功为 0；失败或检查发现问题为 1；用法错误为 2。使用其他状态码的命令在条目中单独列出。
 - 所有者可在面板中执行其中许多操作。面板将操作交给 `felis-node-control.service`，由它运行相同的命令，见[在面板中执行主机操作](/operations/#panel-host-operations)。
 
-::: tip
+::: tip 提示
 部分发行版的 `sudo` 使用的 `secure_path` 不含 `/usr/local/bin`。如 `sudo felis` 提示 `command not found`，改为执行 `sudo /usr/local/bin/felis …`。
 :::
 
@@ -201,7 +201,7 @@ sudo felis backup-now -yes             # 备份所有世界，运行中的服务
 sudo felis backup-now -yes survival    # 备份一台服务器
 ```
 
-::: warning
+::: warning 注意
 `-stop` 会断开玩家连接，并使服务器保持停止状态。备份完成后在面板中重新启动它们。
 :::
 
@@ -228,7 +228,7 @@ felis db audit-export [-config path] [-since date] [-until date] [-out file]
 
 每个备份包是一个名为 `felis-db-<UTC 时间戳>-<label>.tar` 的文件，旁边附有 `.sha256` 文件。备份包包含数据库转储、`/etc/felis` 中的每个文件以及每个 MinecraftServer 对象。
 
-::: danger
+::: danger 危险
 备份包包含 `/etc/felis` 中保存的全部密钥，应按保护 `/etc/felis` 本身的标准保护备份包。
 :::
 
@@ -250,7 +250,7 @@ sudo felis migrate up     # 回退到写入该备份包的发布版时跳过此�
 sudo k3s kubectl -n felis scale deployment felis-api felis-operator --replicas=1
 ```
 
-::: warning
+::: warning 注意
 `db restore` 替换整个数据库。felis-api 缩容期间，面板和 API 不可用。
 :::
 
@@ -313,7 +313,7 @@ felis offsite keygen
 | `take-over` | 报告写入存储桶的主机。未指定 `-yes` 时不写入任何内容：其他主机正在写入且本机从未写入时以状态码 4 退出，其他主机从本机接管了存储桶时以状态码 5 退出。指定 `-yes` 时本机成为写入者，另一台主机在其下次运行时停止复制。 |
 | `keygen` | 输出一个新的加密密钥。 |
 
-::: danger
+::: danger 危险
 加密密钥应保存在本主机以外的地方。存储桶中只有加密后的对象，没有密钥便无法读取。
 :::
 
@@ -354,7 +354,7 @@ sudo felis restore-host [-yes] [-bundle name] [-take-over] [-force]
 - 以下两项需由运维人员完成：将域名指向新主机（`felis domain set`），以及恢复 Cloudflare 隧道（`felis setup`）。地址变化后，在旧地址注册的 Passkey 失效，相应用户需用邮件验证码登录并注册新的 Passkey。
 - 向安装器提供 `FELIS_RESTORE_FROM_OFFSITE=1` 时，安装器会自动运行此命令。
 
-::: danger
+::: danger 危险
 重建会替换本安装的数据库。`-force` 会替换已有服务器的安装。
 :::
 
@@ -405,7 +405,7 @@ sudo felis update --version v0.2.0    # 查看指定发布版
 sudo felis update --apply --version v0.2.0 --expect-commit <full-sha>   # 按检查输出的命令执行
 ```
 
-::: warning
+::: warning 注意
 应用更新可能重启 felis-api、游戏代理和系统服务器，应在维护窗口内执行。
 :::
 
@@ -432,7 +432,7 @@ sudo felis domain check
 - 在 `[auth]` 中手动设置的面板或管理控制台主机名保持不变。安装器生成的自签名证书会为新名称重新签发；运维人员自有的证书若不覆盖新名称，命令会在做任何更改之前停止。
 - 迁移后，`<root>`、`console.<root>`、`op.console.<root>` 和 `*.<root>` 须解析到本主机；服务器地址变为 `<name>.<new root>`；所有用户需重新登录；绑定旧面板主机名的 Passkey 失效。面板经隧道提供时，需重新执行 `felis setup` 的 Cloudflare 步骤。
 
-::: warning
+::: warning 注意
 `domain set -yes` 会重启 felis-api 和游戏代理，所有玩家都会断开连接。
 :::
 
@@ -472,7 +472,7 @@ sudo felis rotate-token [-yes] <credential>
 | `-forwarding-secret` | `/opt/felis/velocity/forwarding.secret` | 游戏代理的转发密钥文件（仅 `forwarding`）。 |
 | `-config` | `/etc/felis/felis.toml` | 配置文件。 |
 
-::: warning
+::: warning 注意
 轮换 `forwarding` 会重启所有运行中的服务器，并断开所有玩家的连接。
 :::
 
@@ -551,7 +551,7 @@ felis node join-controller
 | `upgrade` | 工作节点 | 由主控节点的节点操作经 SSH 启动，将 felis 和 k3s-agent 更新到主控节点的版本。 |
 | `join-controller` | 新主控节点 | 由节点操作启动，将新主控节点加入集群的内嵌 etcd。 |
 
-::: warning
+::: warning 注意
 `upgrade` 会重启工作节点上的 k3s-agent。执行前先停止该节点上的服务器。
 :::
 

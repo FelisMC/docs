@@ -301,7 +301,7 @@ FELIS_DISTRIBUTED=1 FELIS_CONTROLLER_HA=1 \
 | `FELIS_HA_VRID` | VRRP 虚拟路由 ID，1–255，默认 51。 |
 | `FELIS_LONGHORN_VERSION` | Longhorn 版本标签，默认 `v1.8.1`。 |
 
-::: danger
+::: danger 危险
 主控高可用启用后无法在面板中关闭。需要回退时，使用第 1、2 步保存的数据库备份与集群状态快照手动恢复。
 :::
 

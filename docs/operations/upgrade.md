@@ -259,7 +259,7 @@ sudo k3s kubectl -n felis rollout status deploy/felis-api
 
 数据库迁移只能向前执行。升级前生成的 `pre-migrate` 备份包是回退的依据：`felis update --apply` 在安装前创建一份，安装器运行 `felis migrate up` 且有待执行的迁移时也会先创建一份。
 
-::: danger 警告
+::: danger 危险
 恢复会以备份包替换整个数据库，备份包之后的数据库变更全部丢失。恢复前，系统会自动为当前数据库创建一份 `pre-restore` 备份包。
 :::
 

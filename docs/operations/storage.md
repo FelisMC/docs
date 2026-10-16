@@ -64,7 +64,7 @@ description: Felis 在主机上的数据存放位置、扩容磁盘与将数据�
 - 已在云服务商处扩大虚拟磁盘。
 - 已安装 `growpart`：RHEL 系为 `cloud-utils-growpart`，Debian 和 Ubuntu 为 `cloud-guest-utils`。
 
-::: danger
+::: danger 危险
 输错磁盘或分区编号可能损坏文件系统。请先备份全部世界（第 1 步），并从 `lsblk` 的输出中核对设备名称后再输入。
 :::
 
@@ -114,7 +114,7 @@ description: Felis 在主机上的数据存放位置、扩容磁盘与将数据�
 
 迁移期间平台停止服务，停机时间为复制时间加一至两分钟。
 
-::: warning
+::: warning 注意
 第 2 步会停止所有游戏服务器并断开玩家。从第 3 步起到第 4 步 k3s 重新运行为止，面板和游戏代理均不可用。
 :::
 
@@ -208,7 +208,7 @@ description: Felis 在主机上的数据存放位置、扩容磁盘与将数据�
 
 ### 更改上传存储 {#change-upload-storage}
 
-::: warning
+::: warning 注意
 更改存储位置会使面板短暂重启。已保存的上传内容保留在原位置，不会迁移到新位置。
 :::
 
@@ -265,7 +265,7 @@ description: Felis 在主机上的数据存放位置、扩容磁盘与将数据�
 
 4. 删除卡在拉取镜像的 Pod 可立即重试，也可等待下一次自动重试。随后工作负载会自行恢复。
 
-::: danger
+::: danger 危险
 不要为释放空间而手动删除 `/var/lib/rancher/k3s/storage` 下的卷或世界卷声明。世界只存在于其数据卷中，没有备份时删除即永久丢失。
 :::
 

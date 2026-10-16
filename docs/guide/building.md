@@ -29,7 +29,7 @@ go build -o felis ./cmd/felis
 ./felis help
 ```
 
-::: info
+::: info 说明
 直接执行 `go build` 时，二进制中内嵌的是面板占位页，打开面板只显示 “Felis panel assets were not built into this binary.”。需要包含面板的完整二进制时，使用下文的容器镜像构建，或参考[面板](#panel)。
 :::
 

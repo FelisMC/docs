@@ -68,7 +68,7 @@ CentOS Stream 9（aarch64，启用 firewalld 且 SELinux 为 enforcing）和 Ubu
 - 在面板中：在「平台设置 → 访问与安全 → 游戏代理」中设置「内存上限」（256M 至 64G），然后选择「应用」。该值在重新运行安装器或更新后保持不变。
 - 在命令行中：带 `FELIS_VELOCITY_XMX` 重新运行安装器，例如 `FELIS_VELOCITY_XMX=2G`。安装器每次运行都会读取该变量。
 
-::: warning
+::: warning 注意
 修改内存上限会重启游戏代理，所有在线玩家都会被断开。请在玩家较少时操作。
 :::
 

@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/uninstall
 
 k3s 的处理方式：集群中只有 Felis 的命名空间时，用 k3s 自带的 `k3s-uninstall.sh` 卸载 k3s；集群中还运行其他工作负载时，只删除 `felis`、`minecraft`、`felis-build` 命名空间和 MinecraftServer CRD。`--keep-k3s` 和 `--remove-k3s` 可覆盖这一选择。k3s 无法响应时，脚本无法判断集群中是否有其他工作负载，会停止并提示启动 k3s（`systemctl start k3s`）或指定其中一个选项。
 
-::: danger 警告
+::: danger 危险
 `--purge` 删除数据库、数据库备份包、所有世界和世界归档，无法恢复。执行前确认已在主机之外保存需要的备份，见[备份与恢复](/operations/backup#offsite)。
 :::
 

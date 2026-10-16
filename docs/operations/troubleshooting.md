@@ -7,7 +7,7 @@ description: 根据观察到的现象定位 Felis 故障原因，确认原因并
 
 本文帮助运维人员诊断并解决 Felis 主机上的故障。先执行「首先检查」中的步骤，了解整台主机的状态，再转到与所观察现象相符的条目。每个条目说明现象、原因、确认方法和解决办法。条目按领域分组：服务器、玩家与路由、面板与登录、内部 API、账号关联、构建与镜像、主机、备份与数据库、邮件，以及文件与计划任务。文末的[快速索引](#quick-reference)将常见现象对应到相应条目。
 
-::: info
+::: info 说明
 本文中的命令均在 Felis 主机上以 root 身份执行。`kubectl` 命令使用 k3s 自带的版本（`sudo k3s kubectl …`），因为集群管理员凭据 `/etc/rancher/k3s/k3s.yaml` 仅 root 可读。游戏服务器运行在 `minecraft` 命名空间，控制面运行在 `felis` 命名空间。
 :::
 
@@ -58,7 +58,7 @@ sudo felis support-bundle
 
 支持包从不收集 Secret、ConfigMap、配置文件内容、数据库和世界，并从收集的全部内容中移除凭据。包内的 `MANIFEST.txt` 列出已收集的内容、已移除的内容以及未能收集的内容。
 
-::: warning
+::: warning 注意
 发送支持包之前务必通读其内容。脱敏规则无法识别的格式中写出的机密会保留在支持包中。
 :::
 
@@ -237,7 +237,7 @@ sudo k3s kubectl -n minecraft get events --field-selector involvedObject.name=<s
 4. 节点离线时，检查该节点及其容器运行时。Pod 仍在终止或所在节点不可达时，游戏进程可能仍在运行。
 5. 应急停止因权限错误失败时，应用当前的平台更新，更新会安装应急停止所需的权限（见[升级](/operations/upgrade#update)）。
 
-::: danger
+::: danger 危险
 不要通过强制删除世界、Pod 或存储卷声明来解决控制连接丢失的问题。强制删除 Pod 不能证明游戏进程已经退出。
 :::
 
@@ -770,7 +770,7 @@ sudo journalctl -u felis-velocity -n 200
    sudo k3s kubectl -n felis rollout restart deployment/felis-api
    ```
 
-::: tip
+::: tip 提示
 扫描结果反映构建当天的漏洞库，已准入的镜像之后不会再次扫描。如需重新扫描，先执行 `sudo felis mirror-build-tools -only trivy-db` 更新漏洞库，再以相同上下文发起新的构建。
 :::
 
@@ -828,7 +828,7 @@ felis-api 启动时在日志中说明构建 Pod 是否使用用户命名空间�
    推送目标为 `localhost:5000/mirror/<名称>:<标签>`。两个数据库应按需要的漏洞公告时效定期重复推送。定时任务能够访问上游之前，看门狗警告会一直保留。
 3. 如果设置 `build_user_namespaces = "on"` 后构建无法启动，将其改回 `"auto"`（默认值，仅在节点支持时启用用户命名空间）或 `"off"`，修改方法见[镜像构建失败](#build-failures)。
 
-::: info
+::: info 说明
 Kaniko v1.24.0 是上游的最后一个版本，不再获得安全修复。如需使用仍在维护的分支，将其镜像复制到 `mirror/` 下，并将 `[registry] kaniko_image` 设置为该镜像。
 :::
 
@@ -1022,7 +1022,7 @@ comm -23 \
 sudo k3s kubectl -n minecraft delete pvc world-<name>-0
 ```
 
-::: danger
+::: danger 危险
 删除世界卷不可撤销。除非存在该世界的归档，否则世界将永久丢失。
 :::
 
@@ -1093,7 +1093,7 @@ journalctl -u felis-watchdog -n 40
 
 将安装迁移到新地址需要在恢复的备份上重新安装，参见[迁移到其他主机](/operations/backup#move-host)。使用默认 `<ip>.nip.io` 根域名时，在新地址上运行后执行 `sudo felis domain set <new-ip>.nip.io`（[更改根域名](/operations/access#change-domain)）。
 
-::: info
+::: info 说明
 修改主机名不会造成影响。安装器在 `/etc/rancher/k3s/config.yaml.d/50-felis.yaml` 中固定了 k3s 节点名（`node-name:`），所有本地存储卷都绑定到该名称。可通过 `sudo k3s kubectl get node -o jsonpath='{.items[0].metadata.annotations.k3s\.io/node-args}'` 检查。
 :::
 
