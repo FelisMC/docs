@@ -120,7 +120,8 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 | 分组 | 路径 | 等级 | 说明 |
 | --- | --- | --- | --- |
 | 登录 | `/api/v1/auth/…` | `public` | 通行密钥、邮箱验证码、管理员登录、绑定码、设置令牌、退出登录 |
-| 当前用户 | `/api/v1/me`、`/api/v1/me/servers` | `app` | 账户信息与本人的服务器 |
+| 当前用户 | `/api/v1/me`、`/api/v1/me/servers`、`/api/v1/me/server-quota` | `app` | 账户信息、本人的服务器与建服配额；在配额内创建与修改本人的服务器 |
+| 服务端软件 | `/api/v1/software…` | `app` | 可选核心、游戏版本、构建与所需 Java 版本 |
 | 账户 | `/api/v1/account/…` | `app` | 账号绑定、邮箱、通行密钥、身份复核、会话管理、账户迁移 |
 | 服务器操作 | `/api/v1/servers/{name}/…` | `app` | 唤醒、停止、重启、认领、状态、退役、任务记录 |
 | 控制台与玩家 | `/api/v1/servers/{name}/console`、`…/command`、`…/access/…`、`…/allowlist` | `app` | 控制台事件流与 RCON 命令；白名单、封禁、踢出、OP、LuckPerms |
@@ -132,7 +133,7 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 | 镜像与构建 | `/api/v1/images`、`/api/v1/images/build…` | `admin` | 镜像白名单；构建、构建日志、取消、安全扫描与 SBOM |
 | 审核提交 | `/api/v1/submissions…` | `admin` | 批准或拒绝投稿 |
 | 用户管理 | `/api/v1/users…` | `owner` | 用户、配额、会话、通行密钥、游戏角色绑定 |
-| 平台设置 | `/api/v1/settings/…`、`/api/v1/updates/…`、`/api/v1/platform/db-backup` | `owner` | 玩家进入策略、唤醒与归档策略、心跳、故障切换、邮件中继、认证源、维护窗口、版本更新报告、数据库备份状态 |
+| 平台设置 | `/api/v1/settings/…`、`/api/v1/updates/…`、`/api/v1/platform/db-backup` | `owner` | 玩家进入策略、唤醒与归档策略、自助建服默认配额、心跳、故障切换、邮件中继、认证源、维护窗口、版本更新报告、数据库备份状态 |
 | 故障切换 | `/api/v1/nodes/{node}/failover` | `owner` | 读取切换计划并对失联节点执行故障切换 |
 | 紧急停止 | `POST /api/v1/servers/{name}/emergency-stop` | `owner` | 立即停止服务器 |
 | 主机运维 | 见下文 | `owner` | 在主控主机上执行运维任务 |

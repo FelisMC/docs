@@ -595,7 +595,9 @@ These subcommands are run by services, timers, Jobs or the installer. Operators 
 | `node-control` | `felis-node-control.service`, the host operations service the panel uses. |
 | `nano` | `felis-nano.service` on a Felis-nano install. |
 | `panel-settings` | The installer's summary: prints whether a mail relay and a heartbeat are saved in the panel (`yes` or `no`, never a value). |
-| `mirror-build-tools` | `felis-build-tools.timer`: copies the build and scan tools and their databases into the registry. |
+| `mirror-build-tools` | `felis-build-tools.timer`: copies the build and scan tools and their databases, and the Java runtime images servers use, into the registry. `-only` selects one item, for example `runtime-java21`. |
+| `artifact-cache` | The felis-artifacts Deployment: the server software download cache. |
+| `install-self`, `install-server`, `launch` | Pods of servers running server software: copy the felis binary, install the server, start it. |
 | `bootstrap-assets`, `pin-images`, `image-bundle`, `manifests` | The installer and release builds. |
 | `apply` | Development: creates a MinecraftServer object directly, without its database records. |
 | `backup`, `restore`, `stage-world`, `files`, `export`, `fetch-context`, `scan-gate`, `push-image` | Jobs and init containers the control plane creates. |

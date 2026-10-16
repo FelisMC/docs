@@ -595,7 +595,9 @@ felis ha migrate-storage -node <node> -image <felis-image> [flags]
 | `node-control` | `felis-node-control.service`，即面板使用的主机操作服务。 |
 | `nano` | Felis-nano 安装中的 `felis-nano.service`。 |
 | `panel-settings` | 安装器的汇总输出：显示面板中是否保存了邮件中继和心跳（`yes` 或 `no`，从不显示具体值）。 |
-| `mirror-build-tools` | `felis-build-tools.timer`：将构建和扫描工具及其数据库复制到镜像仓库。 |
+| `mirror-build-tools` | `felis-build-tools.timer`：将构建和扫描工具及其数据库、服务器使用的 Java 运行时镜像复制到镜像仓库。`-only` 指定单项，例如 `runtime-java21`。 |
+| `artifact-cache` | felis-artifacts Deployment：服务端软件的下载缓存。 |
+| `install-self`、`install-server`、`launch` | 使用服务端软件的服务器 Pod：复制 felis 二进制、安装服务端、启动服务器。 |
 | `bootstrap-assets`、`pin-images`、`image-bundle`、`manifests` | 安装器和发布版构建。 |
 | `apply` | 开发用途：直接创建 MinecraftServer 对象，不创建对应的数据库记录。 |
 | `backup`、`restore`、`stage-world`、`files`、`export`、`fetch-context`、`scan-gate`、`push-image` | 控制面创建的 Job 和 init 容器。 |

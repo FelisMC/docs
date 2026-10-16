@@ -838,7 +838,7 @@ felis-api 启动时在日志中说明构建 Pod 是否使用用户命名空间�
 1. 主机能够访问 gcr.io、ghcr.io 和 mirror.gcr.io 后，重新复制工具：
 
    ```bash
-   sudo felis mirror-build-tools                  # 全部四项
+   sudo felis mirror-build-tools                  # 全部构建工具与运行时
    sudo felis mirror-build-tools -only trivy-db   # 单项
    ```
 
@@ -944,6 +944,52 @@ sudo k3s kubectl -n minecraft get minecraftserver <name> -o jsonpath='{.spec.ima
 3. 勾选「我已备份世界，确认更换镜像」并保存。
 
 如需回退，重新设置之前的构建（审计日志为每次更换记录 `image_from` 和 `image_to`），并恢复升级前的备份。回退的前提是镜像仓库中仍保留旧构建。默认标签移动后，如需继续以指定 Minecraft 版本创建服务器，将该版本标签加入白名单（[镜像](/guide/administration#images)）。
+
+### 服务端软件安装失败 {#software-install}
+
+使用服务端软件的服务器在启动前安装服务端，安装失败时服务器停留在「启动中」，时限耗尽后显示「启动失败」。首次启动需要访问下载站；之后的启动只校验已下载的文件。
+
+**排查**
+
+```bash
+sudo k3s kubectl -n minecraft logs <server>-0 -c install-server
+sudo k3s kubectl -n felis logs deploy/felis-artifacts --tail=50
+```
+
+| 消息 | 原因 | 解决 |
+| --- | --- | --- |
+| `fetch <路径>: … content does not match its published digest` | 下载内容与官方公布的哈希值不一致，文件损坏或被替换。 | 重试启动。每次都出现时，报告该问题。 |
+| `fetch <路径>: HTTP 403`、`HTTP 5xx` 或超时 | 节点无法访问下载站，或下载站暂时不可用。缓存日志中对应 `artifact download failed`。 | 确认节点可以访问互联网后重试启动。 |
+| `software: <地址> answered HTTP …` | 首次安装时无法读取版本信息。 | 稍后重试启动。已安装的服务器不受影响。 |
+| `the custom jar <路径> is not in the server's files yet` | 自定义 jar 尚未上传。 | 在服务器文件中上传 jar，或在「编辑服务器配置」中更正路径。 |
+| `the forge installer failed`（或 neoforge） | 官方安装器运行失败，常见原因是无法访问其 Maven 仓库或内存不足。安装器使用服务器的内存上限。 | 查看日志中安装器的输出；内存不足时调大服务器内存。 |
+| `a forwarding mod (Modrinth …) for <核心> <版本> not found` | Modrinth 已不再提供创建服务器时可用的转发组件。 | 更换游戏版本，或报告该问题。 |
+
+下载缓存不可用时，服务器直接从官方来源下载，安装不会因此失败。
+
+### Java 运行时不可用 {#runtime-unavailable}
+
+创建服务器或更换服务端软件时提示 `runtime_unavailable`，或服务器 Pod 拉取 `mirror/eclipse-temurin` 镜像时出现 `ImagePullBackOff`。
+
+**原因**
+
+服务端软件运行在集群内镜像仓库中的 Java 运行时镜像上。安装器与 `felis-build-tools.timer` 通过 `felis mirror-build-tools` 从 Docker Hub 复制这些镜像，复制尚未完成或主机无法访问 Docker Hub 时，运行时不可用。
+
+| Java 版本 | 镜像仓库中的副本 | `-only` 名称 |
+| --- | --- | --- |
+| 8 | `mirror/eclipse-temurin:8-jre` | `runtime-java8` |
+| 17 | `mirror/eclipse-temurin:17-jre` | `runtime-java17` |
+| 21 | `mirror/eclipse-temurin:21-jre` | `runtime-java21` |
+| 25 | `mirror/eclipse-temurin:25-jre` | `runtime-java25` |
+
+**解决**
+
+主机能够访问 Docker Hub 后，复制运行时：
+
+```bash
+sudo felis mirror-build-tools                          # 构建工具与全部运行时
+sudo felis mirror-build-tools -only runtime-java21     # 单个运行时
+```
 
 ### 安装发布版时在主机上构建镜像 {#host-build-fallback}
 
@@ -1541,6 +1587,8 @@ felis-api 每 15 秒检查一次计划任务，并在「计划任务」页面记
 | 构建一直「排队中」；`mirror/kaniko-executor` 出现 `ImagePullBackOff`；`failed to download vulnerability DB` | [构建 Pod 无法启动](#build-pods-not-starting) |
 | 镜像仓库推送或拉取失败；写入返回 `503`；隔离网络主机提示 `could not pull …` | [镜像仓库推送或拉取失败](#registry-errors) |
 | `image_not_in_registry`、`registry_unavailable`、`image_change_unconfirmed`；将世界迁移到更新的 Minecraft 版本 | [创建服务器或更换镜像被拒绝](#game-images) |
+| 使用服务端软件的服务器启动失败；`install-server` 日志报错 | [服务端软件安装失败](#software-install) |
+| `runtime_unavailable`；`mirror/eclipse-temurin` 出现 `ImagePullBackOff` | [Java 运行时不可用](#runtime-unavailable) |
 | 安装发布版时在主机上构建镜像 | [安装发布版时在主机上构建镜像](#host-build-fallback) |
 | 大厅控制台无响应；较早的服务器缺少 RCON 或空闲停服；`felis converge` | [新版本引入的设置未应用到现有服务器](#system-server-fields) |
 | `409 world_volume_exists`；删除服务器后世界卷仍在 | [删除服务器后世界卷仍然保留](#world-volume-kept) |

@@ -1099,7 +1099,7 @@ The felis-api log states at startup whether build pods use a user namespace: `bu
 1. Once the host can reach gcr.io, ghcr.io and mirror.gcr.io, copy the tools again:
 
    ```bash
-   sudo felis mirror-build-tools                  # all four
+   sudo felis mirror-build-tools                  # every build tool and runtime
    sudo felis mirror-build-tools -only trivy-db   # one tool
    ```
 
@@ -1205,6 +1205,52 @@ To move a world to a newer build or Minecraft version:
 3. Tick **I've backed up the world — change the image** and save.
 
 To roll back, set the previous build again (the audit log records `image_from` and `image_to` for every change) and restore the pre-upgrade backup. This works while the registry still holds the old build. To create servers on a specific Minecraft version after the default tag has moved, whitelist its versioned tag ([Images](/en/guide/administration#images)).
+
+### Server software installation fails {#software-install}
+
+A server that runs server software installs it before starting. When the installation fails, the server stays **Starting** and shows **Start failed** once the time limit runs out. The first start needs the download sites; later starts only check the downloaded files.
+
+**Diagnose**
+
+```bash
+sudo k3s kubectl -n minecraft logs <server>-0 -c install-server
+sudo k3s kubectl -n felis logs deploy/felis-artifacts --tail=50
+```
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| `fetch <path>: … content does not match its published digest` | The download does not match the hash the official source publishes; the file is damaged or was replaced. | Retry the start. If it happens every time, report it. |
+| `fetch <path>: HTTP 403`, `HTTP 5xx` or a timeout | The node cannot reach the download site, or the site is temporarily unavailable. The cache logs `artifact download failed` for it. | Make sure the node can reach the internet, then retry the start. |
+| `software: <address> answered HTTP …` | Version information could not be read for the first installation. | Retry the start later. Installed servers are not affected. |
+| `the custom jar <path> is not in the server's files yet` | The custom jar has not been uploaded. | Upload the jar to the server files, or correct the path under **Edit Server Config**. |
+| `the forge installer failed` (or neoforge) | The official installer failed, usually because it cannot reach its Maven repository or runs out of memory. The installer runs within the server's memory limit. | Read the installer output in the log; raise the server's memory if it ran out. |
+| `a forwarding mod (Modrinth …) for <core> <version> not found` | Modrinth no longer publishes the forwarding component that was available when the server was created. | Change the game version, or report it. |
+
+When the download cache is unavailable, servers download from the official sources directly, and the installation does not fail because of it.
+
+### Java runtime unavailable {#runtime-unavailable}
+
+Creating a server or changing its server software answers `runtime_unavailable`, or a server pod shows `ImagePullBackOff` pulling a `mirror/eclipse-temurin` image.
+
+**Cause**
+
+Server software runs on Java runtime images in the in-cluster registry. The installer and `felis-build-tools.timer` copy them from Docker Hub with `felis mirror-build-tools`; until the copy has completed, or while the host cannot reach Docker Hub, the runtime is unavailable.
+
+| Java version | Copy in the registry | `-only` name |
+| --- | --- | --- |
+| 8 | `mirror/eclipse-temurin:8-jre` | `runtime-java8` |
+| 17 | `mirror/eclipse-temurin:17-jre` | `runtime-java17` |
+| 21 | `mirror/eclipse-temurin:21-jre` | `runtime-java21` |
+| 25 | `mirror/eclipse-temurin:25-jre` | `runtime-java25` |
+
+**Fix**
+
+Once the host can reach Docker Hub, copy the runtimes:
+
+```bash
+sudo felis mirror-build-tools                          # build tools and every runtime
+sudo felis mirror-build-tools -only runtime-java21     # one runtime
+```
 
 ### The installer builds images on the host during a release install {#host-build-fallback}
 
@@ -1802,6 +1848,8 @@ Act on the detail in the table. Timing rules that explain unexpected run times:
 | Build stays **Queued**; `ImagePullBackOff` on `mirror/kaniko-executor`; `failed to download vulnerability DB` | [Build pods do not start](#build-pods-not-starting) |
 | Registry push or pull fails; writes answer `503`; `could not pull …` on an air-gapped host | [Pushing to or pulling from the registry fails](#registry-errors) |
 | `image_not_in_registry`, `registry_unavailable`, `image_change_unconfirmed`; moving a world to a newer Minecraft | [Creating a server or changing its image is refused](#game-images) |
+| A server running server software fails to start; errors in the `install-server` log | [Server software installation fails](#software-install) |
+| `runtime_unavailable`; `ImagePullBackOff` on `mirror/eclipse-temurin` | [Java runtime unavailable](#runtime-unavailable) |
 | The installer builds images on the host during a release install | [The installer builds images on the host](#host-build-fallback) |
 | Lobby console dead; older servers lack RCON or idle stop; `felis converge` | [A newer setting never reaches an existing server](#system-server-fields) |
 | `409 world_volume_exists`; volume left after deleting a server | [A deleted server's world volume remains](#world-volume-kept) |

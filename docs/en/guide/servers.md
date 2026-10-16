@@ -9,11 +9,12 @@ This page explains how to create and claim servers in the Felis panel, control w
 
 ## Permissions {#permissions}
 
-What you can do depends on your account role and on who owns the server. In the table below, "server owner" is the account that claimed the server; "Owner" is the platform Owner role, which has every Admin right.
+What you can do depends on your account role and on who owns the server. In the table below, "server owner" is the account that claimed or created the server; "Owner" is the platform Owner role, which has every Admin right.
 
 | Action | Who |
 | --- | --- |
-| Create a server, edit the server configuration | Admin |
+| Create a server | Admin; an account with a server quota can create servers of its own, see [Self-service creation](#self-service) |
+| Edit the server configuration | Admin; server owners can change their own servers, except the image |
 | Claim an unowned server | Any account with a linked Minecraft account |
 | Start a server | Server owner, Admin; other players as the [autostart policy](#autostart) allows |
 | Stop, console, player management, files, scheduled tasks, backups and restore | Server owner, Admin |
@@ -25,29 +26,41 @@ Admins see every server on the platform on the **Servers** page, with its owner,
 
 ## Creating a server {#create-server}
 
-Admins create servers. A new server is stopped and belongs to no account until a user claims it. See [Claiming a server](#claim).
+A server an Admin creates is stopped and belongs to no account until a user claims it. See [Claiming a server](#claim). An account with a server quota can create servers it owns itself; see [Self-service creation](#self-service).
 
 1. Open **Servers** and select **New server**.
-2. Fill in the fields:
+2. Under **Runs on**, select **Server software** or **Whitelisted image**. Regular accounts can select server software only.
+3. Fill in the fields:
 
    | Field | Description |
    | --- | --- |
+   | Server software | The core, game version, build or loader version, and Java version. See [Server software](/en/guide/software#types). |
+   | Image | With **Whitelisted image**, an image from the image whitelist. See [Images and Minecraft versions](#images-versions). |
    | Name | 3–32 lowercase letters, digits or hyphens, with no hyphen at either end. `login`, `lobby`, `admin`, `panel`, `console`, `api`, `felis`, `velocity`, `registry`, `internal` and `www` are reserved by the platform. |
    | Subdomain | Same rules as the name. Players reach the server at `<subdomain>.<root>`. |
    | Display name (optional) | The name shown in the panel and the lobby menu. |
-   | Image | An image from the image whitelist. See [Images and Minecraft versions](#images-versions). |
+   | Execution node | Shown to Admins only, in a multi-node deployment: an online, approved node. See [Multi-node and high availability](/en/guide/distributed#overview). |
    | Memory | 2Gi, 4Gi (default), 6Gi or 8Gi; used as the Java heap and the container memory limit. |
    | Storage | Size of the world volume: 5Gi, 10Gi (default), 20Gi or 50Gi. |
    | Autostart policy | Defaults to **Owner only — wake from the panel**. See [Autostart policy](#autostart). |
-   | Execution node | Shown only in a multi-node deployment: an online, approved node. See [Multi-node and high availability](/en/guide/distributed#overview). |
 
-3. Select **Create**.
+4. With server software, accept the Minecraft End User License Agreement (EULA).
+5. Select **Create**.
 
-A new server stops automatically after 600 seconds with nobody online. Creating a server charges no user's quota; quotas are charged when the server is claimed. A name that matches the leftover world volume of a deleted server is refused until that volume is removed or another name is chosen.
+A new server stops automatically after 600 seconds with nobody online. A server an Admin creates charges no user's quota; quotas are charged when the server is claimed. A name that matches the leftover world volume of a deleted server is refused until that volume is removed or another name is chosen.
+
+### Self-service creation {#self-service}
+
+**New server** appears on the **Servers** page, and the account can create servers it owns, when:
+
+- It has a linked Minecraft account. See [Linking your account](/en/guide/players#account-linking).
+- It has a server quota: the Owner set a quota for this account, or turned on the default quota under [Self-service servers](/en/guide/administration#self-service).
+
+A self-created server runs server software only, and its resources count toward the account's quota. The panel shows the quota usage, and memory and storage sizes beyond the remaining quota cannot be selected. Once the server count reaches its cap, **New server** is unavailable. In a multi-node deployment the server is placed on the approved node with the fewest user servers. Server owners can give up their servers; deleting a server remains an Admin action, see [Giving up and deleting a server](#retire).
 
 ### Images and Minecraft versions {#images-versions}
 
-A server can use only enabled images from the image whitelist, which Admins maintain. See [Image whitelist](/en/guide/administration#images). Modpacks that players submit join the whitelist once they are reviewed and built. See [Submissions](/en/guide/administration#submissions).
+A server that runs an image can use only enabled images from the image whitelist, which Admins maintain. See [Image whitelist](/en/guide/administration#images). Modpacks that players submit join the whitelist once they are reviewed and built. See [Submissions](/en/guide/administration#submissions).
 
 - When a server is created, it is pinned to the build its image tag points to at that moment. When the tag later points to a new build, existing servers stay as they are.
 - After you change the image under **Edit Server Config**, the server uses the build the tag points to now; selecting the same tag again also selects its latest build. A Minecraft version change may upgrade the world on the next start, and upgraded chunks cannot be used by older versions. Before saving, tick **I've backed up the world — change the image**.
@@ -74,10 +87,11 @@ For claim errors, see [Account link and claim errors](/en/operations/troubleshoo
 
 ## Editing the server configuration {#edit-server}
 
-On the server's console page, Admins select **Edit Server Config** to change the following; fields left unchanged keep their values:
+On the server's console page, Admins and server owners select **Edit Server Config** to change the following; fields left unchanged keep their values:
 
 - Display name and autostart policy.
-- Image. See [Images and Minecraft versions](#images-versions).
+- Server software. See [Changing the core or version](/en/guide/software#change).
+- Image (Admins only). See [Images and Minecraft versions](#images-versions).
 - Memory and CPU limit. Enter the CPU limit in cores (for example `1` or `1.5`) or millicores (for example `500m`); leave it empty for no limit.
 - Idle auto-stop. See [Start, stop and sleep](#power).
 
@@ -298,10 +312,11 @@ With world cleanup enabled, worlds nobody has played for more than 15 days are b
 
 ## Quotas {#quotas}
 
-The Owner can set a quota for each account, limiting how many servers it owns and their total CPU, memory and storage. Quotas are checked:
+The Owner can set a quota for each account, limiting how many servers it owns and their total CPU, memory and storage; with [Self-service servers](/en/guide/administration#self-service) on, accounts without their own quota use the default quota. Quotas are checked:
 
+- When a server is self-created, at the selected size.
 - When a server is claimed, at the server's actual size.
-- When an Admin raises the CPU or memory of an owned server.
+- When the CPU or memory of an owned server is raised.
 - When an account receives servers through an account migration.
 
-A claim that would exceed the quota is refused. Lowering a quota restricts later actions only and leaves existing servers alone. To set quotas, see [Quotas](/en/guide/administration#quotas).
+An action that would exceed the quota is refused. Lowering a quota restricts later actions only and leaves existing servers alone. To set quotas, see [Quotas](/en/guide/administration#quotas).

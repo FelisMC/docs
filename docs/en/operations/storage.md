@@ -17,6 +17,7 @@ This page is for the host operator. It describes what Felis writes to disk and w
 | World archives | the `felis-backups` volume | about one compressed data volume per backup kept |
 | In-cluster registry | the `registry` volume | 2–3 GB for the stock images; grows with custom builds |
 | Submission uploads | the `felis-uploads` volume, when uploads are stored on the host | up to the upload limits ([Upload storage](#upload-storage)) |
+| Server software download cache | the `felis-artifacts` volume | up to 90% of the volume's requested size ([Downloads and caching](/en/guide/software#downloads)) |
 | k3s's container images | `/var/lib/rancher/k3s/agent/containerd` | 6–9 GB |
 | Docker's images and build cache | `/var/lib/containerd`, on a host that built its images itself | 5–10 GB after repeated upgrades |
 | Release assets during an installation | `/var/lib/felis/artifacts` | up to about 2 GB, deleted once the images are in the registry |
@@ -31,13 +32,14 @@ A world backup archives the server's whole data volume, including libraries and 
 
 ### Volume sizes {#volume-sizes}
 
-The registry, uploads and world-archive volumes request a size on the first installation:
+The registry, uploads, world-archive and server software download cache volumes request a size on the first installation:
 
 | Volume | Installer variable | Default request |
 | --- | --- | --- |
 | `registry` | `FELIS_REGISTRY_STORAGE` | 10Gi |
 | `felis-uploads` | `FELIS_UPLOADS_STORAGE` | 5Gi |
 | `felis-backups` | `FELIS_BACKUP_STORAGE` | 10Gi |
+| `felis-artifacts` | `FELIS_ARTIFACTS_STORAGE` | 10Gi |
 
 On k3s's local-path storage the requested size is not enforced: each volume is a directory on the node's disk and can grow beyond it. Every volume therefore shares the filesystem that holds `/var/lib/rancher/k3s`. A rerun of the installer keeps an existing claim's size and warns when the variable asks for another.
 
@@ -45,6 +47,7 @@ What bounds growth:
 
 - **World archives**: the backup retention and the optional backup store cap ([Retention](/en/operations/backup#retention)). A backup Job refuses to write an archive that would leave less than 10% of the archive filesystem free.
 - **Registry**: every 6 hours felis-api deletes the image manifests nothing uses, and once a day the registry frees the layers no remaining manifest names. Images pushed in the last 24 hours, whitelisted images, images servers pin and the 5 newest tagged builds of each platform repository are kept.
+- **Server software download cache**: beyond 90% of its volume's requested size, the cache deletes the least recently used files.
 - **Docker's build cache**: on a host that built its images, `docker builder prune -af` (with Docker started) reclaims it when space is short; the next upgrade rebuilds it.
 
 Give the host at least **40 GB**, and 60 GB or more once worlds and custom images accumulate. The installer's preflight checks the free space it needs ([Preflight checks](/en/guide/requirements#preflight)) and warns when a filesystem would end above 85% full, where k3s starts deleting cached images; near 95% it evicts pods.

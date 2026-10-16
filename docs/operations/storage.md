@@ -17,6 +17,7 @@ description: Felis 在主机上的数据存放位置、扩容磁盘与将数据�
 | 世界归档 | `felis-backups` 卷 | 每份保留的备份约为一个压缩后的数据卷 |
 | 集群内镜像仓库 | `registry` 卷 | 默认镜像 2–3 GB，随自定义构建增长 |
 | 投稿上传内容 | 上传内容保存在本机时为 `felis-uploads` 卷 | 不超过上传限制（见[上传存储](#upload-storage)） |
+| 服务端软件下载缓存 | `felis-artifacts` 卷 | 不超过该卷申请容量的 90%（见[下载与缓存](/guide/software#downloads)） |
 | k3s 容器镜像 | `/var/lib/rancher/k3s/agent/containerd` | 6–9 GB |
 | Docker 镜像与构建缓存 | 自行构建镜像的主机上的 `/var/lib/containerd` | 多次升级后 5–10 GB |
 | 安装期间的发布版附件 | `/var/lib/felis/artifacts` | 最多约 2 GB，镜像进入镜像仓库后删除 |
@@ -31,13 +32,14 @@ description: Felis 在主机上的数据存放位置、扩容磁盘与将数据�
 
 ### 卷容量 {#volume-sizes}
 
-镜像仓库卷、上传卷和世界归档卷在首次安装时申请容量：
+镜像仓库卷、上传卷、世界归档卷和服务端软件下载缓存卷在首次安装时申请容量：
 
 | 卷 | 安装变量 | 默认申请容量 |
 | --- | --- | --- |
 | `registry` | `FELIS_REGISTRY_STORAGE` | 10Gi |
 | `felis-uploads` | `FELIS_UPLOADS_STORAGE` | 5Gi |
 | `felis-backups` | `FELIS_BACKUP_STORAGE` | 10Gi |
+| `felis-artifacts` | `FELIS_ARTIFACTS_STORAGE` | 10Gi |
 
 在 k3s 的 local-path 存储上，申请的容量不会强制生效：每个卷都是节点磁盘上的一个目录，可以超出申请容量。因此所有卷共用存放 `/var/lib/rancher/k3s` 的文件系统。重新运行安装器时，已有卷声明保持原容量；变量要求不同容量时，安装器给出警告。
 
@@ -45,6 +47,7 @@ description: Felis 在主机上的数据存放位置、扩容磁盘与将数据�
 
 - **世界归档**：备份保留策略及可选的备份存储上限（见[保留策略](/operations/backup#retention)）。若写入归档后归档文件系统的可用空间将低于 10%，备份 Job 拒绝写入。
 - **镜像仓库**：felis-api 每 6 小时删除一次无人使用的镜像清单，镜像仓库每天释放一次不再被任何清单引用的镜像层。最近 24 小时内推送的镜像、白名单中的镜像、服务器固定使用的镜像，以及每个平台仓库最新的 5 个带标签构建都会保留。
+- **服务端软件下载缓存**：缓存超过其卷申请容量的 90% 时，删除最久未使用的文件。
 - **Docker 构建缓存**：在自行构建镜像的主机上空间不足时，启动 Docker 后执行 `docker builder prune -af` 回收；下次升级会重新构建。
 
 主机至少应准备 **40 GB**；世界和自定义镜像增多后，建议 60 GB 以上。安装器的预检会检查所需的可用空间（见[安装前检查](/guide/requirements#preflight)），并在安装后文件系统占用将超过 85% 时警告：k3s 在此时开始删除缓存镜像，接近 95% 时会驱逐 Pod。

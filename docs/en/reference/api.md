@@ -120,7 +120,8 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 | Group | Path | Tier | Purpose |
 | --- | --- | --- | --- |
 | Sign-in | `/api/v1/auth/…` | `public` | Passkey, email code, staff login, bind code, setup token, sign-out |
-| Current user | `/api/v1/me`, `/api/v1/me/servers` | `app` | Account details and the user's own servers |
+| Current user | `/api/v1/me`, `/api/v1/me/servers`, `/api/v1/me/server-quota` | `app` | Account details, the user's own servers and server quota; creating and changing their own servers within it |
+| Server software | `/api/v1/software…` | `app` | Available cores, game versions, builds and the Java each needs |
 | Account | `/api/v1/account/…` | `app` | Account linking, email, passkeys, reauthentication, sessions, account migration |
 | Server actions | `/api/v1/servers/{name}/…` | `app` | Wake, stop, restart, claim, status, retirement, job records |
 | Console and players | `/api/v1/servers/{name}/console`, `…/command`, `…/access/…`, `…/allowlist` | `app` | The console event stream and RCON commands; whitelist, bans, kicks, OP, LuckPerms |
@@ -132,7 +133,7 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 | Images and builds | `/api/v1/images`, `/api/v1/images/build…` | `admin` | The image whitelist; builds, build logs, cancellation, security scans and SBOMs |
 | Submission review | `/api/v1/submissions…` | `admin` | Approve or reject submissions |
 | User administration | `/api/v1/users…` | `owner` | Users, quotas, sessions, passkeys, game profile links |
-| Platform settings | `/api/v1/settings/…`, `/api/v1/updates/…`, `/api/v1/platform/db-backup` | `owner` | Player entry policy, wake and archive policies, heartbeat, failover, mail relay, authentication sources, maintenance window, update report, database backup status |
+| Platform settings | `/api/v1/settings/…`, `/api/v1/updates/…`, `/api/v1/platform/db-backup` | `owner` | Player entry policy, wake and archive policies, the self-service default quota, heartbeat, failover, mail relay, authentication sources, maintenance window, update report, database backup status |
 | Failover | `/api/v1/nodes/{node}/failover` | `owner` | Read the failover plan and fail over a lost node |
 | Emergency stop | `POST /api/v1/servers/{name}/emergency-stop` | `owner` | Stop a server immediately |
 | Host operations | See below | `owner` | Run maintenance tasks on the controller host |

@@ -14,6 +14,7 @@ const gettingStartedSidebar: DefaultTheme.SidebarItem[] = [
     text: '使用指南',
     items: [
       { text: '管理服务器', link: '/guide/servers' },
+      { text: '服务端软件', link: '/guide/software' },
       { text: '玩家接入', link: '/guide/players' },
       { text: '平台管理', link: '/guide/administration' },
     ],
@@ -83,6 +84,7 @@ const englishLabels: Record<string, string> = {
   '安装与部署': 'Installation',
   '使用指南': 'User guide',
   '管理服务器': 'Managing servers',
+  '服务端软件': 'Server software',
   '玩家接入': 'Player access',
   '平台管理': 'Platform administration',
   '运维': 'Operations',

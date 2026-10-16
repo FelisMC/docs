@@ -16,12 +16,13 @@ Felis 的控制面由一个 `felis` 二进制提供。该二进制包含 API、o
 | felis-api | `felis` 命名空间中的 Deployment `felis-api`，单副本 | 提供内部接口、外部接口和 Web 面板；读写 PostgreSQL；创建备份、恢复、文件和构建任务。见 [API 参考](/reference/api) |
 | felis-operator | Deployment `felis-operator` | 协调每台服务器的 `MinecraftServer` 自定义资源，创建并维护其 Pod、Service 和世界卷，并判断服务器是否就绪（通常通过 RCON） |
 | PostgreSQL | Deployment `felis-postgres`，数据位于主机 `/var/lib/felis/postgres` | 保存账户、服务器归属、配额、审计日志和备份索引 |
-| 镜像仓库 | Deployment `registry`，带访问控制边车 `registry-gate` | 存放控制面镜像、系统服镜像、构建产出的镜像，以及构建工具的镜像副本 |
+| 镜像仓库 | Deployment `registry`，带访问控制边车 `registry-gate` | 存放控制面镜像、系统服镜像、构建产出的镜像，以及构建工具与 Java 运行时的镜像副本 |
+| 服务端软件下载缓存 | Deployment `felis-artifacts` 与同名卷 | 按哈希值缓存服务器安装时下载的服务端文件，同一文件只从官方来源下载一次。见[服务端软件](/guide/software#downloads) |
 | 世界清理 | CronJob `felis-reaper`（启用世界清理时） | 备份并移除长期闲置的世界。见[世界清理](/operations/backup#world-cleanup) |
 | 游戏代理 | 主机上的 systemd 服务 `felis-velocity`（Velocity + Felis 代理插件） | 接受玩家连接，验证身份，按域名和玩家进入策略路由，唤醒休眠服务器 |
 | 登录空间 | `minecraft` 命名空间中的系统服 `login`（Limbo + Felis 登录插件） | 为尚未绑定面板账户的玩家完成游戏内登录。见[登录空间镜像](/reference/limbo) |
 | 正式大厅 | 系统服 `lobby`（Paper + Felis 大厅插件 + LuckPerms） | 玩家认证后的中转区，提供服务器菜单。见[大厅镜像](/reference/lobby) |
-| 游戏服务器 | `minecraft` 命名空间中的 Pod 与世界卷，每台服务器一个 `MinecraftServer` 资源 | 运行用户的 Minecraft 服务器 |
+| 游戏服务器 | `minecraft` 命名空间中的 Pod 与世界卷，每台服务器一个 `MinecraftServer` 资源 | 运行用户的 Minecraft 服务器：使用白名单镜像，或在 Java 运行时镜像上运行安装到世界卷中的服务端软件 |
 | 镜像构建 | `felis-build` 命名空间中的 Job | 使用 Kaniko 构建投稿的整合包镜像，使用 Trivy 扫描 |
 | 主机服务 | systemd 单元：`felis-node-control.service`、`felis-watchdog.timer`、`felis-db-backup.timer`、`felis-offsite.timer`、`felis-update-check.timer`、`felis-build-tools.timer`；使用 Cloudflare Tunnel 时还有 `cloudflared-felis` | 执行面板下发的主机任务、健康检查、数据库备份、异地副本、版本检查和构建工具镜像同步 |
 
