@@ -206,7 +206,7 @@ export default withMermaid({
     },
   },
   themeConfig: {
-    logo: { src: '/felis-logo.svg', alt: 'Felis' },
+    logo: { src: '/felis-app.svg', alt: 'Felis' },
     nav: [
       { text: '官网', link: 'https://felismc.com/', target: '_self' },
       { text: '开始使用', link: '/', activeMatch: '^/(?:$|guide/(?!distributed$|building$))' },
