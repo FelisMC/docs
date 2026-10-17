@@ -40,8 +40,8 @@ A server an Admin creates is stopped and belongs to no account until a user clai
    | Subdomain | Same rules as the name. Players reach the server at `<subdomain>.<root>`. |
    | Display name (optional) | The name shown in the panel and the lobby menu. |
    | Execution node | Shown to Admins only, in a multi-node deployment: an online, approved node. See [Multi-node and high availability](/en/guide/distributed#overview). |
-   | Memory | 2Gi, 4Gi (default), 6Gi or 8Gi; used as the Java heap and the container memory limit. |
-   | Storage | Size of the world volume: 5Gi, 10Gi (default), 20Gi or 50Gi. |
+   | Memory | The container memory limit in GiB: 4 by default, at least 1, decimals such as 1.5 allowed. The Java heap is sized from it. |
+   | Storage | The world volume size in whole GiB: 10 by default. It cannot be changed after creation. |
    | Autostart policy | Defaults to **Owner only — wake from the panel**. See [Autostart policy](#autostart). |
 
 4. With server software, accept the Minecraft End User License Agreement (EULA).
@@ -56,7 +56,7 @@ A new server stops automatically after 600 seconds with nobody online. A server 
 - It has a linked Minecraft account. See [Linking your account](/en/guide/players#account-linking).
 - It has a server quota: the Owner set a quota for this account, or turned on the default quota under [Self-service servers](/en/guide/administration#self-service).
 
-A self-created server runs server software only, and its resources count toward the account's quota. The panel shows the quota usage, and memory and storage sizes beyond the remaining quota cannot be selected. Once the server count reaches its cap, **New server** is unavailable. In a multi-node deployment the server is placed on the approved node with the fewest user servers. Server owners can give up their servers; deleting a server remains an Admin action, see [Giving up and deleting a server](#retire).
+A self-created server runs server software only, and its resources count toward the account's quota. The panel shows the quota usage and what is left of it, and a server whose memory or storage exceeds what is left cannot be created. Once the server count reaches its cap, **New server** is unavailable. In a multi-node deployment the server is placed on the approved node with the fewest user servers. Server owners can give up their servers; deleting a server remains an Admin action, see [Giving up and deleting a server](#retire).
 
 ### Images and Minecraft versions {#images-versions}
 

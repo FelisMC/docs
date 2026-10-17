@@ -30,7 +30,7 @@ A server can also keep running an image from the image whitelist, see [Images an
 | Forge | Established mod loader | MinecraftForge | 1.12.2 |
 | NeoForge | Mod loader derived from Forge | NeoForged | 1.20.2 |
 | Vanilla | Mojang's official server | Mojang | 1.7.10 |
-| Custom jar | Starts a jar uploaded to the server files | Server owner | — |
+| Custom jar | Upload a jar, or use one in the server files | Server owner | — |
 
 The version list shows releases only by default; select "Show pre-releases and snapshots" to include pre-releases, release candidates and snapshots. After a game version is selected:
 
@@ -104,10 +104,18 @@ A custom jar runs server software the platform does not list, such as hybrid or 
 
 For a new server:
 
-1. In "New server", select "Custom jar" and choose the jar to run under "Jar file". "Jar path" defaults to the file name and can be changed to another path inside the server directory, such as `pack/server.jar`; the folders in it are created automatically.
-2. Select the Java version, accept the Minecraft EULA and create the server. Once the server is created, the chosen jar is uploaded to that path; if the upload fails, the dialog offers "Retry upload" without creating the server again.
+1. In "New server", select "Custom jar" and drag the jar onto the "Jar file" area, or click it and choose the file. The jar is uploaded to the server's root folder under its own name; to put it elsewhere, select "Put it elsewhere" and enter a path relative to the root folder, such as `pack/server.jar`. The folders in the path are created automatically.
+2. Select the Java version, accept the Minecraft EULA and create the server. Once the server is created, the chosen jar is uploaded; if the upload fails, the dialog offers "Retry upload" without creating the server again.
 3. Start the server.
 
-To move an existing server to a custom jar, stop it, upload the jar through [Server files](/en/guide/servers#files), then in "Edit Server Config" select "Change server software", select "Custom jar" and enter the jar's path.
+To upload the jar later, select "Enter a path" under "Jar file" and enter where the jar will be.
+
+For an existing server, select "Change server software" and "Custom jar" in "Edit Server Config". While the server is stopped, "Jar file" offers three ways:
+
+- "In the server": lists the jar files in the server's root folder to choose from; a lone jar is selected automatically.
+- "Upload": choose a new jar, which is uploaded to the root folder on save, replacing a file of the same name.
+- "Enter a path": enter the jar's path relative to the root folder.
+
+While the server is running its files cannot be read or uploaded to, so only a path can be entered.
 
 The jar must honor the RCON settings in `server.properties`: the platform uses RCON to tell when the server is ready, read the player count and save the world. If the jar has not been uploaded, the start fails with an upload hint. The path must be inside the server directory, end in `.jar`, and not be inside the `.felis` directory.

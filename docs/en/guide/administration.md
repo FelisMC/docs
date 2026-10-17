@@ -59,18 +59,33 @@ The signed-in account cannot change its own role, disable itself or delete itsel
 
 ## Quotas {#quotas}
 
-Under **Quotas** in the user details, the Owner limits the resources an account may own:
+A quota limits how many servers an account may own and their total resources. It is checked when the account creates a server for itself, claims a server, raises the CPU or memory of a server it owns, or receives a server by account migration; an action that would exceed it is refused. Lowering a quota restricts later actions only and leaves existing servers alone; an Admin can bring the account back within it by shrinking its servers. Servers given up but not yet processed still count. For the effect on users, see [Quotas](/en/guide/servers#quotas).
 
-| Field | Description |
+Each account is held to one of two quotas:
+
+- **The default quota**: applies to every account without a quota of its own, and is set in the **Self-service servers and default quota** card on the **Users** page; see [Self-service servers and the default quota](#self-service).
+- **An own quota**: set in the **Quotas** card of the user details, and takes precedence over the default quota; see [One account's quota](#user-quota).
+
+### Self-service servers and the default quota {#self-service}
+
+The **Self-service servers and default quota** card at the top of the **Users** page sets the default quota. When it is on, accounts without a quota of their own can create servers they own within the default quota (see [Creating your own server](/en/guide/servers#self-service)), and their claims and resource changes are held to it as well. When it is off (the default), those accounts cannot create servers, and their claims are not limited.
+
+| Setting | Description |
 | --- | --- |
-| Max Servers | Number of servers the account may own. |
-| Max CPU (millicore) | Sum of the CPU limits of all the account's servers. |
-| Max Memory (MiB) | Sum of the memory of all the account's servers. |
-| Max Storage (GiB) | Sum of the world volume sizes of all the account's servers. |
+| Enable self-service servers | Whether accounts without a quota of their own are held to the default quota. |
+| Servers | How many servers an account may own; a whole number. |
+| Memory (GB) | The total memory of all of an account's servers. |
+| CPU (cores) | The total CPU limit of all of an account's servers; decimals are allowed. |
+| Storage (GB) | The total world volume size of all of an account's servers. |
 
-Leave a field empty for no limit; `0` allocates none of that resource. An account without a quota uses the default quota when [Self-service servers](#self-service) is on; otherwise its claims are not limited, and it cannot create servers itself.
+Leave a field empty for no limit; enter `0` to grant none of that resource. A change to the default quota affects later actions only, not existing servers.
 
-Quotas are checked when a server is self-created, when a server is claimed, when the CPU or memory of an owned server is raised, and when an account receives servers through an account migration; an action that would exceed the quota is refused. Lowering a quota restricts later actions only and leaves existing servers alone; an Admin can bring an account back under its quota by shrinking its servers. A server that was given up counts toward the quota until it has been processed. For how quotas affect users, see [Quotas](/en/guide/servers#quotas).
+### One account's quota {#user-quota}
+
+In the **Quotas** card of the user details, choose where the account's quota comes from, then select **Save quota**:
+
+- **Default quota**: the card shows what the default quota allows; while it is off, the card says the account cannot create servers and its claims are not limited. For an account with a quota of its own, choosing this and saving deletes that quota.
+- **Own quota**: enter the servers, memory (GB), CPU (cores) and storage (GB). Leave a field empty for no limit; enter `0` to grant none of it. With every field empty, the account has no limit at all and is no longer held to the default quota.
 
 The platform-wide running server limit is set in the platform settings. See [Startup and wake policy](#wake-policy). Modpack submissions have limits of their own: at most 5 pending submissions per user; by default 1 GiB per build context, 2 GiB of uploads per user and 4 GiB for all users together, adjusted with keys of the `[registry]` table in `felis.toml` such as `context_max_bytes` and `user_uploads_max_bytes`.
 
@@ -135,7 +150,7 @@ Under **Platform → Platform settings**, the Owner manages platform-wide settin
 
 | Tab | Cards |
 | --- | --- |
-| Player entry | Player entry policy (see [Player entry policy](/en/guide/players#entry-policy)), Startup and wake policy, Self-service servers |
+| Player entry | Player entry policy (see [Player entry policy](/en/guide/players#entry-policy)), Startup and wake policy |
 | Notifications and retention | Mail delivery, Monitoring heartbeat, Backup and audit retention |
 | Access and security | Access and domain, Upload storage, Credential rotation, Game proxy, System server completion |
 | Distributed | Distributed deployment, Node operations, Execution nodes, Failover (see [Multi-node and high availability](/en/guide/distributed#overview)) |
@@ -150,20 +165,6 @@ Saving a setting requires identity verification and is made against the current 
 | Wake cooldown (0–3600 seconds) | Minimum interval between two accepted wake requests for the same server; `0` disables the cooldown. |
 
 The running limit is an admission check, so concurrent requests can briefly exceed it; whether Kubernetes can schedule a server still depends on the nodes' free memory. After **Save and apply**, the policy is active on every API replica at once, without a restart.
-
-### Self-service servers {#self-service}
-
-The **Self-service servers** card on the **Player entry** tab sets the default quota. When it is on, accounts without a quota of their own can create servers they own within the default quota (see [Self-service creation](/en/guide/servers#self-service)), and their claims and resource changes are held to it as well; accounts with their own quota keep it. When it is off (the default), accounts without their own quota cannot create servers, and their claims are not limited.
-
-| Setting | Description |
-| --- | --- |
-| Enable self-service servers | Whether accounts without their own quota use the default quota. |
-| Servers | Number of servers an account may own; a whole number. |
-| Memory (GB) | Sum of the memory of all the account's servers. |
-| CPU (cores) | Sum of the CPU limits of all the account's servers; decimals are allowed. |
-| Storage (GB) | Sum of the world volume sizes of all the account's servers. |
-
-Leave a field empty for no limit; enter `0` to grant none of that resource. Changing the default quota affects later actions only and leaves existing servers alone.
 
 ### Mail delivery {#mail-relay}
 
