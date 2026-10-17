@@ -191,7 +191,7 @@ The page offers presets and keeps a **Recent Actions History**, from which **Rev
 
 ## Server files {#files}
 
-The **Server Files** page browses and repairs files in the world volume, for the server owner and Admins. A running server mounts its world volume exclusively, so stop the server completely before browsing or editing files.
+The **Server Files** page browses and repairs files in the world volume, for the server owner and Admins. A running server mounts its world volume exclusively, so stop the server completely before browsing or editing files. A new server that has not started yet can use it as well, for example to put a modpack, a world or a custom jar in place before its first start.
 
 You can:
 

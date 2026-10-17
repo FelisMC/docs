@@ -102,8 +102,12 @@ A server running a server image can also switch to server software, which additi
 
 A custom jar runs server software the platform does not list, such as hybrid or modified servers.
 
-1. Upload the jar through [Server files](/en/guide/servers#files), for example as `server.jar` in the server's root directory.
-2. When creating or editing the server, select "Custom jar", enter the jar's path relative to the server directory, and select the Java version.
+For a new server:
+
+1. In "New server", select "Custom jar" and choose the jar to run under "Jar file". "Jar path" defaults to the file name and can be changed to another path inside the server directory, such as `pack/server.jar`; the folders in it are created automatically.
+2. Select the Java version, accept the Minecraft EULA and create the server. Once the server is created, the chosen jar is uploaded to that path; if the upload fails, the dialog offers "Retry upload" without creating the server again.
 3. Start the server.
+
+To move an existing server to a custom jar, stop it, upload the jar through [Server files](/en/guide/servers#files), then in "Edit Server Config" select "Change server software", select "Custom jar" and enter the jar's path.
 
 The jar must honor the RCON settings in `server.properties`: the platform uses RCON to tell when the server is ready, read the player count and save the world. If the jar has not been uploaded, the start fails with an upload hint. The path must be inside the server directory, end in `.jar`, and not be inside the `.felis` directory.
