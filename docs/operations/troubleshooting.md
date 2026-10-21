@@ -89,6 +89,16 @@ Owner 无需登录主机终端即可执行相同的检查：
 
 每项主机任务都需要重新验证身份，并记入审计日志；同一时间只运行一项主机任务。面板无法连接主机时（例如 `felis-node-control` 已停止），请使用上述命令。全部操作及其命令行对应方式见[从面板执行主机操作](/operations/#panel-host-operations)。
 
+## 平台服务未运行 {#services-down}
+
+主机重启后平台没有完全恢复，或 `felis status`、`felis doctor` 显示 k3s、游戏代理等单元未运行时，执行：
+
+```bash
+sudo felis start
+```
+
+命令先启动集群并等待节点就绪，再启动其余设为开机启动的服务与定时器，最后等待控制面的全部 Deployment 就绪，并逐项输出结果。已在运行的服务不受影响。仍有部分未能启动时，按输出中给出的命令查看对应日志，详见 [felis start](/reference/cli#start)。
+
 ## 服务器 {#server-problems}
 
 ### 服务器一直处于「启动中」 {#server-stuck-starting}
@@ -1572,6 +1582,7 @@ felis-api 每 15 秒检查一次计划任务，并在「计划任务」页面记
 | 症状 | 参见 |
 | --- | --- |
 | 从何处开始：状态、健康检查、支持包、日志 | [首先检查](#first-steps) |
+| 主机重启后平台未恢复；k3s、游戏代理等服务未运行 | [平台服务未运行](#services-down) |
 | 服务器卡在 `Starting`；`PodNotReady`、`RconNotReachable` | [服务器卡在启动中](#server-stuck-starting) |
 | 服务器处于 `Failed`；`StartupTimeout`、`ReadinessTimeout` | [服务器进入 Failed](#server-failed)、[新版本引入的设置未应用到现有服务器](#system-server-fields) |
 | 服务器无法停止 | [服务器无法停止](#server-wont-stop) |

@@ -133,6 +133,20 @@ only one host task runs at a time. When the panel cannot reach the host, for exa
 [Running host operations from the panel](/en/operations/#panel-host-operations) lists every
 operation and its command-line equivalent.
 
+## Platform services are not running {#services-down}
+
+When the platform did not fully come back after a reboot, or `felis status` or `felis doctor`
+shows units such as k3s or the game proxy not running, run:
+
+```bash
+sudo felis start
+```
+
+It starts the cluster and waits for the node to be Ready, then starts the other services and
+timers set to start at boot, then waits for every control plane Deployment to be ready, and
+prints the outcome of each. Services already running are left alone. If a part still does not
+come up, read its logs with the command the output gives; see [felis start](/en/reference/cli#start).
+
 ## Servers {#server-problems}
 
 ### A server stays in Starting {#server-stuck-starting}
@@ -1833,6 +1847,7 @@ Act on the detail in the table. Timing rules that explain unexpected run times:
 | Symptom | See |
 | --- | --- |
 | Where to start: status, health check, support bundle, logs | [First steps](#first-steps) |
+| The platform did not come back after a reboot; k3s, the game proxy or another service is not running | [Platform services are not running](#services-down) |
 | Server stuck in `Starting`; `PodNotReady`, `RconNotReachable` | [A server is stuck starting](#server-stuck-starting) |
 | Server in `Failed`; `StartupTimeout`, `ReadinessTimeout` | [A server is in Failed](#server-failed), [A newer setting never reaches an existing server](#system-server-fields) |
 | A server does not stop | [A server does not stop](#server-wont-stop) |

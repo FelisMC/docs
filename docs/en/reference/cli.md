@@ -28,6 +28,7 @@ On some distributions, `sudo` uses a `secure_path` that omits `/usr/local/bin`. 
 | [`felis setup`](#setup) | Install the host when needed, configure access and upload storage, create the first Owner | Yes | Partly: **Platform settings → Access and security** |
 | [`felis breakGlass`](#break-glass) | Emergency console when no Owner can sign in | Yes | None |
 | [`felis version`](#version) | Print the version of the binary | No | None |
+| [`felis start`](#start) | Start every Felis service this host is set to start at boot, in order, and wait for the control plane | Yes | None |
 | [`felis status`](#status) | Show the platform at a glance | Yes | **Maintenance & Backups → Status** |
 | [`felis doctor`](#doctor) | Run every health check once | Yes | **Maintenance & Backups → Diagnostics** |
 | [`felis support-bundle`](#support-bundle) | Collect a redacted diagnostics archive | Yes | **Maintenance & Backups → Diagnostics** |
@@ -110,6 +111,28 @@ felis version
 ```
 
 **Root**: Not required. The command changes nothing.
+
+## Starting {#starting}
+
+### felis start {#start}
+
+Starts every Felis service this host is set to start at boot, in order: the way to bring the platform back after its services were stopped or failed to start, with the same result as the automatic start after a reboot.
+
+```bash
+sudo felis start [-timeout 10m] [-systemd-dir dir]
+```
+
+- Starts the cluster first (`k3s` on a controller, `k3s-agent` on a worker) and waits for the node to be Ready, then replicated storage (`iscsid`), the controller virtual address (`keepalived`), the host task service, the game proxy, Felis-nano, the Cloudflare tunnel and the Felis timers.
+- Starts only units that are enabled; a disabled unit, such as a tunnel that is not used, stays off. Units already running are left alone, so the command can be run again at any time.
+- On a controller, waits for every Deployment in the control namespace to be ready and lists the ready replicas of each.
+- When a part does not come up, lists each one with the command to read its logs, and exits non-zero.
+- `-timeout` (default 10 minutes) bounds the total wait for the cluster and the control plane; `-systemd-dir` (default `/etc/systemd/system`) is where the installer's units are.
+
+**Root**: required.
+
+**Panel**: none.
+
+**See also**: [Platform services are not running](/en/operations/troubleshooting#services-down).
 
 ## Status and diagnostics {#status-and-diagnostics}
 

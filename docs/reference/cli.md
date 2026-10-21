@@ -28,6 +28,7 @@ description: 面向运维人员的全部 felis 子命令：用法、主要参数
 | [`felis setup`](#setup) | 必要时安装主机，配置访问方式和上传存储，创建首位所有者 | 是 | 部分功能：「平台设置 → 访问与安全」 |
 | [`felis breakGlass`](#break-glass) | 无所有者能够登录时使用的应急控制台 | 是 | 无 |
 | [`felis version`](#version) | 显示二进制版本 | 否 | 无 |
+| [`felis start`](#start) | 按顺序启动本主机设为开机启动的全部 Felis 服务，并等待控制面就绪 | 是 | 无 |
 | [`felis status`](#status) | 概览平台状态 | 是 | 「维护与备份 → 状态」 |
 | [`felis doctor`](#doctor) | 执行一次全部健康检查 | 是 | 「维护与备份 → 诊断」 |
 | [`felis support-bundle`](#support-bundle) | 收集已脱敏的诊断归档 | 是 | 「维护与备份 → 诊断」 |
@@ -110,6 +111,28 @@ felis version
 ```
 
 **root**：不需要。该命令不更改任何内容。
+
+## 启动 {#starting}
+
+### felis start {#start}
+
+按顺序启动本主机设为开机启动的全部 Felis 服务，用于服务被停止或启动失败后恢复平台，效果与主机重启后的自动启动相同。
+
+```bash
+sudo felis start [-timeout 10m] [-systemd-dir dir]
+```
+
+- 先启动集群（主控节点为 `k3s`，工作节点为 `k3s-agent`）并等待节点就绪，再启动副本存储（`iscsid`）、控制节点虚拟地址（`keepalived`）、主机任务服务、游戏代理、Felis-nano、Cloudflare 隧道以及 Felis 的定时器。
+- 只启动设为开机启动的单元，已停用的单元（例如未使用的隧道）保持停用。已在运行的单元不受影响，命令可以重复执行。
+- 在主控节点上等待控制命名空间中的全部 Deployment 就绪，并列出每个 Deployment 的就绪副本数。
+- 有部分未能启动时，命令逐项列出并给出查看日志的命令，以非零状态退出。
+- `-timeout`（默认 10 分钟）限定等待集群与控制面的总时长；`-systemd-dir`（默认 `/etc/systemd/system`）指定安装器单元所在目录。
+
+**root**：需要。
+
+**面板**：无。
+
+**另见**：[平台服务未运行](/operations/troubleshooting#services-down)。
 
 ## 状态与诊断 {#status-and-diagnostics}
 
