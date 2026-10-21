@@ -168,7 +168,7 @@ The running limit is an admission check, so concurrent requests can briefly exce
 
 ### Mail delivery {#mail-relay}
 
-Mail delivery sends sign-in codes, identity confirmations and alerts. Under **Notifications and retention → Mail delivery**, fill in:
+Mail delivery sends sign-in codes, identity confirmations, alerts and [server event notifications](/en/guide/servers#notifications). Under **Notifications and retention → Mail delivery**, fill in:
 
 | Field | Description |
 | --- | --- |

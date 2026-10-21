@@ -94,6 +94,8 @@ On the server's console page, Admins and server owners select **Edit Server Conf
 - Image (Admins only). See [Images and Minecraft versions](#images-versions).
 - Memory and CPU limit. Enter the CPU limit in cores (for example `1` or `1.5`) or millicores (for example `500m`); leave it empty for no limit.
 - Idle auto-stop. See [Start, stop and sleep](#power).
+- Restarting after a crash and resuming after a host restart. See [Crashes and host restarts](#recovery).
+- Email notifications. See [Email notifications](#notifications).
 
 Raising the CPU or memory of an owned server must fit the server owner's quota; lowering them is never held to it. The login space and the lobby are system services, which Admins manage under **Login & lobby**. See [Customizing the login space and lobby](/en/guide/players#customize-login-lobby).
 
@@ -143,6 +145,49 @@ An emergency stop disconnects every player on the server at once. When the contr
 :::
 
 When the panel cannot read a server's state within 12 seconds, it shows the time of the last successful read and retries on its own. The state shown then is for reference only and does not prove that the game process is healthy.
+
+## Crashes and host restarts {#recovery}
+
+### Restarting after a crash {#crash-restart}
+
+When the server process exits unexpectedly (including being killed for running out of memory) or stops responding, the platform restarts the server by default. Automatic restarts have a limit on crashes in a row, so a server that keeps crashing is not restarted forever:
+
+- While the crashes in a row stay within the limit, the server is restarted.
+- Once they exceed the limit, the server stops, and its console page shows why, together with the cause of the latest crash.
+- A crash more than an hour after the previous one starts the count over.
+
+Admins and server owners set this under **Edit Server Config → Running and recovery**:
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Restart after a crash | On | When off, the platform stops the server once it detects that the process exited. The process may already have restarted briefly before the stop. |
+| Restart at most | 3 times | From 1 to 20. |
+
+A server stopped for crashing is not woken by players joining. Its owner or an Admin fixes the cause and selects **Wake** on the console page, which also resets the crash count. Exiting the process with an in-game command such as `/stop` also counts as an unexpected exit; to stop a server, use **Stop** on the console page.
+
+The **Activity** list on the console page shows the latest starts, stops, crashes, failed starts and host restarts.
+
+### Resuming after a host restart {#resume-after-host-restart}
+
+After a power loss or a restart of the host, the platform services start with the host, and servers that were running before resume by default. With **Resume after a host restart** turned off under **Edit Server Config → Running and recovery**, the server stays stopped once the host is back and its console page shows why; select **Wake** when it is needed, and players joining wake it under its autostart policy. A process exit caused by a host restart does not count as a crash.
+
+::: tip
+Whether the host powers on by itself after a power loss depends on the hardware or virtualization platform, for example the BIOS setting Restore on AC Power Loss. Unattended deployments need that setting turned on at the host.
+:::
+
+The login space and the lobby always restart and resume after a host restart, whatever these settings say; the platform alerts the platform owners about their problems. See [Monitoring and alerts](/en/operations/monitoring).
+
+## Email notifications {#notifications}
+
+When the platform has a [mail relay](/en/guide/administration#mail-relay), server events are mailed to the verified email of the server's owner; for an unclaimed server, to the platform owners. Admins and server owners choose the events under **Edit Server Config → Email notifications**:
+
+| Notification | Default | Events |
+| --- | --- | --- |
+| Problems | On | Crashes and the outcome of the restart, a stop after crashing, failed starts, and resuming or staying stopped after a host restart. |
+| Server started | Off | The server finished starting. |
+| Server stopped | Off | The server finished stopping, including idle auto-stop. |
+
+After a crash, the platform waits up to 3 minutes and sends the outcome of the restart and any events in between in one mail; a stop after crashing is sent at once. Events not sent within an hour are dropped. These mails count toward the relay's hourly limit. The login space and the lobby send no such mail.
 
 ## Autostart policy {#autostart}
 

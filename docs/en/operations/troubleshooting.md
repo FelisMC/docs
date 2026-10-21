@@ -289,6 +289,17 @@ stays in **Failed to start** until someone acts; a join does not start another a
    modpack, raise `spec.startup.timeoutSeconds` and `spec.startup.readinessTimeoutSeconds` on
    the server resource.
 
+### A server stopped after crashing {#server-crash-stopped}
+
+The console page shows **The server kept crashing and is no longer restarted** or **The server stopped after a crash**. A player who tries to join is told the server failed to start, and joining does not wake it. For the restart rules, see [Crashes and host restarts](/en/guide/servers#recovery).
+
+**Troubleshooting**
+
+1. Read the cause of the latest crash in the notice and in the **Activity** list on the console page.
+2. For **Out of memory; the process was killed**, raise the memory under **Edit Server Config**, or reduce what uses it, such as plugins, mods and view distance.
+3. For another exit code, select **Wake** and watch the log in the console for the error. Common causes are incompatible plugins or mods, broken configuration files and damaged world data.
+4. Once it is fixed, select **Wake**; the crash count starts over.
+
 ### A server does not stop {#server-wont-stop}
 
 After **Stop**, the server stays **Running** or **Stopping**, or the panel shows
