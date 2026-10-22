@@ -9,6 +9,12 @@ This page is for operators. It explains how to read the state of a Felis host, c
 
 Every full installation runs the watchdog from `felis-watchdog.timer`, which mails the Owners when something breaks, with no monitoring stack needed. The metrics and alert rules further down are for deployments that also run their own Prometheus.
 
+## Server resource sampling {#server-resource-metrics}
+
+Full installations enable the metrics-server bundled with k3s to supply per-server CPU and memory values to the console and server list. Sampling queries PodMetrics only in the Minecraft namespace; felis-api does not need cluster-scoped node metrics permissions. See [Resource usage](/en/guide/servers#resource-usage) for the interface.
+
+When upgrading an older installation that disabled metrics-server, the installer removes that disable flag and restarts k3s once to load the change. The API is briefly unavailable during the restart; running game containers continue running. History starts accumulating after the component becomes ready. To investigate missing metrics, check `sudo k3s kubectl -n kube-system get deployment metrics-server` and `sudo k3s kubectl top pods -n minecraft`.
+
 ## Status and health checks {#diagnostics}
 
 The following two commands run as root on the host. They only read state, change nothing and send no mail, so they are safe to run at any time.

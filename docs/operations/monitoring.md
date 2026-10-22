@@ -9,6 +9,12 @@ description: 主机状态与健康检查、支持包、看门狗及其告警邮�
 
 每个完整安装都通过 `felis-watchdog.timer` 运行看门狗，无需额外的监控系统即可在出现问题时邮件通知所有者。下文的指标和告警规则供另行运行 Prometheus 的部署使用。
 
+## 服务器资源采样 {#server-resource-metrics}
+
+完整安装启用 k3s 自带的 metrics-server，为控制台与服务器列表提供每服 CPU 和内存数据。采样仅查询 Minecraft 命名空间中的 PodMetrics，不需要为 felis-api 添加节点指标的集群级权限。界面说明见[资源占用](/guide/servers#resource-usage)。
+
+从禁用了 metrics-server 的旧安装升级时，安装器会移除该禁用参数，并重启 k3s 一次以加载设置。重启期间 API 短暂不可用，运行中的游戏容器继续运行；组件就绪后开始积累曲线。指标不可用时，可检查 `sudo k3s kubectl -n kube-system get deployment metrics-server` 和 `sudo k3s kubectl top pods -n minecraft`。
+
 ## 状态与健康检查 {#diagnostics}
 
 以下两个命令在主机上以 root 运行，只读取状态，不修改任何内容，也不发送邮件，可随时执行。

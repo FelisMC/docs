@@ -223,6 +223,12 @@ The server's console page shows the live log and offers:
 
 The console connects automatically once the server is running.
 
+### Resource usage {#resource-usage}
+
+Server owners and Admins can view current CPU and memory usage and the last hour of history on the console. The wide server list also displays current usage. CPU percentages use the server's CPU limit: 500 millicores against a limit of two cores is 25%. Without a CPU limit, usage is shown in millicores. Memory shows the working set against the container memory limit, including memory outside the JVM heap.
+
+The platform samples every 15 seconds and retains at most 240 points per server. Stopped servers and unavailable metrics show no current value; existing history remains for up to one hour. Missing metrics are never shown as zero usage. History is held in the API instance's memory and starts accumulating again after an instance restart or change. Sampling does not include disk usage or network traffic.
+
 ## Player management {#players}
 
 The **Player management** page works over a live connection to the server, so it is available only while the server runs, to the server owner and Admins.
