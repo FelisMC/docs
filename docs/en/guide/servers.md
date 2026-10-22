@@ -250,6 +250,19 @@ When the server runs the LuckPerms plugin, the **LuckPerms Permissions** page ma
 
 The page offers presets and keeps a **Recent Actions History**, from which **Revert** undoes a change. Changes by player name are reliable only for players who have joined since LuckPerms was installed.
 
+## Installed plugins and mods {#extensions}
+
+Server owners and Admins can open **Plugins and mods** from the console sidebar to inspect `.jar` and `.jar.disabled` files in `plugins/` and `mods/`. The page is available while running or fully stopped; wait for startup, shutdown or maintenance to finish before making changes.
+
+The list shows the filename, size, enabled state, and the name, version, authors and loaders declared in readable manifests. It supports Bukkit, Paper, Fabric, Quilt, Forge, NeoForge and Velocity manifests, retaining multiple mod or loader declarations in one JAR. Files with unreadable metadata remain listed and can be disabled or deleted. Consult the server console for actual loading status.
+
+- **Enable and disable** rename between `.jar` and `.jar.disabled`. An existing destination is never replaced; resolve conflicting names through the file manager first.
+- **Delete** permanently removes the selected JAR after confirmation and keeps configuration files.
+- **Open configuration** opens an existing configuration directory in the file manager. The action is absent when no matching directory was found.
+- **Upload JAR** sends files to the plugin or mod directory through the existing upload queue and multipart transfer. The list refreshes after the batch finishes.
+
+Restart the server to apply uploads, enables, disables and deletions made while running. Changes to world directories still require the additional acknowledgement, including when `level-name` is set to `plugins` or `mods`. Missing directories produce an empty list. Scans inspect at most 2000 entries per directory, return at most 500 files, and bound manifest and response sizes; a truncated list directs you to the file manager for remaining files.
+
 ## Server files {#files}
 
 The **Server Files** page browses and repairs files in the world volume, for the server owner and Admins. It is available while the server is running or fully stopped; wait for startup or shutdown to finish during a transition. A new server that has not started yet can use it as well, for example to put a modpack, a world or a custom jar in place before its first start.
