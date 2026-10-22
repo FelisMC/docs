@@ -1529,9 +1529,11 @@ SELECT pid, state, wait_event, query FROM pg_stat_activity;
 | `409` | `file_changed` | 编辑器读取文件后，文件已被修改。 | 选择「载入最新内容」或「仍然覆盖」。 |
 | `400` | `bad_path` | 路径超出世界卷，或会移动 `server.properties`、`config`、`config/paper-global.yml`，或读取 `config/paper-global.yml`。 | 这三项须保持原名；`paper-global.yml` 包含所有服务器共用的转发密钥。 |
 | `404` | `not_found` | 路径或新文件夹的上级目录已不存在。 | 选择「刷新」。 |
-| `413` | `too_large` | 读取超过 1 MiB、保存超过 256 KiB，或单次请求上传超过 64 MiB。 | 大文件应整体上传，不在编辑器中修改。面板会自动分片上传超过 64 MiB 的文件。 |
+| `413` | `too_large` | 读取或保存超过 5 MiB，或单次请求上传超过 64 MiB。 | 大文件应整体上传，不在编辑器中修改。面板会自动分片上传超过 64 MiB 的文件。 |
 | `411` | `length_required` | 上传请求缺少 `Content-Length`。 | 通过面板上传，或使用 `curl -T`。 |
 | `400` | `upload_incomplete` | 请求体在声明的长度之前结束，未做任何修改。 | 重试。 |
+| `400` | `bad_url` | 网址格式不支持、包含凭据，或目标及重定向解析到非公开地址。 | 使用公开的 HTTP 或 HTTPS 下载地址。 |
+| `502` | `download_failed` | 远程下载失败、超时或返回非成功状态。 | 检查源地址可用性后重试。 |
 | `507` | `upload_staging_full` | 暂存该上传会使 felis-api 的暂存文件系统剩余空间低于 10%。 | 释放上传卷的空间。 |
 | `507` | `volume_full` | 世界卷已满，原文件保持不变。 | 删除服务器不再需要的文件，或扩容存储卷。 |
 | `504` | `files_timeout` | felis-api 等待 90 秒后停止等待。 | Job 可能仍会完成（见下文）。 |
@@ -1540,7 +1542,9 @@ SELECT pid, state, wait_event, query FROM pg_stat_activity;
 | `429` | `too_many_uploads` | 该账户已有 4 个大文件上传正在进行。 | 完成或取消其中一个。 |
 | `429` | `export_busy` | 下载限制：每个用户同时两个，全平台同时四个，每个用户每小时 30 个。 | 稍后重试。 |
 
-分片上传过程中出现的 `upload_offset_mismatch`、`upload_busy` 和 `409 upload_incomplete` 由面板自动处理并续传。解压 `.zip` 时会在写入任何内容之前检查所有条目，失败时不做任何修改：`archive_unsafe`（条目超出目标文件夹）、`archive_symlink`（条目为链接）、`type_conflict`（压缩包中的文件与服务器上的文件夹同名，或相反）、`archive_invalid`（条目大小与压缩包声明不符）和 `volume_full`。未选择替换时，会覆盖现有文件的压缩包以 `file_exists` 结束并附带文件列表，面板会显示该列表供确认。文件夹不能直接上传，应压缩为 `.zip` 上传后解压。
+分片上传过程中出现的 `upload_offset_mismatch`、`upload_busy` 和 `409 upload_incomplete` 由面板自动处理并续传。解压 `.zip`、`.tar`、`.tar.gz` 或 `.tgz` 时，会在写入目标位置前检查条目：`archive_unsafe` 表示条目超出目标文件夹，`archive_symlink` 表示条目是链接，`type_conflict` 表示文件与文件夹同名，`archive_invalid` 表示内容损坏或大小与声明不符，`volume_full` 表示空间不足。复制、粘贴或解压会覆盖已有文件时，`file_exists` 附带冲突列表，面板会显示该列表供确认。上传文件夹会保留目录结构，无须先压缩。网址下载同样受暂存盘空间与并发上传限额约束。
+
+后台操作报告 `rollback_incomplete` 时，先检查提示中的保留目录与原目标内容，再决定是否重试。并发新增的文件不会被覆盖，普通保留内容可通过文件管理器恢复；受保护的备份保留在内部目录，须由主机管理员处理。
 
 **排查**
 

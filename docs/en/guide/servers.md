@@ -258,18 +258,23 @@ During live access, the page warns that world changes may be overwritten by the 
 
 You can:
 
-- Browse folders, create files and folders, rename and delete. Deletion is permanent; back up anything you need first.
-- Edit text files online. The editor reads up to 1 MiB and saves up to 256 KiB, and keeps CRLF line endings. Download binary or oversized files, edit them elsewhere and upload them again. If a file changed after you opened it, the editor offers **Load latest** or **Overwrite anyway**.
-- Upload files with **Upload** or by dragging them into the list. Files up to 64 MiB go up in one request; larger files are sent automatically in 32 MiB parts and resume after an interruption. Compress folders into a `.zip`, upload it and extract it. For a file that already exists, choose **Replace** or **Skip**. An account can have at most 4 large uploads in progress, and an upload session idle for 6 hours is dropped.
-- Extract a `.zip` into the current folder. Before extracting, Felis checks for paths that leave the folder, symbolic links, file/folder conflicts and free space. When the archive would overwrite files, the panel lists them; confirm with **Replace and extract**. A failed extraction changes nothing. Archives with file names in GBK encoding extract correctly.
-- Download a file, or a folder as a `.zip`. Each account may run 2 downloads at a time and 30 per hour; the platform runs at most 4 at a time.
+- Browse folders, create files and folders, rename and delete. Select several entries to delete or download them together. Deletion is permanent; back up anything you need first. Each row's **More** menu also supports right-click and a long press on mobile.
+- Copy or cut files and folders within the same server, then open the destination folder and paste. Review the conflict list before confirming replacement of existing files. Rename entries first when a file conflicts with a folder.
+- Search file names in the current folder and its descendants. Search returns at most 500 results, descends at most 16 levels, and skips the `region`, `entities` and `poi` chunk-data folders. Narrow the folder or query when results are truncated.
+- Edit text files up to 5 MiB online, preserving CRLF line endings. Download binary or oversized files, edit them elsewhere and upload them again. If a file changed after you opened it, the editor offers **Load latest** or **Overwrite anyway**.
+- Upload files or folders using the upload buttons or by dragging them into the list. Folder uploads preserve relative paths, create directories and upload each file in turn. Files up to 64 MiB go up in one request; larger files are sent automatically in 32 MiB parts and resume after an interruption. For a file that already exists, choose **Replace** or **Skip**. An account can have at most 4 large uploads in progress, and an upload session idle for 6 hours is dropped.
+- Download a public URL to a chosen server path. Only HTTP and HTTPS without a username or password are accepted. Private, loopback and link-local destinations, including redirects to them, are refused. The file is first fetched onto the platform's staging disk, then written to the server; its size is bounded by available staging space.
+- Pack selected entries into a `.zip` on the server, or extract `.zip`, `.tar`, `.tar.gz` and `.tgz` archives into the current folder. Before extracting, Felis checks containment, links, file/folder conflicts and free space. When existing files would be replaced, the panel lists them for confirmation. Zip archives with file names in GBK encoding extract correctly.
+- Download a file, a folder as a `.zip`, or selected entries together as a `.zip`. Each account may run 2 downloads at a time and 30 per hour; the platform runs at most 4 at a time. PNG, JPG, GIF and WebP images up to 5 MiB can be previewed through the same download channel and count toward these limits.
 
-Large uploads and extractions run in the background and continue after you close the page; **Background operations** shows their progress, and each may run for up to 2 hours. Backups, restores and migrations block file operations. Writes and downloads on a stopped server hold a maintenance lock that prevents startup until they finish. Live file operations take no admission lock and do not prevent shutdown.
+Upload landing, copies, moves, packing and extraction run in the background and continue after you close the page; **Background operations** shows their progress, and each may run for up to 2 hours. URL downloads wait for remote content to reach staging before starting the background landing operation. Backups, restores and migrations block file operations. Writes and downloads on a stopped server hold a maintenance lock that prevents startup until they finish. Live file operations take no admission lock and do not prevent shutdown.
+
+A running server may recreate source or destination files during an operation. If rollback cannot finish, **Background operations** lists the retained directories. Review the contents of `move-recovery-*` or `file-recovery-*` before moving or deleting them. Concurrently created content is not overwritten automatically; protected backups require recovery by the host administrator.
 
 Some files are protected:
 
 - `config/paper-global.yml` holds the proxy forwarding secret that every server shares. It cannot be read, edited or downloaded online, and it is left out of folder downloads.
-- A downloaded `server.properties` has its `rcon.password` redacted.
+- Downloading, packing or copying `server.properties` redacts its credentials.
 - `server.properties`, `config` and `config/paper-global.yml` are managed by Felis and cannot be renamed or moved.
 
 ### Importing a world {#import-world}

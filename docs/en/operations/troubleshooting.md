@@ -1793,9 +1793,11 @@ The **Server Files** page is available to the server's owner and administrators 
 | `409` | `file_changed` | The file changed after the editor read it. | Select **Load latest** or **Overwrite anyway**. |
 | `400` | `bad_path` | The path leaves the world volume, or it would move `server.properties`, `config` or `config/paper-global.yml`, or read `config/paper-global.yml`. | These three keep their names; `paper-global.yml` holds the forwarding secret shared by every server. |
 | `404` | `not_found` | The path, or a new folder's parent, no longer exists. | Select **Refresh**. |
-| `413` | `too_large` | A read over 1 MiB, a save over 256 KiB, or a single-request upload over 64 MiB. | Upload a large file whole instead of editing it. The panel sends files over 64 MiB in parts automatically. |
+| `413` | `too_large` | A read or save over 5 MiB, or a single-request upload over 64 MiB. | Upload a large file whole instead of editing it. The panel sends files over 64 MiB in parts automatically. |
 | `411` | `length_required` | An upload without `Content-Length`. | Upload from the panel, or with `curl -T`. |
 | `400` | `upload_incomplete` | The body ended before its declared length. Nothing changed. | Retry. |
+| `400` | `bad_url` | The URL is unsupported, contains credentials, or resolves to a non-public destination, including after a redirect. | Use a public HTTP or HTTPS download URL. |
+| `502` | `download_failed` | The remote download failed, timed out or returned an unsuccessful status. | Check the source is available, then retry. |
 | `507` | `upload_staging_full` | Staging the upload would leave felis-api's staging filesystem under 10% free. | Free space on the uploads volume. |
 | `507` | `volume_full` | The world volume is full. The old file is unchanged. | Delete files the server no longer needs, or grow the volume. |
 | `504` | `files_timeout` | felis-api stopped waiting after 90 seconds. | The Job may still finish (below). |
@@ -1804,7 +1806,9 @@ The **Server Files** page is available to the server's owner and administrators 
 | `429` | `too_many_uploads` | The account already has 4 large uploads in progress. | Finish or cancel one. |
 | `429` | `export_busy` | Download limits: two per user at a time, four across the install, 30 per user per hour. | Retry later. |
 
-`upload_offset_mismatch`, `upload_busy` and `409 upload_incomplete` during a multi-part upload are handled by the panel, which resumes on its own. Extracting a `.zip` checks every entry before writing anything and changes nothing on failure: `archive_unsafe` (an entry leaves the folder), `archive_symlink` (an entry is a link), `type_conflict` (a file where the server has a folder, or the reverse), `archive_invalid` (an entry's size differs from the archive's declaration) and `volume_full`. Without replace, an archive that would overwrite files ends `file_exists` with the list, which the panel shows for confirmation. Folders cannot be uploaded; upload them as a `.zip` and extract it.
+`upload_offset_mismatch`, `upload_busy` and `409 upload_incomplete` during a multi-part upload are handled by the panel, which resumes on its own. Extracting `.zip`, `.tar`, `.tar.gz` or `.tgz` checks entries before writing into the destination: `archive_unsafe` means an entry leaves the folder, `archive_symlink` means an entry is a link, `type_conflict` means a file conflicts with a folder, `archive_invalid` means corrupt content or a size mismatch, and `volume_full` means insufficient space. Copies, pastes and extractions that would replace existing files report `file_exists` with a conflict list for confirmation. Folder uploads preserve the directory structure without requiring an archive. URL downloads share the staging-space and concurrent-upload limits.
+
+When a background operation reports `rollback_incomplete`, review the listed retained directories and the original destination before retrying. Concurrently created files are not overwritten. Ordinary retained content can be recovered through the file manager; protected backups stay in an internal directory for the host administrator to recover.
 
 **Diagnosis**
 
