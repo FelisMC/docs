@@ -17,7 +17,7 @@ What you can do depends on your account role and on who owns the server. In the 
 | Edit the server configuration | Admin; server owners can change their own servers, except the image |
 | Claim an unowned server | Any account with a linked Minecraft account |
 | Start a server | Server owner, Admin; other players as the [autostart policy](#autostart) allows |
-| Stop, console, player management, files, scheduled tasks, backups and restore | Server owner, Admin |
+| Stop, restart, force stop, console, player management, files, scheduled tasks, backups and restore | Server owner, Admin |
 | Give up a server | Server owner, Admin |
 | Delete a server | Admin |
 | Forwarding mode, emergency stop | Owner |
@@ -130,6 +130,16 @@ While the server starts, its console page shows the current stage and diagnostic
 Select **Stop** on the console page. If players are online, the server sends them an in-game notice and disconnects them 30 seconds later before stopping; starting the server again within that window calls the stop off. When the online count cannot be read, the panel warns that players may still be connected and asks for confirmation.
 
 A server whose online count stays at zero for the configured time stops automatically and releases its memory and CPU; the next join wakes it according to the autostart policy. New servers use 600 seconds. Admins change it, or set it to **Never**, under **Edit Server Config → Idle auto-stop**. The online count is read over RCON; while it cannot be read, idle auto-stop pauses and resumes once the count is readable again. The login space and the lobby never stop when idle.
+
+### Restarting {#restart}
+
+The console page shows **Restart** while the server is running. Restarting saves and shuts down the current process, then starts the server again. The panel asks for confirmation when players are online or the player count cannot be read. Restart requests are refused during maintenance such as backups, restores or file changes.
+
+### Force stop {#force-stop}
+
+When the server process is unresponsive or a normal stop has not completed, the server owner or an Admin can select **More actions → Force stop** on the console page and confirm after reading the data loss warning. Force stop terminates the process immediately, without saving or waiting for the shutdown countdown or termination grace period. Online players will be disconnected. Changes since the last save may be lost.
+
+After the request is accepted, the platform processes the stop and the panel continues updating the server state. The server cannot start again until the stop request has been processed. Force stop requires the operator; if the operator is unresponsive, the platform Owner uses the emergency stop below.
 
 ### Emergency stop {#emergency-stop}
 
