@@ -417,8 +417,7 @@ A wake, restore, backup, download or file change is refused with
 `409 maintenance_in_progress`, and the panel shows **The world is undergoing restoration,
 backup, export, file download, file modification, or reclamation. Retry after the operation
 completes. Exports and downloads remain active until the browser completes the transfer.**
-Or the panel shows **This operation modifies the world volume, which is exclusively mounted
-by the running server. Stop the server completely first.** (`409 not_stopped`).
+Or the panel shows **Stop the server completely before performing this operation.** (`409 not_stopped`).
 
 **Cause**
 
@@ -1783,11 +1782,12 @@ Sign-in limits and locked accounts are covered in [Sign-in problems](#sign-in-pr
 
 **Cause**
 
-The **Server Files** page is available to the server's owner and administrators, and only while the server is fully stopped. Listings and reads hold nothing. Every change (save, new file or folder, rename, delete, upload, extract) runs a Job and holds the world until it ends, so a wake or a second change meanwhile answers `409 maintenance_in_progress`.
+The **Server Files** page is available to the server's owner and administrators while running or fully stopped. Wait for startup or shutdown to finish during a transition. Backups, restores and migrations block file operations. Stopped writes take a maintenance lock. Live file operations access the same volume on the game server's node without taking that admission lock or preventing shutdown. Modifying world directories or extracting an archive while running requires the panel's risk acknowledgement checkbox.
 
 | Status | Code | Meaning | Resolution |
 | --- | --- | --- | --- |
 | `409` | `not_stopped` | The game pod still exists, usually finishing its shutdown save. | Retry once `sudo k3s kubectl -n minecraft get pods -l felis.lolicon.best/server=<name>` shows nothing. |
+| `409` | `server_transitioning` | The server is starting or stopping. | Wait until it is running or fully stopped, then retry. |
 | `409` | `maintenance_in_progress` | Another change, a backup, a restore or the world cleanup holds the world. | Retry once that operation ends. |
 | `409` | `file_exists` | Something exists at the path of a new file, folder, rename or upload. | Choose another name, or select **Replace** for an upload. |
 | `409` | `file_changed` | The file changed after the editor read it. | Select **Load latest** or **Overwrite anyway**. |

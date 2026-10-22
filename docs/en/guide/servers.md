@@ -246,7 +246,9 @@ The page offers presets and keeps a **Recent Actions History**, from which **Rev
 
 ## Server files {#files}
 
-The **Server Files** page browses and repairs files in the world volume, for the server owner and Admins. A running server mounts its world volume exclusively, so stop the server completely before browsing or editing files. A new server that has not started yet can use it as well, for example to put a modpack, a world or a custom jar in place before its first start.
+The **Server Files** page browses and repairs files in the world volume, for the server owner and Admins. It is available while the server is running or fully stopped; wait for startup or shutdown to finish during a transition. A new server that has not started yet can use it as well, for example to put a modpack, a world or a custom jar in place before its first start.
+
+During live access, the page warns that world changes may be overwritten by the server and that plugin and configuration changes usually take effect after a restart. Select the additional risk acknowledgement before modifying `world`, `world_nether`, `world_the_end` or the world directory named by `level-name` in `server.properties`. Extracting an archive while running also requires this acknowledgement. It applies only to the current page and resets after reopening the page or a change in running state.
 
 You can:
 
@@ -256,7 +258,7 @@ You can:
 - Extract a `.zip` into the current folder. Before extracting, Felis checks for paths that leave the folder, symbolic links, file/folder conflicts and free space. When the archive would overwrite files, the panel lists them; confirm with **Replace and extract**. A failed extraction changes nothing. Archives with file names in GBK encoding extract correctly.
 - Download a file, or a folder as a `.zip`. Each account may run 2 downloads at a time and 30 per hour; the platform runs at most 4 at a time.
 
-Large uploads and extractions run in the background and continue after you close the page; **Background operations** shows their progress, and each may run for up to 2 hours. While a file change, backup, restore or download is in progress, the server cannot start.
+Large uploads and extractions run in the background and continue after you close the page; **Background operations** shows their progress, and each may run for up to 2 hours. Backups, restores and migrations block file operations. Writes and downloads on a stopped server hold a maintenance lock that prevents startup until they finish. Live file operations take no admission lock and do not prevent shutdown.
 
 Some files are protected:
 
