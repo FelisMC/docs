@@ -97,6 +97,10 @@ The **Account** page also offers:
 - **Passkeys**: register or delete passkeys. An account's only passkey cannot be deleted while its email address is unverified.
 - **Signed-in devices**: review browser sessions, revoke an unrecognized device, or select **Sign out other devices**.
 
+### Panel appearance {#panel-appearance}
+
+Select **Theme** at the bottom of the sidebar to choose **Light**, **Dark** or **System**. The default follows the system. The choice is stored in the current browser and remains in effect after refreshing or reopening the panel. A fixed Light or Dark choice is unaffected by system appearance changes. On mobile, the theme selector is in the top bar.
+
 ### Account migration {#account-migration}
 
 An account migration moves every server of a retired account to another account:
