@@ -286,7 +286,7 @@ A running server may recreate source or destination files during an operation. I
 
 Some files are protected:
 
-- `config/paper-global.yml` holds the proxy forwarding secret that every server shares. It cannot be read, edited or downloaded online, and it is left out of folder downloads.
+- `config/paper-global.yml` holds the proxy forwarding secret that every server shares. Its source and downloads remain protected, and it is left out of folder downloads. Common settings can be edited through the restricted form below.
 - Downloading, packing or copying `server.properties` redacts its credentials.
 - `server.properties`, `config` and `config/paper-global.yml` are managed by Felis and cannot be renamed or moved.
 
@@ -297,6 +297,10 @@ Open `server.properties` in the root folder through file management to switch be
 Both modes share one draft, so switching preserves unsaved changes. The form updates only properties you change, retaining comments, order, unknown keys and line endings; opening the form does not add missing properties. Legacy properties such as PVP, Nether access and mob spawning appear only when their keys exist in the file, with descriptions of applicable versions. Platform-managed ports, authentication and RCON fields are read-only in the form. Forwarding and player limits for the login space are also managed by the platform.
 
 The editor hides `rcon.password` and `forwarding-secrets`. Saving retains the current on-disk values for unchanged placeholders; these credentials do not need to be entered.
+
+`bukkit.yml`, `spigot.yml`, `config/paper-world-defaults.yml` and `purpur.yml` also offer form and text modes. Each form lists existing common settings with compatible types, without inserting defaults or creating world overrides. Edits preserve comments, order and unknown data, although formatting may be normalized; unchanged files retain their source. Use text mode for complex structures such as anchors, aliases or multiple documents.
+
+`config/paper-global.yml` uses a restricted form for existing common fields with compatible types, without inserting defaults; proxy forwarding and authentication remain managed by the platform. The form receives only editable fields and saves only those you change, retaining other settings and comments. After a conflict, **Overwrite anyway** reads the latest version before applying those changes.
 
 If another process changed the file before saving, choose **Load latest** or **Overwrite anyway**. Configuration saved while running usually requires a restart to take effect; the existing file access and world-directory acknowledgement rules apply.
 
