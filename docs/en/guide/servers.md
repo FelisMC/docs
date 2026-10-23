@@ -218,10 +218,22 @@ A player without permission to wake the server is told in game that they cannot 
 The server's console page shows the live log and offers:
 
 - The stream state (Live, Reconnecting, Stream ended) with **Reconnect**, **Clear** and **Jump to latest**. RCON connection lifecycle logs are hidden by default; show them with **Show RCON connection logs**.
-- While the server runs, the **Server command** field runs console commands, for example `list` or `op <player>`.
+- While the server starts or runs, its owner and Admins can use **Server command** to send console commands, for example `list` or `op <player>`.
 - Links to player management, LuckPerms permissions, backups and restore, server files and scheduled tasks.
 
-The console connects automatically once the server is running.
+### Sending commands {#console-commands}
+
+Enter a single-line command and press Enter or select **Send command**. RCON displays the command's reply when available. During startup or when RCON cannot connect, the platform can send input through the server's standard input; the panel displays **Command sent. Check the console log for the result.** This confirms that input was sent; check the log for the execution result.
+
+If the connection fails after sending begins, the panel reports an uncertain outcome and retains the input. Check the log before deciding whether to send it again; commands are never retried automatically. Input is unavailable before startup or during shutdown; send requests are refused during maintenance such as backups, restores and migrations.
+
+Servers already running before an upgrade enable standard input at their next start or restart. The upgrade does not restart the game process for this change. Older instances can continue to use RCON when it is available.
+
+### Stopped server logs {#stopped-logs}
+
+Once the server has fully stopped, its owner and Admins can view the last 200 lines of `logs/latest.log` on the world volume and load earlier content. Each page displays at most 256 KiB; longer individual lines appear in segments. History is read-only. The live log stream connects automatically when the server starts.
+
+An absent world volume or log file displays no history. If the file is replaced or modified, refresh to read it again and avoid mixing different versions. Existing file access restrictions apply during backups, restores and migrations.
 
 ### Resource usage {#resource-usage}
 
