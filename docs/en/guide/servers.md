@@ -290,6 +290,16 @@ Some files are protected:
 - Downloading, packing or copying `server.properties` redacts its credentials.
 - `server.properties`, `config` and `config/paper-global.yml` are managed by Felis and cannot be renamed or moved.
 
+### Configuration forms {#server-properties}
+
+Open `server.properties` in the root folder through file management to switch between **Form** and **Text**. The form groups common settings under game rules, players, world, network and performance, with boolean, integer, choice and text controls, field descriptions and validation errors. Use text mode for other settings.
+
+Both modes share one draft, so switching preserves unsaved changes. The form updates only properties you change, retaining comments, order, unknown keys and line endings; opening the form does not add missing properties. Legacy properties such as PVP, Nether access and mob spawning appear only when their keys exist in the file, with descriptions of applicable versions. Platform-managed ports, authentication and RCON fields are read-only in the form. Forwarding and player limits for the login space are also managed by the platform.
+
+The editor hides `rcon.password` and `forwarding-secrets`. Saving retains the current on-disk values for unchanged placeholders; these credentials do not need to be entered.
+
+If another process changed the file before saving, choose **Load latest** or **Overwrite anyway**. Configuration saved while running usually requires a restart to take effect; the existing file access and world-directory acknowledgement rules apply.
+
 ### Importing a world {#import-world}
 
 1. Back up and stop the server.
