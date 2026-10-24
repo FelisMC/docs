@@ -124,6 +124,7 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 | 服务端软件 | `/api/v1/software…` | `app` | 可选核心、游戏版本、构建与所需 Java 版本 |
 | 账户 | `/api/v1/account/…` | `app` | 账号绑定、邮箱、通行密钥、身份复核、会话管理、账户迁移 |
 | 服务器操作 | `/api/v1/servers/{name}/…` | `app` | 唤醒、停止、重启、认领、状态、退役、任务记录 |
+| 启动设置 | `GET /api/v1/servers/{name}/startup-settings` | `app` | 本服服主与管理员读取 JVM 参数、启动参数、用户环境变量与停止命令 |
 | 控制台与玩家 | `/api/v1/servers/{name}/console`、`…/command`、`…/access/…`、`…/allowlist` | `app` | 控制台事件流与 RCON 命令；白名单、封禁、踢出、OP、LuckPerms |
 | 文件 | `/api/v1/servers/{name}/files…`、`…/file` | `app` | 浏览、编辑、上传（含分片上传）、下载、解压、重命名 |
 | 备份与导出 | `/api/v1/backups`、`/api/v1/servers/{name}/backup`、`…/restore-backup`、`…/world/export`、`/api/v1/exports/…` | `app` | 世界备份列表、立即备份、恢复、导出与下载 |
@@ -137,6 +138,12 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 | 故障切换 | `/api/v1/nodes/{node}/failover` | `owner` | 读取切换计划并对失联节点执行故障切换 |
 | 紧急停止 | `POST /api/v1/servers/{name}/emergency-stop` | `owner` | 立即停止服务器 |
 | 主机运维 | 见下文 | `owner` | 在主控主机上执行运维任务 |
+
+### 服务器高级启动设置 {#server-startup-settings}
+
+`GET /api/v1/servers/{name}/startup-settings` 仅允许该服务器的所有者与管理员读取，返回 `java_flags`、`args`、`env` 与 `stop_commands` 四个数组。`env` 的每项包含 `name` 与 `value`，空值以空字符串返回；平台托管的环境变量不包含在响应中。这些值不出现在公开服务器状态或服务器列表中。
+
+服务器所有者通过 `PATCH /api/v1/me/servers/{name}` 修改，管理员通过 `PATCH /api/v1/servers/{name}` 修改，请求体使用相同的四个字段。省略字段或传入 `null` 保留原值，传入 `[]` 清空对应设置；环境变量的清空只移除用户设置，保留平台托管值。所有字段先校验，再一起保存；不符合限制时返回 `400 bad_startup_settings`。并发变更无法合并时返回 `409 conflict`，须重新读取后重试。高级启动设置的限制与生效时间见[高级启动设置](/guide/servers#startup-settings)。
 
 ### 主机运维接口 {#host-operations}
 

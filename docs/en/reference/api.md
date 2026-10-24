@@ -124,6 +124,7 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 | Server software | `/api/v1/software…` | `app` | Available cores, game versions, builds and the Java each needs |
 | Account | `/api/v1/account/…` | `app` | Account linking, email, passkeys, reauthentication, sessions, account migration |
 | Server actions | `/api/v1/servers/{name}/…` | `app` | Wake, stop, restart, claim, status, retirement, job records |
+| Startup settings | `GET /api/v1/servers/{name}/startup-settings` | `app` | The server owner and Admins read JVM arguments, server arguments, user environment variables and stop commands |
 | Console and players | `/api/v1/servers/{name}/console`, `…/command`, `…/access/…`, `…/allowlist` | `app` | The console event stream and RCON commands; whitelist, bans, kicks, OP, LuckPerms |
 | Files | `/api/v1/servers/{name}/files…`, `…/file` | `app` | Browse, edit, upload (including chunked uploads), download, unzip, rename |
 | Backups and exports | `/api/v1/backups`, `/api/v1/servers/{name}/backup`, `…/restore-backup`, `…/world/export`, `/api/v1/exports/…` | `app` | World backup list, backup now, restore, export and download |
@@ -137,6 +138,12 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 | Failover | `/api/v1/nodes/{node}/failover` | `owner` | Read the failover plan and fail over a lost node |
 | Emergency stop | `POST /api/v1/servers/{name}/emergency-stop` | `owner` | Stop a server immediately |
 | Host operations | See below | `owner` | Run maintenance tasks on the controller host |
+
+### Server advanced settings {#server-startup-settings}
+
+`GET /api/v1/servers/{name}/startup-settings` allows only that server's owner and Admins to read the four arrays `java_flags`, `args`, `env` and `stop_commands`. Each `env` item contains `name` and `value`; empty values are returned as empty strings. Platform-managed environment variables are excluded. These values do not appear in public server status or server lists.
+
+Server owners update them through `PATCH /api/v1/me/servers/{name}`, and Admins through `PATCH /api/v1/servers/{name}`, using the same four fields. Omitting a field or passing `null` keeps its value; passing `[]` clears it. Clearing environment variables removes only user settings and preserves platform-managed values. All fields are validated before they are saved together. Invalid settings return `400 bad_startup_settings`. A concurrent change that cannot be merged returns `409 conflict`; read the settings again before retrying. See [Advanced startup settings](/en/guide/servers#startup-settings) for limits and when changes take effect.
 
 ### Host operation endpoints {#host-operations}
 

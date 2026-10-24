@@ -96,8 +96,24 @@ On the server's console page, Admins and server owners select **Edit Server Conf
 - Idle auto-stop. See [Start, stop and sleep](#power).
 - Restarting after a crash and resuming after a host restart. See [Crashes and host restarts](#recovery).
 - Email notifications. See [Email notifications](#notifications).
+- JVM arguments, server arguments, environment variables and stop commands. See [Advanced startup settings](#startup-settings).
 
 Raising the CPU or memory of an owned server must fit the server owner's quota; lowering them is never held to it. The login space and the lobby are system services, which Admins manage under **Login & lobby**. See [Customizing the login space and lobby](/en/guide/players#customize-login-lobby).
+
+### Advanced startup settings {#startup-settings}
+
+Server owners and Admins can expand **Edit Server Config → Advanced startup settings** to read and change that server's JVM arguments, server arguments, environment variables and stop commands. Admins manage the login space and the lobby. Advanced startup settings are excluded from public server status and do not include platform-managed environment variables.
+
+| Setting | Input and limits |
+| --- | --- |
+| JVM arguments | Enter one complete argument per item, up to 128 items and 1,024 bytes per item. Arguments cannot contain whitespace. Heap sizing options, including `-Xmx` and `-Xms`, and argument file options are rejected; the heap size is derived from the memory setting. |
+| Server arguments | Each item is passed to the server as one argument, preserving spaces, order and empty strings. Up to 128 items and 2,048 bytes per item. |
+| Environment variables | Enter names and values individually, up to 64 items. Names must be unique, use only English letters, digits and underscores, and cannot start with a digit; up to 128 bytes per name. Values may be empty and are limited to 4,096 bytes. |
+| Stop commands | Commands run in the order entered, up to 16 items. Each item must be a single line of at most 1,024 bytes. Leading and trailing whitespace and one leading `/` are removed. |
+
+All advanced settings together are limited to 64 KiB, measured in UTF-8 bytes. Environment variables cannot override `FELIS_*` or reserved runtime variables such as `JAVA_MEMORY`, `JAVA_FLAGS`, `JAVA_TOOL_OPTIONS`, `RCON_PASSWORD`, `PATH` and `HOME`. Removing an item and saving removes that value; unchanged settings keep their values.
+
+Saved JVM arguments, server arguments and environment variables take effect on the next start or restart. Saving while the server is running or starting does not immediately restart it. On the next normal stop or explicit restart, stop commands are attempted over RCON in order after the world save attempt and before the process shuts down; the group has a total time limit of 30 seconds. Unavailable RCON, a command failure or a timeout does not prevent shutdown. Commands may run again after a failed attempt is retried. Force stop, emergency stop and automatic retries after a failed start skip these commands.
 
 ## Start, stop and sleep {#power}
 
