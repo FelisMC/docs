@@ -145,6 +145,14 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 
 服务器所有者通过 `PATCH /api/v1/me/servers/{name}` 修改，管理员通过 `PATCH /api/v1/servers/{name}` 修改，请求体使用相同的四个字段。省略字段或传入 `null` 保留原值，传入 `[]` 清空对应设置；环境变量的清空只移除用户设置，保留平台托管值。所有字段先校验，再一起保存；不符合限制时返回 `400 bad_startup_settings`。并发变更无法合并时返回 `409 conflict`，须重新读取后重试。高级启动设置的限制与生效时间见[高级启动设置](/guide/servers#startup-settings)。
 
+### 磁盘用量 {#server-disk-usage}
+
+服务器状态与列表中的 `disk` 仅对该服服主和管理员返回，包含 `usedBytes`、`limitBytes`、`sampledAt` 与 `stale`。没有成功采样时省略 `disk`；停止后的服务器仍可返回用量。`diskFull` 表示配额是否阻止启动，公共状态也可返回该标记，但不包含具体用量。
+
+`stale: true` 不仅表示样本已过期，也可能表示清理后新样本已低于配额、仍在等待平台确认解除满额限制。启动限制以 `diskFull` 为准。
+
+满额时，启动和重启接口返回 `409 disk_full`。已有的满额限制会保留到新的有效样本确认低于配额；采样失败或过期不能解除限制。正常停止、文件管理与下载继续可用。统计口径与更新延迟见[磁盘用量与配额](/guide/servers#disk-quota)。
+
 ### 主机运维接口 {#host-operations}
 
 主机运维接口全部属于外部接口，等级为 `owner`。felis-api 把每项任务交给主机上的 root 服务 `felis-node-control.service`，由它执行与命令行相同的 `felis` 命令或安装器功能。面板中的对应位置和命令行等价操作见[运维概览](/operations/#panel-host-operations)。

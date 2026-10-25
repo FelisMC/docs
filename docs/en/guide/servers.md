@@ -115,6 +115,16 @@ All advanced settings together are limited to 64 KiB, measured in UTF-8 bytes. E
 
 Saved JVM arguments, server arguments and environment variables take effect on the next start or restart. Saving while the server is running or starting does not immediately restart it. On the next normal stop or explicit restart, stop commands are attempted over RCON in order after the world save attempt and before the process shuts down; the group has a total time limit of 30 seconds. Unavailable RCON, a command failure or a timeout does not prevent shutdown. Commands may run again after a failed attempt is retried. Force stop, emergency stop and automatic retries after a failed start skip these commands.
 
+### Disk usage and quota {#disk-quota}
+
+The storage size selected when creating a server is also its disk quota. The console and file page show usage, the quota and the latest measurement time, including while the server is stopped. Usage counts allocated bytes in the world volume, including worlds, plugins, configuration, logs and temporary files within that volume. Sparse files count only allocated space, hard links count once, and symbolic links are not followed.
+
+At 90% of the quota, the console displays a warning. Server owners with problem notifications enabled also receive an email. At 100%, the platform stops the server through the normal shutdown process, records the `DiskFull` stop reason, and refuses starts, start retries and restarts. File management and downloads remain available for cleanup. Once the platform confirms a new successful measurement below the quota, the server can be started again; it does not start automatically.
+
+The platform schedules read-only volume scans serially every minute. Updates may take longer with more servers, slow volume mounts or large directory trees. Protection takes effect after periodic detection, so writes may continue during measurement and normal shutdown. A failed, timed-out or incomplete scan preserves the last successful result. Measurements older than three minutes are marked stale. After cleanup, even a new measurement below the quota may still await confirmation. During this period, its timestamp is retained, current usage is shown as unavailable, and the startup restriction remains in effect. Usage without a successful measurement is unavailable rather than zero. Sampling failures do not release an existing full-disk startup block.
+
+The file listing's available space is the free space on the underlying filesystem, separate from the server quota. Writes can fail when the underlying storage is full even if the server remains below its quota.
+
 ## Start, stop and sleep {#power}
 
 A server is in one of these states:

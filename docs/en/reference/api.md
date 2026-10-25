@@ -145,6 +145,14 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 
 Server owners update them through `PATCH /api/v1/me/servers/{name}`, and Admins through `PATCH /api/v1/servers/{name}`, using the same four fields. Omitting a field or passing `null` keeps its value; passing `[]` clears it. Clearing environment variables removes only user settings and preserves platform-managed values. All fields are validated before they are saved together. Invalid settings return `400 bad_startup_settings`. A concurrent change that cannot be merged returns `409 conflict`; read the settings again before retrying. See [Advanced startup settings](/en/guide/servers#startup-settings) for limits and when changes take effect.
 
+### Disk usage {#server-disk-usage}
+
+Server status and lists return `disk` only to the server owner and administrators, with `usedBytes`, `limitBytes`, `sampledAt` and `stale`. The field is omitted when no successful measurement exists; stopped servers can still report usage. `diskFull` indicates that the quota blocks startup. Public status may include this flag without disclosing usage.
+
+`stale: true` can indicate an expired measurement or a new below-quota measurement awaiting confirmation after cleanup. Use `diskFull` to determine whether startup is blocked.
+
+Start and restart endpoints return `409 disk_full` while the quota blocks startup. An existing block remains until a new successful measurement confirms usage below the quota; failed or stale measurements do not release it. Normal stops, file management and downloads remain available. See [Disk usage and quota](/en/guide/servers#disk-quota) for measurement rules and update delays.
+
 ### Host operation endpoints {#host-operations}
 
 All host operation endpoints belong to the external face and have the tier `owner`. felis-api hands each task to `felis-node-control.service`, a root service on the host, which runs the same `felis` command or installer function as the command line. The panel location and command-line equivalent of each operation are listed in the [Operations overview](/en/operations/#panel-host-operations).
