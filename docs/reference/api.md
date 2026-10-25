@@ -145,6 +145,14 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 
 服务器所有者通过 `PATCH /api/v1/me/servers/{name}` 修改，管理员通过 `PATCH /api/v1/servers/{name}` 修改，请求体使用相同的四个字段。省略字段或传入 `null` 保留原值，传入 `[]` 清空对应设置；环境变量的清空只移除用户设置，保留平台托管值。所有字段先校验，再一起保存；不符合限制时返回 `400 bad_startup_settings`。并发变更无法合并时返回 `409 conflict`，须重新读取后重试。高级启动设置的限制与生效时间见[高级启动设置](/guide/servers#startup-settings)。
 
+### 额外端口 {#server-extra-ports}
+
+服主使用 `PATCH /api/v1/me/servers/{name}`，管理员使用 `PATCH /api/v1/servers/{name}`，通过 `extraPorts` 数组设置额外端口，例如 `{"extraPorts":[{"protocol":"UDP","port":24454},{"protocol":"TCP","port":8123}]}`。每项只接受 `protocol`（`TCP` 或 `UDP`）与内部 `port`（1–65535），最多五项，同协议端口不可重复。托管游戏、RCON 和健康检查 TCP 端口返回 `400 bad_extra_ports`。客户端不能指定对外端口；省略或传入 `null` 保留原值，`[]` 清空。全部字段校验成功后一起保存，运行中修改不会重启游戏。
+
+管理者状态与自己的服务器列表可返回 `extraPorts`，每项包含 `protocol`、`port`，以及确认应用后的 `nodePort` 和可用时的完整直连 `address`。`extraPortsPending` 表示尚未确认应用；未确认的外口和地址不会充作有效映射。公共状态不返回这些字段。地址使用节点对外 IP，不使用 Cloudflare Tunnel 域名。
+
+账户删除或世界释放会等待端口撤销确认；清理未完成时保留所有权，HTTP 请求可返回 `409 extra_ports_pending`，稍后可重试。使用方式见[额外 TCP 与 UDP 端口](/guide/servers#extra-ports)。
+
 ### 磁盘用量 {#server-disk-usage}
 
 服务器状态与列表中的 `disk` 仅对该服服主和管理员返回，包含 `usedBytes`、`limitBytes`、`sampledAt` 与 `stale`。没有成功采样时省略 `disk`；停止后的服务器仍可返回用量。`diskFull` 表示配额是否阻止启动，公共状态也可返回该标记，但不包含具体用量。

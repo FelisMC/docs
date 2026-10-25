@@ -115,6 +115,16 @@ All advanced settings together are limited to 64 KiB, measured in UTF-8 bytes. E
 
 Saved JVM arguments, server arguments and environment variables take effect on the next start or restart. Saving while the server is running or starting does not immediately restart it. On the next normal stop or explicit restart, stop commands are attempted over RCON in order after the world save attempt and before the process shuts down; the group has a total time limit of 30 seconds. Unavailable RCON, a command failure or a timeout does not prevent shutdown. Commands may run again after a failed attempt is retried. Force stop, emergency stop and automatic retries after a failed start skip these commands.
 
+### Additional TCP and UDP ports {#extra-ports}
+
+Server owners and administrators can add up to five entries under **Extra ports** in **Edit Server Config**. Select TCP or UDP and enter the internal port on which the plugin or mod listens. Internal ports range from 1 to 65535, and protocol/port pairs must be unique. Managed game, RCON and health-check TCP ports cannot be exposed.
+
+The platform assigns external ports from 30000–32767. Once applied, the console shows the protocol, internal port, external port and a direct node address that can be copied. IPv6 addresses use brackets. Plugins listen on internal ports, and clients connect to external ports. For example, [Simple Voice Chat](https://modrepo.de/minecraft/voicechat/wiki/server_config) defaults to UDP 24454, [Dynmap](https://github.com/webbukkit/dynmap/wiki/Configuration.txt#webserver-port) to TCP 8123 and [BlueMap](https://bluemap.bluecolored.de/wiki/FAQ.html) to TCP 8100. Keep Simple Voice Chat's `port` set to the configured internal port, and set `voice_host` to the complete external address shown in the console. Open web maps at `http://node-IP:external-port/`.
+
+Mappings can be changed while the server is running or stopped. Saving does not start or restart the game. Plugin configuration still takes effect as that plugin requires. The panel indicates pending configuration or an unavailable address until a direct address is confirmed. Wait for the confirmed address before configuring clients. Stopping a server retains its configured port allocations. Removing an entry revokes its mapping and releases the corresponding allocation.
+
+Additional connections go directly to the node running the server, without using the existing Cloudflare Tunnel routes. The installer opens the default range in active firewalld or ufw configurations. Cloud security groups and NAT forwarding must also allow the relevant connections. Migration can change the direct node IP, so use the address currently shown in the console.
+
 ### Disk usage and quota {#disk-quota}
 
 The storage size selected when creating a server is also its disk quota. The console and file page show usage, the quota and the latest measurement time, including while the server is stopped. Usage counts allocated bytes in the world volume, including worlds, plugins, configuration, logs and temporary files within that volume. Sparse files count only allocated space, hard links count once, and symbolic links are not followed.

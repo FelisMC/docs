@@ -145,6 +145,14 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 
 Server owners update them through `PATCH /api/v1/me/servers/{name}`, and Admins through `PATCH /api/v1/servers/{name}`, using the same four fields. Omitting a field or passing `null` keeps its value; passing `[]` clears it. Clearing environment variables removes only user settings and preserves platform-managed values. All fields are validated before they are saved together. Invalid settings return `400 bad_startup_settings`. A concurrent change that cannot be merged returns `409 conflict`; read the settings again before retrying. See [Advanced startup settings](/en/guide/servers#startup-settings) for limits and when changes take effect.
 
+### Additional ports {#server-extra-ports}
+
+Owners use `PATCH /api/v1/me/servers/{name}` and administrators use `PATCH /api/v1/servers/{name}` with an `extraPorts` array, for example `{"extraPorts":[{"protocol":"UDP","port":24454},{"protocol":"TCP","port":8123}]}`. Each entry accepts only `protocol` (`TCP` or `UDP`) and an internal `port` (1–65535). Up to five entries are allowed, with unique protocol/port pairs. Managed game, RCON and health-check TCP ports return `400 bad_extra_ports`. Clients cannot select external ports. Omitted or `null` values keep the current list; `[]` removes it. All fields are validated before being saved together, and changing ports while running does not restart the game.
+
+Manager status and owned server-list rows can include `extraPorts`, with `protocol`, `port`, and a confirmed external `nodePort` plus a complete direct `address` when available. `extraPortsPending` indicates that application is not yet confirmed; unconfirmed external ports and addresses are not presented as valid mappings. Public status omits these fields. Addresses use the node's external IP rather than a Cloudflare Tunnel hostname.
+
+Account deletion and world release wait for port removal to be confirmed. Incomplete cleanup retains ownership; HTTP requests can return `409 extra_ports_pending` and be retried later. See [Additional TCP and UDP ports](/en/guide/servers#extra-ports).
+
 ### Disk usage {#server-disk-usage}
 
 Server status and lists return `disk` only to the server owner and administrators, with `usedBytes`, `limitBytes`, `sampledAt` and `stale`. The field is omitted when no successful measurement exists; stopped servers can still report usage. `diskFull` indicates that the quota blocks startup. Public status may include this flag without disclosing usage.
