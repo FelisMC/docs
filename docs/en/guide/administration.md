@@ -150,12 +150,12 @@ Under **Platform → Platform settings**, the Owner manages platform-wide settin
 
 | Tab | Cards |
 | --- | --- |
-| Player entry | Player entry policy (see [Player entry policy](/en/guide/players#entry-policy)), Startup and wake policy |
+| Player entry | Player entry policy (see [Player entry policy](/en/guide/players#entry-policy)), Startup and wake policy, Default interface language |
 | Notifications and retention | Mail delivery, Monitoring heartbeat, Backup and audit retention |
 | Access and security | Access and domain, Upload storage, Credential rotation, Game proxy, System server completion |
 | Distributed | Distributed deployment, Node operations, Execution nodes, Failover (see [Multi-node and high availability](/en/guide/distributed#overview)) |
 
-Saving a setting requires identity verification and is made against the current revision; if someone changed the same setting in the meantime, the save is refused and you reload before editing again. Settings saved in the panel take precedence over the install-time settings. See [Panel settings precedence](/en/reference/configuration#panel-settings-precedence).
+Saving a setting (except the default interface language) requires identity verification and is made against the current revision; if someone changed the same setting in the meantime, the save is refused and you reload before editing again. Settings saved in the panel take precedence over the install-time settings. See [Panel settings precedence](/en/reference/configuration#panel-settings-precedence).
 
 ### Startup and wake policy {#wake-policy}
 
@@ -165,6 +165,12 @@ Saving a setting requires identity verification and is made against the current 
 | Wake cooldown (0–3600 seconds) | Minimum interval between two accepted wake requests for the same server; `0` disables the cooldown. |
 
 The running limit is an admission check, so concurrent requests can briefly exceed it; whether Kubernetes can schedule a server still depends on the nodes' free memory. After **Save and apply**, the policy is active on every API replica at once, without a restart.
+
+### Default interface language {#default-language}
+
+Under **Player entry → Default interface language**, choose the default interface language of the panel: **Follow browser language**, **简体中文** or **English**. The setting applies to new visitors and to users who have not chosen a language in the panel. A language a user selects in the panel takes precedence over the default.
+
+With **Follow browser language**, the panel uses the language of the visitor's browser and shows English when that language is not supported. After saving, the setting takes effect the next time a visitor loads the panel. A visitor who saved a language in the browser earlier keeps that language; after the site's browser data is cleared, the default applies. Notification emails are always bilingual and are not affected by this setting.
 
 ### Mail delivery {#mail-relay}
 
