@@ -1828,18 +1828,19 @@ Act on the code in the table. After `files_timeout`, the Job runs on to its own 
 
 **Cause**
 
-felis-api checks scheduled tasks every 15 seconds and records the result of each run on the **Scheduled tasks** page. A command, restart or stop runs only while the server is running, and a start only while it is stopped. A backup of a running server is taken live; when that is not possible, the server is stopped, backed up and started again. A step has a deadline: the pod must stop within 15 minutes, the backup Job must end within 45, and the start gets 15. A restart or backup that cannot finish still starts the server again if it was running before.
+felis-api checks scheduled tasks every 15 seconds, runs the steps of each task in order, and records the result of each run on the **Scheduled tasks** page. A console command runs only while the server is running. A start, stop, restart or force stop whose goal already holds is recorded as **Skipped** when it is the only step of its task; in a longer task, the run moves on to the next step. A backup of a running server is taken live; when that is not possible, the server is stopped, backed up and started again. A step has a deadline: the pod must stop within 15 minutes, the backup Job must end within 45, and the start gets 15. When a step fails, the run ends and the remaining steps do not run. If the run stopped a server that was running before, the server is started again, and the detail ends with `; the server was started again`.
 
 | Result | Detail | Resolution |
 | --- | --- | --- |
 | Skipped | `the server has a new owner since this schedule was saved; save it again to use it` | Ownership changed and the task switched itself off. The new owner reviews the task and saves it to turn it back on. |
-| Skipped | `the server was not running`, `the server was already stopped`, `the server was already running`, `the server has no world yet`, `the server is being given up or deleted`, `the server no longer exists`; for a start also `the cluster is at its running-server cap` or `the world is busy with …` | The run had nothing to act on. The next run tries again. |
-| Missed | `felis-api was not running at the scheduled time` | felis-api was down for more than 10 minutes past the time. The run is dropped; the next one runs as usual. |
+| Skipped | `the server was not running`, `the server was already stopped`, `the server was already running`, `the server has no world yet`, `the server is being given up or deleted`, `the server no longer exists` | The run had nothing to act on. The next run tries again. |
+| Missed | `felis-api was not running at the scheduled time` | felis-api was down for more than 10 minutes past the time. The run is dropped and the next one runs as usual. A one-time task switches itself off once it is missed, and a missed run does not count toward the run limit. |
 | Failed | `felis-api stopped in the middle of this run` | felis-api restarted during the run. Check that the server is in the state you want. |
 | Failed | `the server did not stop within 15 minutes` | See [A server does not stop](#server-wont-stop). The backup did not run. |
 | Failed | `another operation kept the world busy for 15 minutes` | A restore, file change or another backup held the world. |
 | Failed | `the backup failed: …`, `the backup did not finish within 45 minutes`, `the backup store is full; ask an administrator to free space` | See [A world backup is refused or fails](#backup-failures). The **Backups & restore** page shows the Job. |
-| Failed | `could not start the server again: …` | The server stopped and could not start again (running-server cap, a server being given up, or a world still busy after 15 minutes). Start it from the panel once the cause is gone. |
+| Failed | `could not start the server: …`, `could not start the server again: …` | The start step, or the start after a restart or backup, did not complete within 15 minutes (the running-server cap was reached, the server is being given up, or the world was still busy). Start the server from the panel once the cause is gone. |
+| Failed | `the server did not become ready within 15 minutes`, `the server failed to start` | After a start or restart with steps behind it, the server must become ready within 15 minutes. See [A server is stuck starting](#server-stuck-starting). The remaining steps did not run. |
 | Failed | `the server console could not be reached`, `the console is not configured`, `the command failed: …` | RCON is unreachable or off. See [A server is stuck starting](#server-stuck-starting) and [A newer setting never reaches an existing server](#system-server-fields). |
 
 While a run is in progress the task cannot be edited, deleted or run again (`409 schedule_running`).
@@ -1854,7 +1855,7 @@ Act on the detail in the table. Timing rules that explain unexpected run times:
 
 - A time that the clock skips at a daylight-saving change runs an hour early; a time it repeats runs once, the first time.
 - A time zone the host no longer knows runs in UTC.
-- **Run now** starts a run at once, also on a task that is off, and leaves the next planned run unchanged.
+- **Run now** starts a run at once, also on a task that is off, and leaves the next planned run unchanged. That run counts toward the run limit; a one-time task, or a task that reaches its run limit, switches itself off after the run.
 - Deleting a server deletes its tasks; a new server with the same name starts with none.
 
 ## Quick reference {#quick-reference}

@@ -1564,18 +1564,19 @@ sudo k3s kubectl -n minecraft logs job/<job>
 
 **原因**
 
-felis-api 每 15 秒检查一次计划任务，并在「计划任务」页面记录每次执行的结果。控制台命令、重启和停止只在服务器运行时执行，启动只在服务器停止时执行。运行中的服务器以不停服方式备份；无法不停服备份时，先停止服务器，备份后再启动。每个步骤都有期限：Pod 须在 15 分钟内停止，备份 Job 须在 45 分钟内结束，启动有 15 分钟。无法完成的重启或备份，如果服务器原本在运行，仍会重新启动服务器。
+felis-api 每 15 秒检查一次计划任务，按顺序执行任务的各个步骤，并在「计划任务」页面记录每次执行的结果。控制台命令只在服务器运行时执行；启动、停止、重启与强制结束在目标状态已经成立时，单步骤任务记为已跳过，多步骤任务直接进入下一步。运行中的服务器以不停服方式备份；无法不停服备份时，先停止服务器，备份后再启动。每个步骤都有期限：Pod 须在 15 分钟内停止，备份 Job 须在 45 分钟内结束，启动有 15 分钟。某一步失败时，本次执行结束，后续步骤不再执行；如果本次执行停止了原本在运行的服务器，会重新启动服务器，详情末尾显示 `; the server was started again`。
 
 | 结果 | 详情 | 解决 |
 | --- | --- | --- |
 | 已跳过 | `the server has a new owner since this schedule was saved; save it again to use it` | 服务器所有者已变更，任务已自动关闭。新所有者检查任务后重新保存即可启用。 |
-| 已跳过 | `the server was not running`、`the server was already stopped`、`the server was already running`、`the server has no world yet`、`the server is being given up or deleted`、`the server no longer exists`；启动任务还可能为 `the cluster is at its running-server cap` 或 `the world is busy with …` | 本次执行没有可操作的对象，下次执行时会再次尝试。 |
-| 错过 | `felis-api was not running at the scheduled time` | felis-api 在预定时间之后停止运行超过 10 分钟。本次执行被放弃，下次执行照常进行。 |
+| 已跳过 | `the server was not running`、`the server was already stopped`、`the server was already running`、`the server has no world yet`、`the server is being given up or deleted`、`the server no longer exists` | 本次执行没有可操作的对象，下次执行时会再次尝试。 |
+| 错过 | `felis-api was not running at the scheduled time` | felis-api 在预定时间之后停止运行超过 10 分钟。本次执行被放弃，下次执行照常进行；一次性任务错过后自动关闭，错过的执行不计入执行次数。 |
 | 失败 | `felis-api stopped in the middle of this run` | 执行期间 felis-api 重启。确认服务器处于预期状态。 |
 | 失败 | `the server did not stop within 15 minutes` | 参见[服务器无法停止](#server-wont-stop)。备份未执行。 |
 | 失败 | `another operation kept the world busy for 15 minutes` | 恢复、文件修改或另一次备份占用了世界。 |
 | 失败 | `the backup failed: …`、`the backup did not finish within 45 minutes`、`the backup store is full; ask an administrator to free space` | 参见[世界备份被拒绝或失败](#backup-failures)。「备份与恢复」页面显示对应的 Job。 |
-| 失败 | `could not start the server again: …` | 服务器已停止但无法重新启动（达到运行服务器上限、服务器正在被放弃，或 15 分钟后世界仍被占用）。原因排除后在面板中启动服务器。 |
+| 失败 | `could not start the server: …`、`could not start the server again: …` | 启动步骤，或重启、备份之后的重新启动，在 15 分钟内未能完成（达到运行服务器上限、服务器正在被放弃，或世界仍被占用）。原因排除后在面板中启动服务器。 |
+| 失败 | `the server did not become ready within 15 minutes`、`the server failed to start` | 启动或重启之后还有后续步骤时，服务器须在 15 分钟内就绪。参见[服务器卡在启动中](#server-stuck-starting)。后续步骤未执行。 |
 | 失败 | `the server console could not be reached`、`the console is not configured`、`the command failed: …` | RCON 无法连接或未开启。参见[服务器卡在启动中](#server-stuck-starting)和[新版本引入的设置未应用到现有服务器](#system-server-fields)。 |
 
 执行进行中的任务无法编辑、删除或再次执行（`409 schedule_running`）。
@@ -1590,7 +1591,7 @@ felis-api 每 15 秒检查一次计划任务，并在「计划任务」页面记
 
 - 夏令时切换时被跳过的时间点会提前一小时执行；重复出现的时间点只在第一次执行。
 - 主机无法识别的时区按 UTC 执行。
-- 「立即执行」会立刻开始一次执行，对已关闭的任务同样有效，且不改变下次计划的执行时间。
+- 「立即执行」会立刻开始一次执行，对已关闭的任务同样有效，且不改变下次计划的执行时间；该次执行计入执行次数，一次性任务或达到执行次数上限的任务在执行后自动关闭。
 - 删除服务器会删除其计划任务；同名新建的服务器没有任何计划任务。
 
 ## 快速索引 {#quick-reference}

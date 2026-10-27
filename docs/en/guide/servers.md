@@ -364,27 +364,39 @@ For refused file operations, see [File manager errors](/en/operations/troublesho
 
 ## Scheduled tasks {#schedules}
 
-The **Scheduled tasks** page runs server operations on a schedule, for the server owner and Admins, with up to 20 tasks per server. It offers templates such as **Restart every night at 04:00**, **Back up every night at 05:00** and **Announce in chat every 30 minutes**; select **New task** for a custom one.
+The **Scheduled tasks** page runs a sequence of server operations on a schedule, for the server owner and Admins, with up to 20 tasks per server. It offers templates such as **Restart every night at 04:00**, **Back up every night at 05:00** and **Announce in chat every 30 minutes**; select **New task** for a custom one.
 
-| Task type | Server running | Server stopped |
+A task consists of one to ten steps that run in order. Steps can be added, removed and reordered. The editor also offers three templates that fill in steps at once: **Warn, then restart** (console command → delay of 60 seconds → restart), **Stop, back up, start** (stop → backup → start) and **Save, then back up** (`save-all` → backup).
+
+| Step | Server running | Server stopped |
 | --- | --- | --- |
-| Console command | Runs the command over RCON; the leading `/` is optional | Skipped |
-| Restart | Stops and starts the server; players are disconnected | Skipped |
-| Stop | Stops the server; players are disconnected | Skipped |
-| Start | Skipped | Starts the server, subject to the running server limit |
+| Console command | Runs the command over RCON; the leading `/` is optional. The command is one line of up to 1024 bytes. | The whole run is recorded as **Skipped** |
+| Delay | Waits 1 to 3600 seconds | Waits 1 to 3600 seconds |
+| Start | Goal already holds | Starts the server, subject to the running server limit |
+| Stop | Stops the server; players are disconnected | Goal already holds |
+| Restart | Stops and starts the server; players are disconnected | Goal already holds |
+| Force stop | Ends the server process at once, without saving; players are disconnected | Goal already holds |
 | Backup | Takes a live backup where possible; otherwise stops the server, backs it up and starts it again | Backs it up; the server stays stopped |
+
+A task must contain at least one step that is not a delay, and at most one backup step.
 
 Task settings:
 
-- **Execution mode**: **Once a day** runs at a set time; **Repeat** runs at an interval counted from 00:00 each day: 15 or 30 minutes, or 1, 2, 3, 4, 6, 8 or 12 hours. A restart, stop, start or backup repeats at most once an hour.
-- **Execution days**: the weekdays to run on, with shortcuts for every day, weekdays and weekends.
+- **Execution mode**: **Once a day** runs at a set time. **Repeat** runs at an interval counted from 00:00 each day: 1, 5, 10, 15 or 30 minutes, or 1, 2, 3, 4, 6, 8 or 12 hours. A task with a start, stop, restart, force stop or backup step repeats at most once an hour. **One time only** runs once at the chosen date and time, interpreted in the task's time zone. When the task is enabled, that time must be in the future, and the task switches itself off after it runs.
+- **Execution days**: the weekdays to run on, with shortcuts for every day, weekdays and weekends. A one-time task does not use this setting.
 - **Time zone**: an IANA time zone name (for example `Asia/Shanghai`); defaults to the browser's.
-- **Warn players**: a restart, stop or backup can post a Chinese and English warning in game chat 1, 5, 10, 15 or 30 minutes ahead while the server runs.
+- **Disable after N runs**: from 1 to 10000. Leave it empty or enter `0` for no limit. A run started by hand counts toward the limit; a missed run does not. When the limit is reached, the task switches itself off. When a task that is off is enabled again, its run count returns to zero. While the task is enabled, the limit must be greater than the number of runs already made.
+- **Warn players**: when a task has a stop, restart, force stop or backup step, it can post a Chinese and English warning in game chat 1, 5, 10, 15 or 30 minutes before the task starts, while the server runs. The warning goes out before the first step, and its wording follows the first stop, restart, force stop or backup step.
 - **Enabled**: switch it off to keep the task without running it.
+
+Each row in the task list shows the task's steps (for example **Console command → Delay 60 seconds → Restart**), the run time of a one-time task, and, for a task with a run limit, the runs made so far (for example **Executed 3 of 10 times**). While a task runs, its row shows the current progress, for example **Step 2 of 3: Waiting for the server to stop…**
 
 How tasks run:
 
 - felis-api checks every 15 seconds, so a task starts within about 15 seconds of its time. A run more than 10 minutes late (for example because felis-api was not running) is recorded as **Missed**, and the next one runs as usual.
+- Steps run in order. When a step fails, the run is recorded as **Failed** and the remaining steps do not run. If the run stopped a server that was running, the server is started again after the failure. A command whose outcome is unknown is not sent again.
+- After a start or restart that has steps behind it, the run waits up to 15 minutes for the server to be ready. After a stop or force stop that has steps behind it, the run waits for the server to stop completely.
+- A start, stop, restart or force stop whose goal already holds (for example, a stop or restart on a server that is already stopped) is recorded as **Skipped** when the task consists of that step alone, and is passed over in a longer task. A command step on a server that is not running records the whole run as **Skipped**.
 - The result shows as **Succeeded**, **Skipped**, **Failed** or **Missed**, with details.
 - **Run now** also works on a task that is off. It skips the players' warning, disconnects online players right away, and keeps the next scheduled run. While a run is in progress, the task cannot be edited, deleted or run again.
 - When the server changes owner, its tasks are switched off; the new owner reviews and saves them to turn them back on.
