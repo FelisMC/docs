@@ -65,6 +65,28 @@ felis-api and felis-operator each run as a single replica with the Recreate stra
 
 A platform upgrade does not restart running game servers. Their init containers also run the Felis image; a running server keeps the version it started with and picks up the new one at its next start. A release that changes the game pod in any other way restarts running servers once, as editing a server's settings does.
 
+## Updating from the panel {#panel-update}
+
+The Owner can update Felis from the panel directly, without logging in to the host to run `felis update --apply`.
+
+**Entry and permissions**: the entry point is **Maintenance & Backups → Updates**. When the daily version check finds a newer release for felis-api, a card titled **Update now to** followed by the target version appears below the **Component versions** card. It shows the current version, the target version and a description of the component. Only the Owner can use it; Admins do not see the card. After you select **Update now** and confirm in the dialog, identity verification is required before the update starts. While another host task is running on the host, the button is unavailable; use it once that task ends.
+
+**What it does**: the update is the same as `--apply` on the command line. Felis backs up the database and the deployment state first, then runs the installer of the target version. felis-api, the game proxy and the system servers restart, and players who are online may be disconnected; see [Restarts during an update](#restarts).
+
+**Maintenance window**:
+
+- Inside the [maintenance window](#maintenance-window), the dialog asks only for confirmation.
+- Outside the window, the dialog shows “The current time is outside the maintenance window. The update starts immediately.” The update can be confirmed only after you tick **I confirm updating immediately outside the maintenance window**. This is the same as `--apply --now`, which explicitly starts one-off manual maintenance.
+
+**How it runs**: the update runs in a transient systemd unit named `felis-update-<task ID>.service` on the host. It does not depend on the felis-api or node-control processes, so restarting either of them during the update does not interrupt it. Panel requests fail briefly while the update runs; the page shows “The panel is restarting. Reconnecting…” and keeps retrying. When node-control restarts, it reattaches to the same task, and the stage shows “Reconnected; waiting for the update to finish”. A task runs for at most 90 minutes; on timeout, the task is marked as failed and the update unit on the host is not stopped. If the host restarts during the update, the task ends as failed. Run `felis version` and `felis update --check` on the host to confirm the installed version before deciding whether to retry.
+
+**Results**:
+
+- Success: the page shows the version the host was updated to. The panel files have changed, so select **Reload the panel** to load the new version.
+- Failure: the page shows the error and the end of the log, including the installer output, with a rollback note. The backups of the database and the deployment state taken before the update are kept. Run `felis update --check` on the host to see the version now installed, then investigate under [When an update fails](#failed-update). To go back, follow [Rolling back](#rollback).
+
+**Multi-node deployments**: a panel update updates only the controller node. Worker nodes still use the node upgrade task; see [Updating nodes](/en/guide/distributed#update-nodes).
+
 ## Maintenance window {#maintenance-window}
 
 The maintenance window decides when `felis update --apply` may run. Set it under **Maintenance & Backups → Updates** → **Configure Maintenance Window**:
