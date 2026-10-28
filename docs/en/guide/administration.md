@@ -13,7 +13,7 @@ Felis has three roles:
 
 | Role | Rights | Panel navigation |
 | --- | --- | --- |
-| Owner | The platform owner. Has every Admin right and manages users, authentication sources, host operations and platform settings. Can also use the emergency stop and set a server's forwarding mode. | **Platform**: Users, Authentication sources, Maintenance & Backups, Platform settings |
+| Owner | The platform owner. Has every Admin right and manages users, authentication sources, host operations and platform settings. Can also use the emergency stop and set a server's forwarding mode. | **Platform**: Users, Authentication sources, Maintenance & Backups, Audit log, Platform settings |
 | Admin | Creates servers, edits their configuration and manages every server; maintains the login space and lobby, the image whitelist, builds and submission review; in a multi-node deployment, chooses execution nodes and migrates servers. | **Admin**: Login & lobby, Images, Build Pipeline, Submissions |
 | User | Claims servers, manages the servers they own, and submits modpacks. | Dashboard, Servers, My Submissions, Account |
 
@@ -29,6 +29,16 @@ Every role has the Dashboard, Servers, My Submissions and Account. The Owner acc
 An operator sign-in request works like this: on the operator console, select **Operator sign-in**, enter your email address and select **Request operator sign-in**. A code is emailed to you, and an online Admin or Owner with a linked game identity must approve the request in game with `/felis web op approve <code>`. Once it is approved, enter the code from the email to sign in.
 
 Operator sessions end after 30 minutes of inactivity. Sensitive operations (for example saving platform settings, running host tasks or downloading a support bundle) require identity verification with a registered passkey or a verified email address; a verification stays valid for 5 minutes, and an operator account that signs in again counts as verified for 5 minutes. Without a mail relay, no code can be sent. See [Mail delivery](#mail-relay).
+
+## Platform resources on the dashboard {#dashboard-overview}
+
+On the dashboard of Admins and the Owner, the **Platform resources** card appears below the statistics cards. Users' dashboards do not show the card or load its data. The card has three parts:
+
+- **Totals over the last hour**: the summed CPU and memory of all running servers, and the number of running servers, each in its own chart covering the last hour. CPU is shown in cores, for example “1.25 cores”; the vertical axis of each chart is scaled to the highest value in that hour.
+- **Nodes table**: for each node, the summed CPU and memory of its running servers and the number of those servers, sorted by node name. Nodes with no running servers are not listed. When no server is running, the card shows “No servers are running.” On narrow screens, the table becomes a list of cards.
+- **Failed sign-ins in the last 24 hours**: the number of refused sign-ins, shown in the warning color when it is above 0. The Owner can select **View audit log** beside the number to open the [Audit log](#audit-log) page and check the causes.
+
+Samples are taken every 15 seconds, and the panel refreshes every 15 seconds; the curves keep the last hour. CPU and memory come from the cluster's metrics service. A running server without metrics counts toward the running total but not toward the CPU and memory totals. Samples are held in the memory of felis-api, so the curves start empty after felis-api restarts. When several controller replicas run, each replica samples and keeps only its own data, and the page shows the curves of the replica it reaches, so the curves can differ slightly between replicas. When the latest sample is more than 45 seconds old, the current values show “No data yet” and the nodes table is empty.
 
 ## Users {#users}
 
@@ -49,6 +59,7 @@ Select **Details** in the user list to:
 - **Edit Profile**: change the username, email and role (Admin or User), then select **Save Changes**.
 - **Linked Minecraft Accounts**: link a game identity, or **Unlink** one. After unlinking, the user loses the in-game identity tied to that UUID.
 - **Quotas**: see [Quotas](#quotas).
+- **Assign server**: give a server to this user; see [Assigning a server](#assign-server).
 - **Sessions**: revoke a single session, or select **Revoke All** to sign the user out of every device.
 - **Danger Zone**:
   - **Disable User** prevents sign-in and revokes every session at once; **Enable User** allows sign-in again.
@@ -56,6 +67,21 @@ Select **Details** in the user list to:
   - **Delete User** soft-deletes the account: its servers are released, every session is revoked, and the account is permanently disabled. This cannot be undone in the panel.
 
 The signed-in account cannot change its own role, disable itself or delete itself.
+
+### Assigning a server {#assign-server}
+
+The Owner can give a server directly to a chosen account, without the account claiming it. Only the Owner can do this: Admins and users do not see the entry points, and the API refuses the same requests for them. Assignment has two entry points, which share one dialog:
+
+- **User details page**: select **Assign server**, then choose the server to hand over from the server list in the dialog. The list can be filtered by name or display name. It omits system servers, servers the account already owns and servers being given up. A disabled account cannot receive servers, and the button is unavailable for it.
+- **Server page**: on the server's console page, open **Edit Server Config**. The **Owner** row shows the current owner. Select **Change owner**, then choose the new owner from the user list. The list can be filtered, and it omits disabled accounts and the current owner. System servers have no owner, so this row does not appear for them.
+
+Once a server and an account are selected, the dialog first shows the current owner and the change from one owner to another. For a server with no owner, it states that the server will be assigned to the chosen account.
+
+An assignment has the same effect as a claim: the server's wake list and tags are cleared, the server counts toward the new owner's quota, and the previous owner no longer owns it. A server that is being given up or deleted cannot be assigned; cancel the request first. See [Giving up and deleting servers](/en/guide/servers#retire).
+
+Before assigning, the dialog checks the new owner's quota. If the assignment would exceed it, the dialog lists the totals after assignment and the limits in warning style, item by item, covering the number of servers, CPU, memory and storage. The Owner must tick **Assign anyway, exceeding the quota** before confirming; until then the confirm button is unavailable. No confirmation is needed when the quota is not exceeded. An excess confirmed this way is handled like a lowered quota: it restricts only the account's later creations, claims and resource changes, and existing servers are not affected. See [Quotas](#quotas).
+
+A successful assignment is recorded in the audit log as the action `server.assign`. Its payload contains `owner_from` (the previous owner, empty when the server had none), `owner_to` (the new owner) and `over_quota` (the quota items exceeded at confirmation). The audit record detail shows the owner change as “owner: old value → new value”. See [Audit log](#audit-log).
 
 ## Quotas {#quotas}
 
@@ -146,14 +172,15 @@ If the submitter uploaded the context again after your review, approval is refus
 
 ## Platform settings {#platform-settings}
 
-Under **Platform → Platform settings**, the Owner manages platform-wide settings, spread over four tabs:
+Under **Platform → Platform settings**, the Owner manages platform-wide settings, spread over five tabs:
 
 | Tab | Cards |
 | --- | --- |
 | Player entry | Player entry policy (see [Player entry policy](/en/guide/players#entry-policy)), Startup and wake policy, Default interface language |
 | Notifications and retention | Mail delivery, Monitoring heartbeat, Backup and audit retention |
-| Access and security | Access and domain, Upload storage, Credential rotation, Game proxy, System server completion |
+| Access and security | Access and domain, Upload storage, Credential rotation, API keys, Game proxy, System server completion |
 | Distributed | Distributed deployment, Node operations, Execution nodes, Failover (see [Multi-node and high availability](/en/guide/distributed#overview)) |
+| Branding | Panel name, Logo, Sign-in background image, Sign-in notice, Show “Powered by Felis” (see [Branding](#branding)) |
 
 Saving a setting (except the default interface language) requires identity verification and is made against the current revision; if someone changed the same setting in the meantime, the save is refused and you reload before editing again. Settings saved in the panel take precedence over the install-time settings. See [Panel settings precedence](/en/reference/configuration#panel-settings-precedence).
 
@@ -212,7 +239,7 @@ After **Save retention settings**, felis-api applies the new values at once, and
 
 ### Access and security {#access-security}
 
-The operations on the **Access and security** tab are run as root by the node operations service on the host. One task runs at a time, and each requires identity verification and is recorded in the audit log:
+The operations on the **Access and security** tab, apart from **API keys**, are run as root by the node operations service on the host. One task runs at a time, and each requires identity verification and is recorded in the audit log:
 
 | Card | Purpose | Details |
 | --- | --- | --- |
@@ -224,15 +251,58 @@ The operations on the **Access and security** tab are run as root by the node op
 
 For the task rules and the full list of operations, see [Running the host from the panel](/en/operations/#panel-host-operations).
 
+### API keys {#api-keys}
+
+On **Access and security → API keys**, the Owner decides whether users can create API keys. Keys that users create let scripts call the external interface as that user; the request format is described in [API keys](/en/reference/api#api-keys).
+
+- **Switch**: **Allow users to create API keys** is off by default, and saving it requires identity verification. When it is on, users can create keys on the **Account** page.
+- **Effect of turning it off**: every existing key stops working at once, but users can still view and revoke them on the **Account** page. When the switch is turned on again, keys that have neither expired nor been revoked work again.
+- **Admin keys**: Admins and the Owner can also create admin keys. An admin key carries its creator's administrative permissions on the operator console, works only on the operator console domain and cannot be used for operations that require identity verification. Creating one requires a validity period of no more than 90 days and identity verification.
+- **Limit**: each account can hold up to 10 keys.
+
+### Branding {#branding}
+
+On the **Branding** tab, set how the panel presents itself to visitors: its name, logo, sign-in background and notice, and the credit line. Saved settings apply the next time a visitor loads the panel.
+
+| Setting | Description |
+| --- | --- |
+| Panel name | Up to 40 characters, shown in the sidebar, the top bar, the sign-in page and the browser tab title. Leading and trailing whitespace is removed automatically. Leave it empty to use the default name Felis. |
+| Logo | Replaces the Felis mark in the sidebar, the top bar and the sign-in page. The Felis mark is used when no logo is set. |
+| Sign-in background image | Fills the background of the sign-in page and the first-run setup page. The sign-in card stays readable in front of it. |
+| Sign-in notice | Plain text of up to 1000 characters, shown above the sign-in card with line breaks preserved. HTML and Markdown are not interpreted and are displayed as entered. Apart from line breaks, it cannot contain control characters. Leave it empty to show no notice. |
+| Show “Powered by Felis” | On by default. When on, a credit link to felismc.com appears at the bottom of the sign-in page and of the sidebar. When off, the link is hidden. |
+
+The logo and the background image must be PNG or WebP files; SVG is not supported. The logo may be at most 256 KiB, and the background image at most 2 MiB. Each dimension of a PNG may be at most 4096 pixels. The file content must match the chosen format, or the upload is refused.
+
+Saving the panel name, the sign-in notice or the credit switch, and uploading or removing an image, each require identity verification. The name, notice and credit switch are saved with **Save branding settings** against the current revision. Uploading or removing an image is saved at once and is not controlled by that button.
+
 ## Audit log {#audit-log}
 
 Felis records administrative and sensitive actions in the audit log. Each record holds the time, the actor, the action, the server and the action's parameters. Recorded actions include:
 
-- Servers: creation (`server.create`), backups (`backup.create`, `backup.scheduled`), backup deletion (`backup.delete`), backup downloads and world exports (`backup.export`, `world.export`).
+- Servers: creation (`server.create`), assignment (`server.assign`), backups (`backup.create`, `backup.scheduled`), backup deletion (`backup.delete`), backup downloads and world exports (`backup.export`, `world.export`).
 - Files: `file.write`, `file.mkdir`, `file.delete`, `file.rename`, `file.upload`, `file.unzip`, `file.download`.
 - Scheduled tasks: `schedule.create`, `schedule.update`, `schedule.delete`, `schedule.run_now`, and `schedule.run` after every finished run.
 - Platform: changes to platform settings (`platform.*`, such as `platform.entry_policy` and `platform.archive_policy`), host tasks (`platform.host.*`) and node operations (`platform.node.*`).
 - Sign-in: every refused sign-in is recorded as `auth.<door>.failed`, with the cause in the payload's `reason`; throttled requests are recorded as `auth.rate_limited`. These records carry the account ID, client address and user agent.
+
+### Browsing in the panel {#audit-browse}
+
+The Owner browses every record under **Platform → Audit log**, newest first. Each page loads 50 records; select **Load more** to continue to older records. Submitting the filters at the top reloads the list from the first page. When several filters are filled in, a record must match all of them:
+
+| Filter | Matching |
+| --- | --- |
+| Actor | Contains the text entered, ignoring case |
+| Action | Matches by prefix; for example, `server.` matches every server action |
+| Server | Must match the server name exactly |
+| From (inclusive), Until (exclusive) | Read in the browser's time zone; the end time must be later than the start time |
+| Keyword | Ignores case; matches the text of the actor, action, server and action parameters |
+
+The list shows the time (in the browser's time zone), the actor, the action and the server; on narrow screens, each record appears as a card. Select a record to open its details, which show every field: the record number, source, actor and the actor's account ID, request ID, client address, User-Agent, and the action's parameters, formatted. Paired parameters `xxx_from` and `xxx_to` (for example `image_from` and `image_to` when an image is changed) are listed above the details as “xxx: old value → new value”. The `fields` of a server settings change are shown as **Fields changed**, naming the settings that the edit changed.
+
+Browsing the audit log does not require identity verification, and Admins cannot open this page. Exporting still requires identity verification; see below. The Owner's dashboard also shows a **Recent actions** card, which lists the time, actor, action and server of the latest 10 records. Select **View all** to open the audit log page.
+
+### Export and retention {#audit-export}
 
 Audit records are kept for 365 days by default; set the period under [Backup and audit retention](#retention). felis-api prunes expired records a minute after it starts and every 6 hours after that; the daily database backups keep the records for as long as the backups are kept. To keep records longer, export them before the period ends:
 

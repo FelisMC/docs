@@ -96,6 +96,7 @@ The **Account** page also offers:
 - **Email Verification**: enter an email address to receive a six-digit code, valid for 10 minutes.
 - **Passkeys**: register or delete passkeys. An account's only passkey cannot be deleted while its email address is unverified.
 - **Signed-in devices**: review browser sessions, revoke an unrecognized device, or select **Sign out other devices**.
+- **API keys**: let scripts call external interfaces as this account. Keys can be created only after the platform Owner turns the feature on. On **Account → API keys**, select **Create key**, enter a name and choose a validity period: 30 days, 90 days, 1 year or no expiry, with 90 days as the default. The key is shown once, immediately after it is created, and cannot be viewed again after the dialog is closed, so copy and save it first. Each account can hold up to 10 keys; once the limit is reached, revoke the keys no longer in use before creating new ones. Select **Revoke** in the list to stop a key at once; scripts that use it stop working immediately. For the request format, see [API keys](/en/reference/api#api-keys).
 
 ### Panel appearance {#panel-appearance}
 

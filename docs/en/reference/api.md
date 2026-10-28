@@ -14,7 +14,7 @@ felis-api is served by the `felis` binary and runs two faces at once:
 | Face | Callers | Where it is reached | Authentication |
 | --- | --- | --- | --- |
 | Internal face | The game proxy, the login space, image build jobs, file and export jobs, some `felis` commands on the host | The in-cluster ClusterIP Service `felis-api-internal`, port `8081`, plain HTTP | A per-caller service token; one-time tokens for job transfers |
-| External face | The web panel and clients that use a session | The panel hostnames: the player console `console.<root_domain>` and the operator console `op.console.<root_domain>` | The `felis_session` session cookie |
+| External face | The web panel and clients that use a session | The panel hostnames: the player console `console.<root_domain>` and the operator console `op.console.<root_domain>` | The `felis_session` session cookie or an API key |
 
 The external face is served through the NodePort Service `felis-api` (port `443`), behind the access method chosen at install time; the panel pages and the API share the same host. The internal face is never wrapped in Zero Trust and is never published on a node's external address. The network policies of game servers block access to it, with the login space as the only exception; image build jobs reach it through their own egress policy; the game proxy reaches it from the host through the ClusterIP. See [Access and domains](/en/operations/access#access-methods) for the access methods.
 
@@ -47,7 +47,7 @@ A missing or invalid token returns `401`; a valid token for a caller the operati
 
 ### Sessions {#sessions}
 
-The external face accepts only the session cookie `felis_session`. The cookie is `HttpOnly`, `Secure` and `SameSite=Lax`, and is valid only for the host that issued it, so an operator console session is never sent to the player console. The server stores only the SHA-256 digest of the cookie.
+The external face accepts the session cookie `felis_session` or an API key; the latter is described in [API keys](#api-keys). The cookie is `HttpOnly`, `Secure` and `SameSite=Lax`, and is valid only for the host that issued it, so an operator console session is never sent to the player console. The server stores only the SHA-256 digest of the cookie.
 
 Sessions are issued by these passwordless sign-in methods:
 
@@ -58,6 +58,22 @@ Sessions are issued by these passwordless sign-in methods:
 - the setup token in the first-run setup link (used to initialize the first Owner).
 
 When the installation sits behind Cloudflare Access, Access is enforced at the edge and felis-api does not read the Access token. The sign-in endpoints are rate-limited per source address; over the limit they return `429 rate_limited` with a `Retry-After` header.
+
+### API keys {#api-keys}
+
+An API key lets a script call the external face as the account that created it. The request header takes the form `Authorization: Bearer felis_pat_…`:
+
+```bash
+curl -H "Authorization: Bearer $FELIS_API_KEY" https://console.example.com/api/v1/me/servers
+```
+
+- **Availability**: the Owner must turn API keys on in the platform settings before keys can be created or used. The setting is off by default; see [API keys](/en/guide/administration#api-keys). When it is turned off, every existing key stops working immediately. When it is turned on again, keys that have neither expired nor been revoked work again.
+- **Identity**: a key represents the account that created it. A request that carries both a session cookie and an API key returns `401`.
+- **Operations that require a session**: a key cannot manage keys. Using an API key on `/api/v1/account/api-tokens` returns `403 session_required`. A request made with an API key also cannot pass [reauthentication](#reauthentication), and operations that require reauthentication return `403 session_required` for it.
+- **Validity and limit**: an ordinary key may have no expiry; when one is set, it can last at most 365 days. Each account can hold up to 10 keys.
+- **Admin keys**: Admins and the Owner can set `admin: true` when they create a key. An admin key holds administrative permissions only on the operator console domain. It must have a validity period of no more than 90 days, and creating it requires reauthentication.
+- **Storage and audit**: the creation response returns the plain-text key once; the server stores only its SHA-256 digest. The audit log records the source as `api_key:<prefix>`, where the prefix is the first 18 characters of the key.
+- **Cross-site checks**: requests made with an API key are not subject to the [cross-site write](#common-behaviour) check.
 
 ### Access tiers {#access-tiers}
 
@@ -80,6 +96,7 @@ Operations that add, remove or change a way into an account, and the host operat
 - Signing in with a passkey, an email code, staff login or the setup token counts as reauthentication; signing in with a bind code does not.
 - Users reauthenticate with a passkey or an email code.
 - Admins and the Owner reauthenticate with a passkey or by signing in again; an email code alone is not a factor for staff.
+- A request made with an API key cannot pass reauthentication and returns `403 session_required`.
 
 ### Setup lockdown {#setup-lockdown}
 
@@ -122,7 +139,7 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 | Sign-in | `/api/v1/auth/…` | `public` | Passkey, email code, staff login, bind code, setup token, sign-out |
 | Current user | `/api/v1/me`, `/api/v1/me/servers`, `/api/v1/me/server-quota` | `app` | Account details, the user's own servers and server quota; creating and changing their own servers within it |
 | Server software | `/api/v1/software…` | `app` | Available cores, game versions, builds and the Java each needs |
-| Account | `/api/v1/account/…` | `app` | Account linking, email, passkeys, reauthentication, sessions, account migration |
+| Account | `/api/v1/account/…` | `app` | Account linking, email, passkeys, reauthentication, sessions, API keys, account migration |
 | Server actions | `/api/v1/servers/{name}/…` | `app` | Wake, stop, restart, claim, status, retirement, job records |
 | Startup settings | `GET /api/v1/servers/{name}/startup-settings` | `app` | The server owner and Admins read JVM arguments, server arguments, user environment variables and stop commands |
 | Console and players | `/api/v1/servers/{name}/console`, `…/command`, `…/access/…`, `…/allowlist` | `app` | The console event stream and RCON commands; whitelist, bans, kicks, OP, LuckPerms |
@@ -134,7 +151,7 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 | Images and builds | `/api/v1/images`, `/api/v1/images/build…` | `admin` | The image whitelist; builds, build logs, cancellation, security scans and SBOMs |
 | Submission review | `/api/v1/submissions…` | `admin` | Approve or reject submissions |
 | User administration | `/api/v1/users…` | `owner` | Users, quotas, sessions, passkeys, game profile links |
-| Platform settings | `/api/v1/settings/…`, `/api/v1/updates/…`, `/api/v1/platform/db-backup` | `owner` | Player entry policy, wake and archive policies, the self-service default quota, heartbeat, failover, mail relay, authentication sources, maintenance window, update report, database backup status |
+| Platform settings | `/api/v1/settings/…`, `/api/v1/updates/…`, `/api/v1/platform/db-backup` | `owner` | Player entry policy, wake and archive policies, the self-service default quota, heartbeat, failover, mail relay, authentication sources, the API key switch, maintenance window, update report, database backup status |
 | Failover | `/api/v1/nodes/{node}/failover` | `owner` | Read the failover plan and fail over a lost node |
 | Emergency stop | `POST /api/v1/servers/{name}/emergency-stop` | `owner` | Stop a server immediately |
 | Host operations | See below | `owner` | Run maintenance tasks on the controller host |

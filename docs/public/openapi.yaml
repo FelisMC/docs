@@ -134,10 +134,21 @@ components:
         session doors — passkey login, email-OTP, bind code, and op-login
         finish — HttpOnly+Secure+SameSite=Lax and host-only, so an op.console
         session never reaches the player console. Only its sha-256 is
-        persisted. It is the external face's only credential: Cloudflare
-        Access, when the install sits behind it, is enforced at the edge and
-        felis-api does not read the Access JWT. Admin-tier operations
-        additionally require a staff session on the operator console host.
+        persisted. Cloudflare Access, when the install sits behind it, is
+        enforced at the edge and felis-api does not read the Access JWT.
+        Admin-tier operations additionally require a staff session on the
+        operator console host.
+    apiKey:
+      type: http
+      scheme: bearer
+      description: >-
+        Personal API key (external face), `Authorization: Bearer felis_pat_…`,
+        accepted wherever sessionCookie is, while the owner keeps API keys
+        turned on. It acts as its owner with three limits: it cannot manage API
+        keys, it cannot pass a confirmation of identity, and it carries staff
+        rights only when created as an admin key and used on the operator
+        console. A request carrying both a key and a session cookie is refused.
+        Only the key's sha-256 is persisted; audit records name it by prefix.
 
   responses:
     NoContent:
@@ -352,6 +363,32 @@ components:
       properties:
         language: { type: string, enum: ['', zh-CN, en-US], description: "Default panel language for visitors who have not chosen one; empty when none is set or the setting cannot be read." }
 
+    BrandingSettings:
+      type: object
+      description: >-
+        The panel name, the notice above the sign-in form and the footer credit, with
+        whether a logo and a sign-in background image are stored. The images have their
+        own operations and do not change the revision.
+      required: [name, notice, show_powered_by, has_logo, has_background, revision]
+      properties:
+        name: { type: string, maxLength: 40, description: "Panel name without leading or trailing whitespace; empty uses the default name Felis." }
+        notice: { type: string, maxLength: 1000, description: "Plain-text notice; line breaks are kept and no other control characters are allowed." }
+        show_powered_by: { type: boolean, description: "Whether the panel footer credits Felis." }
+        has_logo: { type: boolean }
+        has_background: { type: boolean }
+        revision: { type: string, description: "Opaque revision of the name, notice and credit; stale or concurrent writes return 409." }
+
+    PublicBranding:
+      type: object
+      description: What the panel shows before sign-in. Image URLs carry a content version in the v query parameter.
+      required: [name, notice, show_powered_by, logo, background]
+      properties:
+        name: { type: string, description: "Panel name; Felis when none is set." }
+        notice: { type: string }
+        show_powered_by: { type: boolean }
+        logo: { type: string, nullable: true, description: "URL of the logo; null when none is set." }
+        background: { type: string, nullable: true, description: "URL of the sign-in background image; null when none is set." }
+
     ArchivePolicySettings:
       type: object
       description: >-
@@ -398,6 +435,32 @@ components:
         replicaMinutes: { type: integer, minimum: 0, maximum: 1440, description: "0, or 15 to 1440." }
         revision: { type: string }
         managed: { type: boolean }
+
+    AuditEntryView:
+      type: object
+      description: One audit log row (internal/api/repo.go AuditRecord). Columns without a value are null.
+      required: [id, created_at, actor, actor_user_id, source, action, server_name, request_id, client_ip, user_agent, payload]
+      properties:
+        id: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+        actor: { type: string, description: Display name of the actor. }
+        actor_user_id: { type: string, nullable: true, description: The account the action is attributed to. }
+        source: { type: string, description: "external, or internal:<component> for platform components." }
+        action: { type: string, description: "Dotted action name such as server.patch." }
+        server_name: { type: string, nullable: true, description: The server concerned; other objects store their identifier here. }
+        request_id: { type: string, nullable: true }
+        client_ip: { type: string, nullable: true }
+        user_agent: { type: string, nullable: true }
+        payload: { type: object, nullable: true, additionalProperties: true, description: The detail stored with the action. }
+
+    AuditPage:
+      type: object
+      required: [entries, next_cursor]
+      properties:
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEntryView' }
+        next_cursor: { type: string, description: Opaque cursor for the next page; empty when no older rows remain. }
 
     MailSettings:
       type: object
@@ -663,8 +726,12 @@ components:
       properties:
         action:
           type: string
-          enum: [enable, join, approve, upgrade, fence, unfence, enable-ha, join-controller, db-backup, db-verify, db-delete, db-restore, offsite-sync, offsite-list, offsite-check-key, offsite-take-over, offsite-configure, offsite-disable, restore-host, backup-now, rotate-token, domain-check, domain-set, storage-configure, connection-configure, converge, doctor, support-bundle, host-settings, server-forwarding]
-          description: The node lifecycle actions (enable to join-controller) and the platform host tasks the panel runs on the controller host.
+          enum: [enable, join, approve, upgrade, fence, unfence, enable-ha, join-controller, db-backup, db-verify, db-delete, db-restore, offsite-sync, offsite-list, offsite-check-key, offsite-take-over, offsite-configure, offsite-disable, restore-host, backup-now, rotate-token, domain-check, domain-set, storage-configure, connection-configure, converge, doctor, support-bundle, host-settings, server-forwarding, update]
+          description: >-
+            The node lifecycle actions (enable to join-controller) and the platform host tasks the panel runs on the controller host.
+            update applies the published release in params.version with `felis update --apply` in its own systemd unit;
+            params.now "true" applies it outside the maintenance window. felis-api restarts during an update, and the task
+            keeps running and reports its result once the panel reconnects.
         name: { type: string, description: Stable node name; required for every action except enable and enable-ha. }
         sshTarget: { type: string, description: Verified root SSH alias or user@host; required for join, approve, upgrade and join-controller. }
         externalIP: { type: string, description: Fixed node IP; required for enable, join and join-controller. }
@@ -1044,6 +1111,10 @@ components:
           description: >-
             Owner and staff only. Present while the owner has given the server up or an
             admin is deleting it; the reaper carries that out on its next run.
+        tags:
+          type: array
+          items: { type: string }
+          description: Owner and staff only. Present when the server carries tags.
         resumeAfterHostRestart:
           type: boolean
           description: Whether a server that was running starts again after its host restarts, for example after a power loss. System servers always resume.
@@ -1230,6 +1301,46 @@ components:
           items: { $ref: '#/components/schemas/UsagePoint' }
           description: Oldest first, covering the last hour; held in memory and cleared when the API instance changes.
 
+    PlatformUsagePoint:
+      type: object
+      description: The running servers added together at one sampling.
+      required: [at, cpuMilli, memoryBytes, running]
+      properties:
+        at: { type: string, format: date-time }
+        cpuMilli: { type: integer, format: int64, minimum: 0, description: Sum over the running servers that have metrics. }
+        memoryBytes: { type: integer, format: int64, minimum: 0, description: Sum over the running servers that have metrics. }
+        running: { type: integer, minimum: 0, description: Servers that are running and meant to run; those without metrics are counted too. }
+
+    NodeUsage:
+      type: object
+      description: The running servers of one node added together at the latest sampling.
+      required: [name, cpuMilli, memoryBytes, running]
+      properties:
+        name: { type: string }
+        cpuMilli: { type: integer, format: int64, minimum: 0 }
+        memoryBytes: { type: integer, format: int64, minimum: 0 }
+        running: { type: integer, minimum: 1 }
+
+    PlatformUsage:
+      type: object
+      required: [current, history, nodes, loginFailures24h]
+      properties:
+        current:
+          anyOf:
+            - { $ref: '#/components/schemas/PlatformUsagePoint' }
+            - { type: 'null' }
+          description: Null before the first sample, or when the latest one is older than 45 seconds.
+        history:
+          type: array
+          maxItems: 240
+          items: { $ref: '#/components/schemas/PlatformUsagePoint' }
+          description: Oldest first, covering the last hour; held in memory and cleared when the API instance changes.
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/NodeUsage' }
+          description: By node name; only nodes with a running server, and empty while current is null.
+        loginFailures24h: { type: integer, minimum: 0, description: Sign-in failures recorded in the last 24 hours. }
+
     MyServerView:
       type: object
       description: One row of the caller's server list (internal/api/repo.go MyServerView).
@@ -1283,6 +1394,35 @@ components:
         retiring:
           allOf: [{ $ref: '#/components/schemas/RetireState' }]
           description: Owned rows only. Present while the server is given up or being deleted.
+        tags:
+          type: array
+          items: { type: string }
+          description: Owned rows only. Present when the server carries tags.
+
+    ServerTagsRequest:
+      type: object
+      description: The complete tag set of a server (internal/api/handlers_tags.go serverTagsRequest).
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items: { type: string }
+          description: >-
+            Each tag has 1 to 20 characters after surrounding space is removed and no
+            comma or control character. Tags that differ only in letter case count as
+            one and keep their first spelling. At most 6 tags remain. An empty list
+            removes every tag.
+
+    ServerTags:
+      type: object
+      description: The tag set a server holds after a change (internal/api/handlers_tags.go serverTagsView).
+      required: [name, tags]
+      properties:
+        name: { type: string }
+        tags:
+          type: array
+          maxItems: 6
+          items: { type: string, minLength: 1, maxLength: 20 }
 
     ScheduleStep:
       type: object
@@ -2101,6 +2241,64 @@ components:
           description: >-
             On the holder's own list only, true on the session the request came in
             on. Absent otherwise.
+
+    QuotaExcess:
+      type: object
+      description: One quota cap the new owner passes with this server; storage is counted in MB.
+      required: [resource, limit, after]
+      properties:
+        resource: { type: string, enum: [servers, cpu_milli, memory_mb, storage_mb] }
+        limit: { type: integer, description: The cap in force. }
+        after: { type: integer, description: The new owner's total including this server. }
+
+    ServerAssignment:
+      type: object
+      required: [name, owner_id, over]
+      properties:
+        name: { type: string }
+        owner_id:
+          type: string
+          description: The current owner in a preview (empty when unclaimed), the new owner after an assignment.
+        over:
+          type: array
+          description: The caps the new owner passes; empty when the server fits the quota.
+          items: { $ref: '#/components/schemas/QuotaExcess' }
+
+    APIToken:
+      type: object
+      description: >-
+        One live personal API key as its owner sees it. The key itself is
+        returned only once, in the response that creates it.
+      required: [id, name, prefix, admin, created_at, expires_at, last_used_at]
+      properties:
+        id: { type: string }
+        name: { type: string, maxLength: 64 }
+        prefix:
+          type: string
+          description: The first characters of the key, shown to tell keys apart and recorded as the audit source.
+        admin:
+          type: boolean
+          description: Whether the key carries the owner's staff rights on the operator console.
+        created_at: { type: string, format: date-time }
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the key stops working, or null for a key without an expiry. An admin key always expires.
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the key last authenticated a request, recorded at most once a minute.
+
+    APITokenSettings:
+      type: object
+      required: [enabled, revision]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether personal API keys can be created and used on this platform. Off by default.
+        revision: { type: string, description: Opaque revision; stale or concurrent writes return 409. }
 
 paths:
   /api/v1/nodes:
@@ -3786,6 +3984,76 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/servers/{name}/assignment:
+    get:
+      tags: [admin-servers]
+      operationId: previewServerAssignment
+      summary: Show what giving the server to an account would change (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: user_id, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The current owner and the quota caps the account would pass.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerAssignment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: already_owner or server_retiring.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [admin-servers]
+      operationId: assignServer
+      summary: Give the server to an account (Owner).
+      description: >
+        Works like a claim by that account: the wake list and the tags are cleared
+        and the server counts towards the new owner's quota. A server that passes
+        the quota is refused with 409 quota_exceeded unless allow_over_quota is
+        true. Audited as server.assign with owner_from, owner_to and over_quota.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string }
+                allow_over_quota: { type: boolean, default: false }
+      responses:
+        '200':
+          description: The new owner and the caps it now passes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerAssignment' }
+        '400':
+          description: bad_request, bad_name (including the reserved system services), or unknown_user when the account is missing or disabled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: already_owner, server_retiring, or quota_exceeded without allow_over_quota.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/servers/{name}/command:
     post:
       tags: [console]
@@ -4541,6 +4809,55 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/servers/{name}/tags:
+    put:
+      tags: [servers]
+      operationId: setServerTags
+      summary: Replace the tags of a server (owner or admin).
+      description: >-
+        Tags group servers in the server list and filter it. The request replaces the
+        whole set. Only the database changes; the cluster is not touched. A malformed
+        tag is bad_tags. A system service cannot carry tags (system_server). Audited as
+        server.tags.
+      x-felis-face: [external]
+      x-felis-tier: app
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServerTagsRequest' }
+      responses:
+        '200':
+          description: The tags the server now holds.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerTags' }
+        '400':
+          description: >-
+            bad_tags: a tag is empty, longer than 20 characters or holds a comma or
+            control character, or more than 6 distinct tags were sent. bad_request: the
+            body is malformed or has no tags field.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Neither the owner of the server nor an admin.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 'system_server: a system service has no record to hold tags.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/servers/{name}/status:
     get:
@@ -5434,6 +5751,88 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PanelLanguage' }
 
+  /api/v1/branding:
+    get:
+      tags: [auth]
+      operationId: getBranding
+      summary: Read the panel branding.
+      description: >-
+        Public, pre-session read the panel makes on load. When the setting cannot be read,
+        the response carries the defaults (name Felis, no notice, footer credit shown, no
+        images) so the panel still renders. The response is revalidated on each load with
+        its ETag.
+      x-felis-face: [external]
+      x-felis-tier: public
+      security: []
+      parameters:
+        - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The branding.
+          headers:
+            ETag:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string, const: no-cache }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicBranding' }
+        '304': { description: The branding is unchanged since the ETag in If-None-Match. }
+
+  /api/v1/branding/logo:
+    get:
+      tags: [auth]
+      operationId: getBrandingLogo
+      summary: Read the panel logo.
+      description: The image is cached for a day; its URL changes with the content.
+      x-felis-face: [external]
+      x-felis-tier: public
+      security: []
+      parameters:
+        - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The logo bytes, as image/png or image/webp.
+          headers:
+            ETag:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string, const: 'public, max-age=86400' }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '304': { description: The logo is unchanged since the ETag in If-None-Match. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/branding/background:
+    get:
+      tags: [auth]
+      operationId: getBrandingBackground
+      summary: Read the sign-in background image.
+      description: The image is cached for a day; its URL changes with the content.
+      x-felis-face: [external]
+      x-felis-tier: public
+      security: []
+      parameters:
+        - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The background image bytes, as image/png or image/webp.
+          headers:
+            ETag:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string, const: 'public, max-age=86400' }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '304': { description: The image is unchanged since the ETag in If-None-Match. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/auth/logout:
     post:
       tags: [auth]
@@ -5996,6 +6395,32 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Host node execution service is unavailable. }
+  /api/v1/platform/audit:
+    get:
+      operationId: listAudit
+      summary: Browse the audit log, newest first (Owner).
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: actor, in: query, required: false, schema: { type: string }, description: Case-insensitive substring of the actor. }
+        - { name: action, in: query, required: false, schema: { type: string }, description: "Prefix of the action name; server. matches every server action." }
+        - { name: server, in: query, required: false, schema: { type: string }, description: Exact server name. }
+        - { name: since, in: query, required: false, schema: { type: string, format: date-time }, description: Earliest time (inclusive). }
+        - { name: until, in: query, required: false, schema: { type: string, format: date-time }, description: Time to stop before (exclusive); must come after since. }
+        - { name: q, in: query, required: false, schema: { type: string }, description: "Case-insensitive keyword matched against the actor, action, server name and payload text." }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string }, description: The next_cursor of the previous page. }
+      responses:
+        '200':
+          description: One page of audit rows.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/platform/audit-export:
     get:
       operationId: exportAudit
@@ -6167,6 +6592,221 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
           description: The default language changed; reload before saving.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/settings/branding:
+    get:
+      tags: [account]
+      operationId: getBrandingSettings
+      summary: Read the panel branding settings (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Current settings and revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandingSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [account]
+      operationId: setBrandingSettings
+      summary: Save the panel name, notice and footer credit (Owner, fresh reauthentication).
+      description: Applies to visitors on their next page load. The name and notice are stored without leading or trailing whitespace.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, notice, show_powered_by, revision]
+              properties:
+                name: { type: string, maxLength: 40 }
+                notice: { type: string, maxLength: 1000 }
+                show_powered_by: { type: boolean }
+                revision: { type: string }
+      responses:
+        '200':
+          description: Saved settings and new revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandingSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The settings changed; reload before saving.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/settings/branding/logo:
+    put:
+      tags: [account]
+      operationId: setBrandingLogo
+      summary: Upload the logo (Owner, fresh reauthentication).
+      description: >-
+        The body is the image itself, sent as image/png or image/webp, at most 256 KiB.
+        A PNG may be at most 4096 by 4096 pixels. SVG is not accepted. The file must match
+        its declared type (bad_image).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema: { type: string, format: binary }
+          image/webp:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: The branding with the logo stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandingSettings' }
+        '400':
+          description: The body is empty or is not a valid image of the declared type (bad_image).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413':
+          description: The image is larger than 256 KiB (too_large).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415':
+          description: The Content-Type is neither image/png nor image/webp (unsupported_media_type).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [account]
+      operationId: clearBrandingLogo
+      summary: Remove the logo (Owner, fresh reauthentication).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The branding without the logo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandingSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/settings/branding/background:
+    put:
+      tags: [account]
+      operationId: setBrandingBackground
+      summary: Upload the sign-in background image (Owner, fresh reauthentication).
+      description: >-
+        The body is the image itself, sent as image/png or image/webp, at most 2 MiB.
+        A PNG may be at most 4096 by 4096 pixels. SVG is not accepted. The file must match
+        its declared type (bad_image).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema: { type: string, format: binary }
+          image/webp:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: The branding with the background image stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandingSettings' }
+        '400':
+          description: The body is empty or is not a valid image of the declared type (bad_image).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413':
+          description: The image is larger than 2 MiB (too_large).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '415':
+          description: The Content-Type is neither image/png nor image/webp (unsupported_media_type).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [account]
+      operationId: clearBrandingBackground
+      summary: Remove the sign-in background image (Owner, fresh reauthentication).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The branding without the background image.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandingSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/settings/api-tokens:
+    get:
+      tags: [account]
+      operationId: getAPITokenSettings
+      summary: Read whether personal API keys are turned on (Owner).
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Current switch and revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APITokenSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [account]
+      operationId: setAPITokenSettings
+      summary: Turn personal API keys on or off (Owner).
+      description: >
+        Turning keys off stops every existing key from authenticating at once and
+        refuses new ones; turning them back on restores the keys that have not
+        expired or been revoked. Needs a confirmation of identity from the last
+        few minutes.
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/APITokenSettings' }
+      responses:
+        '200':
+          description: Saved switch and new revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APITokenSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The setting changed; reload before saving.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6761,6 +7401,29 @@ paths:
                   servers:
                     type: array
                     items: { $ref: '#/components/schemas/FleetServer' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/fleet/usage:
+    get:
+      tags: [admin-servers]
+      operationId: fleetUsage
+      summary: Platform resource usage over the last hour, per-node figures and recent sign-in failures (admin).
+      description: >-
+        The running servers' CPU and memory added together, sampled every 15
+        seconds from the API instance's own memory, so each replica answers from its
+        own samples. nodes lists the current figures per node.
+      x-felis-face: [external]
+      x-felis-tier: admin
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The platform usage view.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformUsage' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -10222,6 +10885,107 @@ paths:
                     description: How many sessions were signed out.
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/account/api-tokens:
+    get:
+      tags: [account]
+      operationId: listMyAPITokens
+      summary: List the caller's live personal API keys.
+      description: >
+        Managed from a signed-in session only; a request authenticated by an API
+        key is refused with 403 session_required.
+      x-felis-face: [external]
+      x-felis-tier: app
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The platform switch, the per-account limit and the caller's live keys, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, limit, can_create_admin, tokens]
+                properties:
+                  enabled: { type: boolean, description: Whether API keys are turned on for the platform. }
+                  limit: { type: integer, description: The most live keys one account may hold. }
+                  can_create_admin:
+                    type: boolean
+                    description: True for staff signed in on the operator console, who may create admin keys.
+                  tokens:
+                    type: array
+                    items: { $ref: '#/components/schemas/APIToken' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [account]
+      operationId: createMyAPIToken
+      summary: Create a personal API key and return it once.
+      description: >
+        A key lasts at most 365 days, or without an expiry when expires_at is
+        omitted. An admin key needs staff on the operator console, a confirmation
+        of identity from the last few minutes and an expiry within 90 days.
+        Managed from a signed-in session only.
+      x-felis-face: [external]
+      x-felis-tier: app
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 64, description: A single-line label. }
+                expires_at: { type: string, format: date-time }
+                admin: { type: boolean, default: false }
+      responses:
+        '201':
+          description: The key; `token` is shown only in this response.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/APIToken' }
+                  - type: object
+                    required: [token]
+                    properties:
+                      token: { type: string, description: "The key, starting with felis_pat_; send it as Authorization: Bearer." }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: >-
+            api_tokens_disabled — API keys are turned off; session_required — the
+            request used an API key; reauth_required — an admin key needs a recent
+            confirmation of identity; forbidden — only staff on the operator console
+            create admin keys.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: api_token_limit — the account already holds the most live keys allowed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/account/api-tokens/{id}:
+    delete:
+      tags: [account]
+      operationId: revokeMyAPIToken
+      summary: Revoke one of the caller's API keys.
+      description: >
+        Scoped to the caller: an id that is not one of the caller's live keys is a
+        404 whoever it belongs to. Managed from a signed-in session only.
+      x-felis-face: [external]
+      x-felis-tier: app
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/account/migrate:
     get:

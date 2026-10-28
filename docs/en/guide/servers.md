@@ -24,6 +24,36 @@ What you can do depends on your account role and on who owns the server. In the 
 
 Admins see every server on the platform on the **Servers** page, with its owner, online players and autostart policy. Users see the servers they own and the servers they can claim. For the roles, see [Roles](/en/guide/administration#roles).
 
+## Server list {#server-list}
+
+The **Servers** page lists the servers you can see. You can search the list, filter it by status, and sort it by name, status or number of online players. The list also offers the following features.
+
+### Servers per page {#page-size}
+
+The list shows 20 servers per page by default. To change this, select 50 or 100 under **Servers per page** above the list. The selected number is saved in the current browser and used the next time the page opens.
+
+### Tags {#tags}
+
+Tags group servers. Server owners and Admins add or remove tags in the **Tags** field of **Edit Server Config**: type a tag, then press Enter or type a comma to add it.
+
+- A server can have up to 6 tags. Each tag has 1 to 20 characters and cannot contain commas or control characters.
+- Tags that differ only in letter case are treated as the same tag, and the spelling entered first is kept.
+- Tags appear below the server name in the list, and only server owners and Admins can see them.
+- When a server is claimed by another account, its existing tags are cleared.
+- System services, such as the login space and the lobby, cannot have tags.
+
+The **Tags** filter above the list shows every tag that appears in the current list. Select a tag to filter by it, and select it again to clear the filter. When several tags are selected, only servers that carry all of them are shown.
+
+### Batch start, stop and restart {#batch}
+
+Tick the checkbox at the start of a server's row, or the checkbox in the header to select every server on the current page. A batch action bar then appears above the list. Admins can select any server, and other users can select only the servers they own; system services cannot be selected. A batch action applies only to the selected servers within the current filtered results.
+
+- **Wake** runs immediately.
+- **Stop** and **Restart** first ask for one confirmation. The confirmation lists the servers with players online and their player counts. When no player is online, it states only how many servers will be affected.
+- Servers are processed one at a time in list order, and the batch action bar shows the progress, for example “Processing server 2 of 5”.
+
+When every server has been processed, the results appear below the batch action bar. Each server is listed as done or with the reason it failed, and a summary states how many completed and how many failed. Failed servers stay selected so that you can run the action again, and successful servers are deselected. Each server follows the same rules as a single action: for example, a server pending reclamation cannot start, and a server under maintenance refuses a restart. Batch actions do not include giving up or deleting servers.
+
 ## Creating a server {#create-server}
 
 A server an Admin creates is stopped and belongs to no account until a user claims it. See [Claiming a server](#claim). An account with a server quota can create servers it owns itself; see [Self-service creation](#self-service).

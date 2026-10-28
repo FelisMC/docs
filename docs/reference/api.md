@@ -14,7 +14,7 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 | 接口面 | 调用方 | 访问位置 | 认证方式 |
 | --- | --- | --- | --- |
 | 内部接口 | 游戏代理、登录空间、镜像构建任务、文件与导出任务、主机上的部分 `felis` 命令 | 集群内 ClusterIP Service `felis-api-internal`，端口 `8081`，明文 HTTP | 按调用方分配的服务令牌；任务传输使用一次性令牌 |
-| 外部接口 | Web 面板及使用会话的客户端 | 面板域名：玩家控制台 `console.<root_domain>` 与管理控制台 `op.console.<root_domain>` | `felis_session` 会话 Cookie |
+| 外部接口 | Web 面板及使用会话的客户端 | 面板域名：玩家控制台 `console.<root_domain>` 与管理控制台 `op.console.<root_domain>` | `felis_session` 会话 Cookie 或 API 密钥 |
 
 外部接口通过 NodePort Service `felis-api`（端口 `443`）提供，前面是安装时选择的访问方式，面板页面与 API 同域。内部接口不经过零信任认证，也不发布到节点的外部地址。游戏服务器的网络策略禁止访问它，只有登录空间例外；镜像构建任务通过自己的出站策略访问它；游戏代理在主机上通过 ClusterIP 连接。访问方式见[访问与域名](/operations/access#access-methods)。
 
@@ -47,7 +47,7 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 
 ### 会话 {#sessions}
 
-外部接口只接受会话 Cookie `felis_session`。Cookie 带有 `HttpOnly`、`Secure`、`SameSite=Lax` 属性，并且只对签发它的主机有效，因此管理控制台的会话不会发送到玩家控制台。服务端只保存 Cookie 的 SHA-256 摘要。
+外部接口接受会话 Cookie `felis_session` 或 API 密钥，后者见 [API 密钥](#api-keys)。Cookie 带有 `HttpOnly`、`Secure`、`SameSite=Lax` 属性，并且只对签发它的主机有效，因此管理控制台的会话不会发送到玩家控制台。服务端只保存 Cookie 的 SHA-256 摘要。
 
 会话由以下免密码登录方式签发：
 
@@ -58,6 +58,22 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 - 首次设置链接中的设置令牌（用于初始化第一个所有者）。
 
 安装位于 Cloudflare Access 之后时，Access 在边缘执行，felis-api 不读取 Access 令牌。登录相关接口按来源地址限流，超出限制时返回 `429 rate_limited` 并附带 `Retry-After` 响应头。
+
+### API 密钥 {#api-keys}
+
+API 密钥让脚本以创建者本人的身份调用外部接口。请求头的格式为 `Authorization: Bearer felis_pat_…`：
+
+```bash
+curl -H "Authorization: Bearer $FELIS_API_KEY" https://console.example.com/api/v1/me/servers
+```
+
+- **开启条件**：所有者在平台设置中开启后才可创建与使用密钥，默认关闭，见[API 密钥](/guide/administration#api-keys)。关闭后所有已有密钥立即失效，重新开启后未过期也未撤销的密钥恢复可用。
+- **身份**：密钥代表创建它的账户。同一请求同时带有会话 Cookie 与 API 密钥时返回 `401`。
+- **会话限定的操作**：密钥不能用来管理密钥，使用 API 密钥管理 `/api/v1/account/api-tokens` 时返回 `403 session_required`。使用 API 密钥的请求也不能通过[身份复核](#reauthentication)，要求身份复核的操作同样返回 `403 session_required`。
+- **有效期与数量**：普通密钥可不设有效期，设置时最长 365 天。每个账户最多 10 个密钥。
+- **管理密钥**：管理员与所有者创建密钥时可设置 `admin: true`。管理密钥只在管理控制台域名下具有管理权限，必须设置不超过 90 天的有效期，创建时须完成身份复核。
+- **存储与审计**：创建响应返回一次明文密钥，服务端只保存其 SHA-256 摘要。审计日志以 `api_key:<前缀>` 记录来源，前缀是密钥开头的 18 个字符。
+- **跨站检查**：使用 API 密钥的请求不受[跨站写入](#common-behaviour)检查限制。
 
 ### 访问等级 {#access-tiers}
 
@@ -80,6 +96,7 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 - 以通行密钥、邮箱验证码、管理员登录或设置令牌登录时，会话即视为已复核；以绑定码登录不计入。
 - 普通用户可使用通行密钥或邮箱验证码复核。
 - 管理员和所有者使用通行密钥复核，或重新登录；单独的邮箱验证码对工作人员不构成复核因素。
+- 使用 API 密钥的请求不能通过身份复核，返回 `403 session_required`。
 
 ### 首次设置锁定 {#setup-lockdown}
 
@@ -122,7 +139,7 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 | 登录 | `/api/v1/auth/…` | `public` | 通行密钥、邮箱验证码、管理员登录、绑定码、设置令牌、退出登录 |
 | 当前用户 | `/api/v1/me`、`/api/v1/me/servers`、`/api/v1/me/server-quota` | `app` | 账户信息、本人的服务器与建服配额；在配额内创建与修改本人的服务器 |
 | 服务端软件 | `/api/v1/software…` | `app` | 可选核心、游戏版本、构建与所需 Java 版本 |
-| 账户 | `/api/v1/account/…` | `app` | 账号绑定、邮箱、通行密钥、身份复核、会话管理、账户迁移 |
+| 账户 | `/api/v1/account/…` | `app` | 账号绑定、邮箱、通行密钥、身份复核、会话管理、API 密钥、账户迁移 |
 | 服务器操作 | `/api/v1/servers/{name}/…` | `app` | 唤醒、停止、重启、认领、状态、退役、任务记录 |
 | 启动设置 | `GET /api/v1/servers/{name}/startup-settings` | `app` | 本服服主与管理员读取 JVM 参数、启动参数、用户环境变量与停止命令 |
 | 控制台与玩家 | `/api/v1/servers/{name}/console`、`…/command`、`…/access/…`、`…/allowlist` | `app` | 控制台事件流与 RCON 命令；白名单、封禁、踢出、OP、LuckPerms |
@@ -134,7 +151,7 @@ felis-api 由 `felis` 二进制提供，同时运行两个接口面：
 | 镜像与构建 | `/api/v1/images`、`/api/v1/images/build…` | `admin` | 镜像白名单；构建、构建日志、取消、安全扫描与 SBOM |
 | 审核提交 | `/api/v1/submissions…` | `admin` | 批准或拒绝投稿 |
 | 用户管理 | `/api/v1/users…` | `owner` | 用户、配额、会话、通行密钥、游戏角色绑定 |
-| 平台设置 | `/api/v1/settings/…`、`/api/v1/updates/…`、`/api/v1/platform/db-backup` | `owner` | 玩家进入策略、唤醒与归档策略、自助建服默认配额、心跳、故障切换、邮件中继、认证源、维护窗口、版本更新报告、数据库备份状态 |
+| 平台设置 | `/api/v1/settings/…`、`/api/v1/updates/…`、`/api/v1/platform/db-backup` | `owner` | 玩家进入策略、唤醒与归档策略、自助建服默认配额、心跳、故障切换、邮件中继、认证源、API 密钥开关、维护窗口、版本更新报告、数据库备份状态 |
 | 故障切换 | `/api/v1/nodes/{node}/failover` | `owner` | 读取切换计划并对失联节点执行故障切换 |
 | 紧急停止 | `POST /api/v1/servers/{name}/emergency-stop` | `owner` | 立即停止服务器 |
 | 主机运维 | 见下文 | `owner` | 在主控主机上执行运维任务 |
