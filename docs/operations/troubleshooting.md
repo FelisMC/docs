@@ -1274,7 +1274,7 @@ sudo k3s certificate check --output table
 
 **排查**
 
-看门狗报告 `clock`（警告，持续 30 分钟后发送）。
+看门狗报告 `clock`（警告，持续 30 分钟后发送）。主机有意不同步时钟时，可以[忽略此告警](/operations/monitoring#ignore-alerts)。
 
 ```bash
 timedatectl          # 预期为 "System clock synchronized: yes" 和 "NTP service: active"

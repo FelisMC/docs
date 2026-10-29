@@ -1553,7 +1553,7 @@ Sign-in codes and sessions expire by the system clock, S3 refuses off-site uploa
 
 **Diagnosis**
 
-The watchdog reports the finding `clock` (warning, after 30 minutes).
+The watchdog reports the finding `clock` (warning, after 30 minutes). On a host whose clock is deliberately left unsynchronized, [ignore the alert](/en/operations/monitoring#ignore-alerts).
 
 ```bash
 timedatectl          # expect "System clock synchronized: yes" and "NTP service: active"

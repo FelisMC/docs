@@ -151,6 +151,17 @@ echo $(( $(date +%s) + 3600 )) | sudo tee /run/felis/watchdog-quiet-until   # ho
 sudo rm /run/felis/watchdog-quiet-until                                       # resume alert mail
 ```
 
+## Ignoring an alert {#ignore-alerts}
+
+A hold covers every check and expires. An alert that needs no action, such as `clock` on a host whose clock is deliberately left unsynchronized, can be ignored on its own:
+
+1. Open **Maintenance & Backups → Status** → **Host status** → **Watchdog alerts**.
+2. Select **Ignore** beside the alert and confirm your identity when asked.
+
+An ignored check keeps running, but it sends no mail or reminders, does not count as an open alert and reports no failure to the heartbeat's `/fail` endpoint; no recovery notice is sent when it clears. An ignore lasts until it is removed and survives host restarts. Ignored checks are listed under **Ignored**; after **Restore alerts**, an alert that is still open is mailed on the usual schedule.
+
+The ignore list is kept on the host in `/var/lib/felis/watchdog/ignored.json`, a JSON array of alert keys.
+
 ## Mail relay {#mail-relay}
 
 The mail relay sends sign-in codes, email verification and identity confirmation codes, notices, the world cleanup's warnings, watchdog alerts and the emergency console's codes. A relay comes from one of two places:
