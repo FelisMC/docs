@@ -290,7 +290,7 @@ The server's console page shows the live log and offers:
 
 ### Sending commands {#console-commands}
 
-Enter a single-line command and press Enter or select **Send command**. RCON displays the command's reply when available. During startup or when RCON cannot connect, the platform can send input through the server's standard input; the panel displays **Command sent. Check the console log for the result.** This confirms that input was sent; check the log for the execution result.
+Enter a single-line command and press Enter or select **Send command**. The command is written to the server's standard input, as if typed on the server's own terminal: the log first shows the command echoed with a leading `>`, and its output follows in the same log stream without any RCON session entries. When standard input is unavailable and the command has not been delivered, the platform runs it over RCON instead, and the reply also appears in the log. Before the log starts, the panel shows **Command sent. Check the console log for the result.** above the input.
 
 If the connection fails after sending begins, the panel reports an uncertain outcome and retains the input. Check the log before deciding whether to send it again; commands are never retried automatically. Input is unavailable before startup or during shutdown; send requests are refused during maintenance such as backups, restores and migrations.
 
