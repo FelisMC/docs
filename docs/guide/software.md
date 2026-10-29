@@ -84,7 +84,7 @@ Forge 1.13 至 1.20.1 的模组客户端在代理中切换服务器时，需要�
 | `mods/felis-managed-*.jar` | 平台安装的身份转发组件。 |
 | `cache/` | Paper 与 Purpur 启动时生成的文件。 |
 
-平台每次启动时写入 `eula.txt`，以及 `server.properties` 中的 `server-port`、`online-mode` 与 RCON 设置。新服务器首次启动时 `white-list` 设为 `false`，准入由[自动启动策略](/guide/servers#autostart)与唤醒名单控制；服务器所有者之后修改的白名单设置保持不变。世界备份包含整个世界卷，包括上述文件。
+平台每次启动时写入 `eula.txt`，以及 `server.properties` 中的 `server-port`、`online-mode` 与 RCON 设置；RCON 设置包括 `broadcast-rcon-to-ops=false`，平台自身执行的 RCON 命令不在游戏内向 OP 播报，也不写入日志。新服务器首次启动时 `white-list` 设为 `false`，准入由[自动启动策略](/guide/servers#autostart)与唤醒名单控制；服务器所有者之后修改的白名单设置保持不变。世界备份包含整个世界卷，包括上述文件。
 
 ## 更换核心或版本 {#change}
 

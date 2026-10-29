@@ -284,7 +284,7 @@ A player without permission to wake the server is told in game that they cannot 
 
 The server's console page shows the live log and offers:
 
-- The stream state (Live, Reconnecting, Stream ended) with **Reconnect**, **Clear** and **Jump to latest**. RCON connection lifecycle logs are hidden by default; show them with **Show RCON connection logs**.
+- The stream state (Live, Reconnecting, Stream ended) with **Reconnect**, **Clear** and **Jump to latest**. RCON connection lifecycle logs are hidden by default; show them with **Show RCON connection logs**. The saved log shown after the server stops works the same way. The platform keeps one RCON connection per server and reuses it, so connection entries appear only after the server starts or a connection drops.
 - While the server starts or runs, its owner and Admins can use **Server command** to send console commands, for example `list` or `op <player>`.
 - Links to player management, LuckPerms permissions, backups and restore, server files and scheduled tasks.
 

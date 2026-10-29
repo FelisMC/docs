@@ -84,7 +84,7 @@ Versions 1.7 to 1.18 are affected by Log4Shell (CVE-2021-44228). Vanilla, Fabric
 | `mods/felis-managed-*.jar` | Identity forwarding components installed by the platform. |
 | `cache/` | Files Paper and Purpur generate at startup. |
 
-On every start the platform writes `eula.txt`, and `server-port`, `online-mode` and the RCON settings in `server.properties`. On a new server's first start `white-list` is set to `false`; access is controlled by the [autostart policy](/en/guide/servers#autostart) and the wake list, and a whitelist setting the owner changes later is kept. World backups contain the whole world volume, including these files.
+On every start the platform writes `eula.txt`, and `server-port`, `online-mode` and the RCON settings in `server.properties`. The RCON settings include `broadcast-rcon-to-ops=false`, so commands the platform runs over RCON are neither announced to operators in game nor written to the log. On a new server's first start `white-list` is set to `false`; access is controlled by the [autostart policy](/en/guide/servers#autostart) and the wake list, and a whitelist setting the owner changes later is kept. World backups contain the whole world volume, including these files.
 
 ## Changing the core or version {#change}
 
