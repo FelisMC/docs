@@ -262,16 +262,16 @@ sudo k3s kubectl -n minecraft get events --field-selector involvedObject.name=<s
 不要通过强制删除世界、Pod 或存储卷声明来解决控制连接丢失的问题。强制删除 Pod 不能证明游戏进程已经退出。
 :::
 
-### 服务器无人时不自动停止 {#idle-stop}
+### 服务器无人时不自动休眠或停止 {#idle-stop}
 
-从面板创建的服务器在无人在线 600 秒后停止，下次有玩家加入时唤醒。登录空间和大厅从不因空闲而停止。服务器无人在线却持续运行，或玩家数始终显示为 0，原因如下。
+从面板创建的服务器在无人在线 600 秒后休眠，下次有玩家加入时唤醒。登录空间和大厅从不因空闲而休眠或停止。服务器无人在线却持续运行，或玩家数始终显示为 0，原因如下。
 
 **原因**
 
-- 「设置」页的「空闲自动停服」已关闭。
+- 「设置」页的「空闲自动处理」已关闭。
 - 服务器创建于空闲自动停服成为默认设置之前，没有空闲设置。
-- 服务器未启用 RCON。玩家数来自 RCON 就绪检查执行的 `list` 命令；没有 RCON 时玩家数从未读取，始终为 0，空闲自动停服也不会执行。
-- 服务器的 `list` 回复格式无法识别，例如插件改写了 `/list`，或回复经过翻译。无法读取的玩家数视为未知，不会当作零：服务器继续运行，面板显示「在线人数读取失败，空闲停服已暂停。读取恢复后将继续判断。」，`PlayersCounted` 条件为 `False`，原因为 `ListUnreadable`。
+- 服务器未启用 RCON。玩家数来自 RCON 就绪检查执行的 `list` 命令；没有 RCON 时玩家数从未读取，始终为 0，空闲自动处理也不会执行。
+- 服务器的 `list` 回复格式无法识别，例如插件改写了 `/list`，或回复经过翻译。无法读取的玩家数视为未知，不会当作零：服务器继续运行，面板显示「在线人数读取失败，空闲自动处理已暂停。读取恢复后将继续判断。」，`PlayersCounted` 条件为 `False`，原因为 `ListUnreadable`。
 - 服务器就绪不足 3 分钟。在此期间玩家数为零不会开始倒计时，以免仍在进入的玩家被停服。
 - 不停服备份正在复制世界。复制期间 operator 不会因空闲停止服务器。
 
@@ -290,9 +290,51 @@ sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.status
 
 **解决**
 
-1. 在「设置」页打开「空闲自动停服」，并选择无人在线多久后停止。
+1. 在「设置」页打开「空闲自动处理」，并选择无人在线的等待时长。
 2. 对于在空闲自动停服或 RCON 成为默认设置之前创建的服务器，执行系统服务器补全：`sudo felis converge` 为没有空闲设置的服务器设定默认值 600 秒，`sudo felis converge -user-rcon` 为旧用户服务器启用 RCON。启用 RCON 之前请阅读[系统服务器字段](#system-server-fields)：镜像没有 RCON 监听器的服务器启用后将无法启动。
 3. 恢复受支持的 `list` 回复，例如移除插件对该消息的改写或翻译。
+
+### 空闲服务器停止而没有休眠 {#hibernate-fallback}
+
+服务器的「空闲处理方式」为「休眠」，空闲后却被停止。平台在无法安全冻结时改为正常停止，原因记录在服务器的 Kubernetes 事件中。
+
+**原因**
+
+- 节点没有交换空间，或空闲交换空间不足以容纳服务器的内存（事件 `HibernateFailed`，代码 `insufficient_swap`）。
+- 冻结前无法通过 RCON 暂停自动保存并写入世界（事件 `HibernateSkipped`）。
+- 内核未能将服务器的内存全部写入交换空间（事件 `HibernateFailed`，代码 `incomplete`）。
+- 服务器的进程在升级到支持休眠的版本之前启动。该进程仍按原方式运行，重启服务器后开始休眠。
+
+**排查**
+
+```bash
+sudo k3s kubectl -n minecraft get events --field-selector involvedObject.name=<server> | grep -i hibernat
+swapon --show
+free -m
+```
+
+**解决**
+
+1. 为节点添加交换空间，大小不小于该节点上会休眠的服务器内存之和。没有交换空间的节点重新运行安装器即可创建 `/swapfile`，也可以手动创建：
+
+   ```bash
+   sudo fallocate -l 16G /swapfile
+   sudo chmod 600 /swapfile
+   sudo mkswap /swapfile
+   sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   ```
+
+2. 世界无法保存时，检查服务器是否启用 RCON 并能回复命令，见[服务器无人时不自动休眠或停止](#idle-stop)。
+
+### 唤醒等待可用内存 {#wake-waiting-memory}
+
+休眠的服务器唤醒时，控制台显示「唤醒等待可用内存」，服务器保持冻结。冻结期间节点将空出的内存分配给了其他服务器，取回服务器原有的内存配额，或将交换空间中的内容读回内存，需要节点有足够的可用内存。
+
+**解决**
+
+- 停止节点上的其他服务器，或等待它们空闲后休眠或停止。内存可用后唤醒自动继续，无需重新操作。
+- 不再需要保留运行状态时，停止该服务器。冻结前世界已完整保存，停止不会丢失已保存的内容。
 
 ### 操作提示世界正被占用 {#world-busy}
 
@@ -1046,7 +1088,7 @@ building here what the release did not supply takes about … MiB under /var/lib
 
 ## 系统服务器与配置 {#configuration}
 
-本节条目涉及未在现有服务器上生效的设置、空闲自动停服，以及已删除服务器遗留的世界卷。
+本节条目涉及未在现有服务器上生效的设置、空闲自动处理，以及已删除服务器遗留的世界卷。
 
 ### 新版本引入的设置未应用到现有服务器 {#system-server-fields}
 
@@ -1060,7 +1102,8 @@ building here what the release did not supply takes about … MiB under /var/lib
 | --- | --- |
 | `spec.startup.timeoutSeconds` | 启动允许的时间。`0` 或未设置时为 300 秒；超时后服务器进入 `Failed`，原因为 `StartupTimeout`。 |
 | `spec.startup.readinessTimeoutSeconds` | 等待 RCON 探测期间整个启动过程的期限，从发出启动请求开始计算。`0` 或未设置时为 300 秒；超时后服务器进入 `Failed`，原因为 `ReadinessTimeout`。 |
-| `spec.idle.autoStopEnabled`、`spec.idle.emptySecondsBeforeStop` | 仅在 `spec.rcon.enabled` 开启时生效，因为在线人数通过 RCON 读取。`emptySecondsBeforeStop: 0` 表示关闭空闲停服。 |
+| `spec.idle.autoStopEnabled`、`spec.idle.emptySecondsBeforeStop` | 仅在 `spec.rcon.enabled` 开启时生效，因为在线人数通过 RCON 读取。`emptySecondsBeforeStop: 0` 表示关闭空闲自动处理。 |
+| `spec.idle.action` | 空闲后的处理方式：`hibernate`（未设置时的默认值）或 `stop`。 |
 
 **排查**
 
@@ -1073,7 +1116,7 @@ sudo k3s kubectl -n minecraft get minecraftserver \
 
 在镜像就绪之后（即运行安装器或完成更新之后）执行以下操作。如果服务器镜像不提供相应监听，启用 RCON 或就绪检查会使该服务器停留在 `Starting`，直到被标记为 `Failed`。
 
-1. 补全系统服务器缺失的字段，并为较早的用户服务器设置默认的空闲自动停服（无人在线 600 秒后停止）：
+1. 补全系统服务器缺失的字段，并为较早的用户服务器设置默认的空闲自动处理（无人在线 600 秒后休眠）：
 
    ```bash
    sudo felis converge
@@ -1604,7 +1647,9 @@ felis-api 每 15 秒检查一次计划任务，按顺序执行任务的各个步
 | 服务器处于 `Failed`；`StartupTimeout`、`ReadinessTimeout` | [服务器进入 Failed](#server-failed)、[新版本引入的设置未应用到现有服务器](#system-server-fields) |
 | 服务器无法停止 | [服务器无法停止](#server-wont-stop) |
 | 「登录与大厅」页面提示登录空间或正式大厅尚未创建 | [登录空间或正式大厅不存在](#system-servers-missing) |
-| 服务器无人时不停止；在线人数始终为 0；`PlayersCounted` 为 `False` | [服务器无人时不自动停止](#idle-stop) |
+| 服务器无人时不休眠或停止；在线人数始终为 0；`PlayersCounted` 为 `False` | [服务器无人时不自动休眠或停止](#idle-stop) |
+| 空闲后停止而没有休眠；`HibernateFailed`、`HibernateSkipped`、`insufficient_swap` | [空闲服务器停止而没有休眠](#hibernate-fallback) |
+| 「唤醒等待可用内存」 | [唤醒等待可用内存](#wake-waiting-memory) |
 | 玩家无法进服或被送到错误位置；唤醒被拒绝 | [玩家无法进服](#players-cannot-join) |
 | 路由未启用 | [路由未启用](#routing-disabled) |
 | 面板返回 401 或 403 | [面板错误](#panel-errors) |

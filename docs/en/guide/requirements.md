@@ -48,7 +48,7 @@ Approximate memory use of an idle platform:
 
 The system servers come on top: the login space (Limbo, pod limit 512 MiB, about 0.16 GB in use) and the lobby (Paper, pod limit 1 GiB, about 0.7–0.85 GB in use). Every game server adds the memory its owner assigned to it: the pod's limit equals its request, and the Java heap is derived from it. Quotas cap the memory per user ([Quotas](/en/guide/administration#quotas)).
 
-A release installation builds nothing on the host. When the installer does build images on the host, its peak is the image builds (Docker and a Gradle container); afterwards it stops Docker, so that memory returns to the servers. On a host with less than 2 GB of RAM and no swap, the installer adds a 2 GiB `/swapfile`.
+A release installation builds nothing on the host. When the installer does build images on the host, its peak is the image builds (Docker and a Gradle container); afterwards it stops Docker, so that memory returns to the servers. On a node without swap, the installer creates a `/swapfile` as large as physical memory (at least 2 GiB) to hold the memory of [hibernated](/en/guide/servers#hibernate) servers; it skips the file when the root filesystem would have less than 10% free after the installation. Existing swap is left as it is, and the installer warns when it is smaller than physical memory.
 
 ### Recommendations {#recommendations}
 

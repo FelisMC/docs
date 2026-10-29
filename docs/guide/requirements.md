@@ -48,7 +48,7 @@ CentOS Stream 9（aarch64，启用 firewalld 且 SELinux 为 enforcing）和 Ubu
 
 系统服务器另计：登录空间（Limbo，Pod 限制 512 MiB，实际占用约 0.16 GB）和大厅（Paper，Pod 限制 1 GiB，实际占用约 0.7–0.85 GB）。每台游戏服务器另需其所有者分配的内存：Pod 的 limit 等于 request，Java 堆大小据此计算。每位用户可用的内存受配额限制（见[配额](/guide/administration#quotas)）。
 
-安装发布版时不在主机上构建任何内容。安装器需要在主机上构建镜像时，峰值占用来自镜像构建（Docker 及 Gradle 容器）；构建完成后安装器停止 Docker，释放的内存归还给服务器使用。内存不足 2 GB 且没有 swap 的主机上，安装器会添加 2 GiB 的 `/swapfile`。
+安装发布版时不在主机上构建任何内容。安装器需要在主机上构建镜像时，峰值占用来自镜像构建（Docker 及 Gradle 容器）；构建完成后安装器停止 Docker，释放的内存归还给服务器使用。没有交换空间的节点上，安装器创建与物理内存等大的 `/swapfile`（至少 2 GiB），供服务器[休眠](/guide/servers#hibernate)时存放内存；根文件系统在安装后剩余空间不足 10% 时不创建。节点已有交换空间时保持不变，交换空间小于物理内存时安装器给出提示。
 
 ### 配置建议 {#recommendations}
 

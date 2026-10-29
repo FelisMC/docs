@@ -5,7 +5,7 @@ description: Create, claim, start, stop and maintain Minecraft servers in the pa
 
 # Managing servers {#servers}
 
-This page explains how to create and claim servers in the Felis panel, control when they start and sleep, and use the console, player management, the file manager, scheduled tasks and backups. It is written for server owners, Admins and the platform Owner.
+This page explains how to create and claim servers in the Felis panel, control when they start, stop and hibernate, and use the console, player management, the file manager, scheduled tasks and backups. It is written for server owners, Admins and the platform Owner.
 
 ## Permissions {#permissions}
 
@@ -124,7 +124,7 @@ Admins and server owners change the following directly on the server's **Setting
 - Image (Admins only). See [Images and Minecraft versions](#images-versions).
 - Memory and CPU limit. Enter the CPU limit in cores (for example `1` or `1.5`) or millicores (for example `500m`); leave it empty for no limit.
 - Storage. See [Disk usage and quota](#disk-quota).
-- Idle auto-stop. See [Start, stop and sleep](#power).
+- Idle handling. See [Idle handling](#idle).
 - Restarting after a crash and resuming after a host restart. See [Crashes and host restarts](#recovery).
 - Email notifications. See [Email notifications](#notifications).
 - JVM arguments, server arguments, environment variables and stop commands. See [Advanced startup settings](#startup-settings).
@@ -166,7 +166,7 @@ The platform schedules read-only volume scans serially every minute. Updates may
 
 The file listing's available space is the free space on the underlying filesystem, separate from the server quota. Writes can fail when the underlying storage is full even if the server remains below its quota.
 
-## Start, stop and sleep {#power}
+## Start, stop and hibernation {#power}
 
 A server is in one of these states:
 
@@ -175,7 +175,9 @@ A server is in one of these states:
 | Running | The server is ready and players can join. |
 | Starting | Resources are being scheduled, files prepared and images pulled, or Minecraft is starting and being checked for readiness. |
 | Stopping | The world is being saved and the server shut down. |
-| Stopped | The server is asleep and uses no memory or CPU. |
+| Stopped | The server is shut down and uses no memory or CPU. |
+| Hibernating | The world has been saved; the process is being frozen and its memory written to swap. |
+| Hibernated | The process is frozen with its memory kept on disk and uses no CPU. Resuming continues from the frozen state. See [Hibernation](#hibernate). |
 | Timed out · retrying | The start timed out; the system is recreating the runtime instance and retrying. |
 | Failed to start | The automatic retry limit has been reached. |
 
@@ -192,11 +194,41 @@ Every start is subject to the platform's running server limit and wake cooldown.
 
 While the server starts, its console page shows the current stage and diagnostics. When schedulable memory runs short, the page suggests reducing the server's memory, stopping other servers or adding node capacity. The default start budget is 300 seconds. After a timeout the system recreates the runtime instance up to 3 times, waiting longer before each attempt; if the server is still not ready, its state becomes **Failed to start**. Resolve the fault, then select **Retry start**. To investigate, see [Server stuck in Starting](/en/operations/troubleshooting#server-stuck-starting) and [Server failed to start](/en/operations/troubleshooting#server-failed).
 
-### Stopping and idle auto-stop {#stop}
+### Stopping {#stop}
 
 Select **Stop** at the top of the server page. If players are online, the server sends them an in-game notice and disconnects them 30 seconds later before stopping; starting the server again within that window calls the stop off. When the online count cannot be read, the panel warns that players may still be connected and asks for confirmation.
 
-A server whose online count stays at zero for the configured time stops automatically and releases its memory and CPU; the next join wakes it according to the autostart policy. New servers use 600 seconds. Server owners and Admins turn **Idle auto-stop** off on the **Settings** tab, or choose how long the server waits without players. The online count is read over RCON; while it cannot be read, idle auto-stop pauses and resumes once the count is readable again. The login space and the lobby never stop when idle.
+### Idle handling {#idle}
+
+A server whose online count stays at zero for the configured time hibernates or stops automatically, as selected; the next join wakes it according to the autostart policy. New servers hibernate after 600 seconds without players. Server owners and Admins turn **Idle handling** off on the **Settings** tab, choose how long the server waits without players, or choose the behaviour under **Idle action**. The online count is read over RCON; while it cannot be read, idle handling pauses and resumes once the count is readable again. The login space and the lobby never hibernate or stop when idle.
+
+| Idle action | Behaviour |
+| --- | --- |
+| Hibernate (default) | Freezes the server process and writes its memory to swap. Resuming continues from the frozen state, with redstone circuits, entities and loaded chunks unchanged. A hibernated server uses no CPU and little memory. |
+| Stop | Saves the world, ends the process and releases all memory and CPU. The world loads again on the next start. |
+
+### Hibernation {#hibernate}
+
+Hibernation has two phases, freezing and resuming. Each phase checks resources before it begins, and the server keeps its current state when they fall short:
+
+1. Before freezing, the platform turns off automatic world saving and writes the whole world to disk, then checks that the node's free swap can hold all of the server's memory. When swap is short, the world cannot be saved, or the memory cannot be fully written to swap, the process resumes and the server stops normally instead.
+2. Once frozen, the server's memory allocation shrinks to 128 MiB, so the node can give the rest to other servers.
+3. When resuming, the platform first reclaims the server's original memory allocation, then checks that the node's available memory can hold what is in swap. While memory is short, the process stays frozen and the console shows **Resume is waiting for memory**; resuming continues once memory is available. The process runs again only after all of its memory has been read back.
+4. Once the process runs again, automatic world saving is turned back on.
+
+While a server is hibernated:
+
+- The console shows the log from before the freeze and accepts no commands.
+- The file manager is unavailable; resume or stop the server to manage its files.
+- A backup reads the world saved before the freeze, and the server stays hibernated. Restoring a backup requires stopping the server.
+- **Stop** ends the frozen process directly. The world was saved in full before the freeze, so stopping loses nothing that was saved.
+- A scheduled stop stops the hibernated server, a scheduled restart skips it, and a scheduled start resumes it.
+
+A frozen process exists only in the node's memory and swap. After a node restart, the platform keeps the world saved before the freeze and marks the server as stopped, with the reason in its lifecycle log. When a frozen process cannot resume, the platform starts the server again from the world saved before the freeze.
+
+Hibernation relies on swap on the node. The installer creates a `/swapfile` as large as physical memory on nodes without swap; see [What the platform uses](/en/guide/requirements#platform-usage). When the node's free swap cannot hold a server's memory, that server stops when idle instead.
+
+A server that hibernates runs with the game's own hang watchdog turned off (`max-tick-time` set to `-1`, and Paper's watchdog disabled), so that the jump in time after resuming is not taken for a hang. The platform detects hangs instead: a server that does not answer RCON for 90 seconds is treated as crashed and handled according to [Restarting after a crash](#crash-restart).
 
 ### Restarting {#restart}
 
@@ -262,13 +294,13 @@ When the platform has a [mail relay](/en/guide/administration#mail-relay), serve
 | --- | --- | --- |
 | Problems | On | Crashes and the outcome of the restart, a stop after crashing, failed starts, and resuming or staying stopped after a host restart. |
 | Server started | Off | The server finished starting. |
-| Server stopped | Off | The server finished stopping, including idle auto-stop. |
+| Server stopped | Off | The server finished stopping, including an idle stop. |
 
 After a crash, the platform waits up to 3 minutes and sends the outcome of the restart and any events in between in one mail; a stop after crashing is sent at once. Events not sent within an hour are dropped. These mails count toward the relay's hourly limit. The login space and the lobby send no such mail.
 
 ## Autostart policy {#autostart}
 
-The autostart policy decides who may wake a sleeping server. The server owner and Admins can always start it.
+The autostart policy decides who may wake a stopped or hibernated server. The server owner and Admins can always start it.
 
 | Policy | Who can wake the server |
 | --- | --- |

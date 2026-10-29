@@ -364,22 +364,23 @@ Do not resolve a lost control connection by force-deleting worlds, pods or volum
 Force-deleting a pod is no evidence that the game process has exited.
 :::
 
-### A server does not stop when empty {#idle-stop}
+### A server does not hibernate or stop when empty {#idle-stop}
 
-Servers created from the panel stop after 600 seconds with nobody online, and the next join
-wakes them. The login space and the lobby never stop when idle. A server that keeps running
-with nobody online, or whose player count always shows 0, has one of the causes below.
+Servers created from the panel hibernate after 600 seconds with nobody online, and the next
+join wakes them. The login space and the lobby never hibernate or stop when idle. A server
+that keeps running with nobody online, or whose player count always shows 0, has one of the
+causes below.
 
 **Cause**
 
-- **Idle auto-stop** is turned off on the **Settings** tab.
+- **Idle handling** is turned off on the **Settings** tab.
 - The server was created before idle auto-stop became the default and has no idle setting.
 - RCON is off on the server. The player count comes from the RCON readiness check, which runs
-  `list`; without RCON the count is never read and stays at 0, and idle auto-stop never acts.
+  `list`; without RCON the count is never read and stays at 0, and idle handling never acts.
 - The server's `list` reply has a format Felis does not recognise, such as a plugin that
   rewrites `/list` or a translated reply. A count that cannot be read counts as unknown,
   never as zero: the server keeps running, the panel shows **The online player count could
-  not be read. Idle shutdown is paused until player count retrieval resumes.**, and the
+  not be read. Idle handling is paused until player count retrieval resumes.**, and the
   `PlayersCounted` condition is `False` with reason `ListUnreadable`.
 - The server became ready less than 3 minutes ago. A zero count in that window starts no
   countdown, so the server does not stop while players are still arriving.
@@ -401,7 +402,7 @@ Run `list` in the server's console in the panel to see the reply. Felis reads th
 
 **Resolution**
 
-1. Turn on **Idle auto-stop** on the **Settings** tab and choose how long the server waits
+1. Turn on **Idle handling** on the **Settings** tab and choose how long the server waits
    without players.
 2. For servers created before idle auto-stop or RCON became defaults, run system server
    completion: `sudo felis converge` gives servers without an idle setting the default of 600
@@ -410,6 +411,62 @@ Run `list` in the server's console in the panel to see the reply. Felis reads th
    has no RCON listener then fails to start.
 3. Restore a supported `list` reply, for example by removing the plugin's override or its
    translation of that message.
+
+### An idle server stopped instead of hibernating {#hibernate-fallback}
+
+The server's **Idle action** is **Hibernate**, yet it stopped when idle. When the platform
+cannot freeze a server safely it stops the server normally instead, and records the reason in
+the server's Kubernetes events.
+
+**Cause**
+
+- The node has no swap, or its free swap cannot hold the server's memory (event
+  `HibernateFailed`, code `insufficient_swap`).
+- Automatic saving could not be turned off and the world written over RCON before the freeze
+  (event `HibernateSkipped`).
+- The kernel could not write all of the server's memory to swap (event `HibernateFailed`,
+  code `incomplete`).
+- The server's process started before the upgrade to a version with hibernation. That process
+  keeps its earlier configuration; the server hibernates after its next restart.
+
+**Diagnosis**
+
+```bash
+sudo k3s kubectl -n minecraft get events --field-selector involvedObject.name=<server> | grep -i hibernat
+swapon --show
+free -m
+```
+
+**Resolution**
+
+1. Give the node swap at least as large as the memory of the servers on it that hibernate.
+   Running the installer again creates `/swapfile` on a node without swap, or create one by
+   hand:
+
+   ```bash
+   sudo fallocate -l 16G /swapfile
+   sudo chmod 600 /swapfile
+   sudo mkswap /swapfile
+   sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   ```
+
+2. When the world cannot be saved, check that RCON is on and answers commands; see
+   [A server does not hibernate or stop when empty](#idle-stop).
+
+### Resume is waiting for memory {#wake-waiting-memory}
+
+When a hibernated server resumes, its console shows **Resume is waiting for memory** and the
+server stays frozen. While it was frozen, the node gave the freed memory to other servers;
+reclaiming the server's original memory allocation, or reading its swap back into memory,
+needs that much memory available on the node.
+
+**Resolution**
+
+- Stop other servers on the node, or wait for them to hibernate or stop when idle. Resuming
+  continues on its own once memory is available.
+- When the running state no longer needs to be kept, stop the server. The world was saved in
+  full before the freeze, so stopping loses nothing that was saved.
 
 ### An operation reports that the world is busy {#world-busy}
 
@@ -1310,7 +1367,7 @@ Re-run once the asset can be downloaded, free the space, or set `FELIS_PREFLIGHT
 
 ## System servers and configuration {#configuration}
 
-These entries cover settings that do not take effect on existing servers, idle auto-stop and world volumes left behind by deleted servers.
+These entries cover settings that do not take effect on existing servers, idle handling and world volumes left behind by deleted servers.
 
 ### A newer setting never reaches an existing server {#system-server-fields}
 
@@ -1324,7 +1381,8 @@ Some fields act only under conditions:
 | --- | --- |
 | `spec.startup.timeoutSeconds` | Time allowed for a start. `0` or unset means 300 s; afterwards the server becomes `Failed` with `StartupTimeout`. |
 | `spec.startup.readinessTimeoutSeconds` | Deadline for the whole start while waiting for the RCON probe, measured from the start request. `0` or unset means 300 s; afterwards the server becomes `Failed` with `ReadinessTimeout`. |
-| `spec.idle.autoStopEnabled`, `spec.idle.emptySecondsBeforeStop` | Act only with `spec.rcon.enabled`, because the player count comes from RCON. `emptySecondsBeforeStop: 0` turns idle stop off. |
+| `spec.idle.autoStopEnabled`, `spec.idle.emptySecondsBeforeStop` | Act only with `spec.rcon.enabled`, because the player count comes from RCON. `emptySecondsBeforeStop: 0` turns idle handling off. |
+| `spec.idle.action` | What an idle server does: `hibernate` (the default when unset) or `stop`. |
 
 **Diagnosis**
 
@@ -1337,7 +1395,7 @@ sudo k3s kubectl -n minecraft get minecraftserver \
 
 Run the following after the images are in place, that is after an installer run or update. Enabling RCON or the readiness check on a server whose image lacks the listener keeps that server in `Starting` until it is marked `Failed`.
 
-1. Fill the missing fields of the system servers and give older user servers the default idle auto-stop (stop after 600 s with nobody online):
+1. Fill the missing fields of the system servers and give older user servers the default idle handling (hibernate after 600 s with nobody online):
 
    ```bash
    sudo felis converge
@@ -1868,7 +1926,9 @@ Act on the detail in the table. Timing rules that explain unexpected run times:
 | Server in `Failed`; `StartupTimeout`, `ReadinessTimeout` | [A server is in Failed](#server-failed), [A newer setting never reaches an existing server](#system-server-fields) |
 | A server does not stop | [A server does not stop](#server-wont-stop) |
 | The **Login & lobby** page reports that the login space or the lobby does not exist | [The login space or the lobby is missing](#system-servers-missing) |
-| Server never stops when empty; player count always 0; `PlayersCounted` is `False` | [A server never stops when empty](#idle-stop) |
+| Server never hibernates or stops when empty; player count always 0; `PlayersCounted` is `False` | [A server does not hibernate or stop when empty](#idle-stop) |
+| Stopped when idle instead of hibernating; `HibernateFailed`, `HibernateSkipped`, `insufficient_swap` | [An idle server stopped instead of hibernating](#hibernate-fallback) |
+| **Resume is waiting for memory** | [Resume is waiting for memory](#wake-waiting-memory) |
 | Players cannot join or land in the wrong place; wake refused | [Players cannot join](#players-cannot-join) |
 | Routing disabled | [Routing is disabled](#routing-disabled) |
 | Panel answers 401 or 403 | [Panel errors](#panel-errors) |

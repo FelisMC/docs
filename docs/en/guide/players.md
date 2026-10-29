@@ -17,11 +17,11 @@ With the default player entry policy, joining works like this:
 
 1. The game proxy (Velocity) verifies the player's game identity: first with Mojang, then with the enabled third-party sources in order. See [Authentication sources](#auth-sources).
 2. The player enters the login space. A player without a linked panel account gets a bind code there and completes the web sign-in (see [Account linking](#account-linking)); a linked player passes straight through.
-3. If the target server is running, the player is moved there directly. If it is asleep, Felis wakes it according to its [autostart policy](/en/guide/servers#autostart); the player waits in the lobby, hears a progress line every minute, and is moved over once the server is ready.
+3. If the target server is running, the player is moved there directly. If it is stopped or hibernated, Felis starts or resumes it according to its [autostart policy](/en/guide/servers#autostart); the player waits in the lobby, hears a progress line every minute, and is moved over once the server is ready.
 
 The Owner can change how players enter, for example straight to a main server or without account linking. See [Player entry policy](#entry-policy).
 
-In the server list, each server's MOTD shows its current state (online, starting or sleeping); refreshing the server list never wakes a server.
+In the server list, each server's MOTD shows its current state (online, starting, stopped or hibernated); refreshing the server list never wakes a server.
 
 ### Lobby menu {#lobby-menu}
 
@@ -31,7 +31,8 @@ In the lobby, run `/menu` to open the server menu. The menu follows the player's
 | --- | --- |
 | Join (green) | The server is running; click to join. |
 | Claim & Start (gold) | The server has no owner; click to claim and start it. |
-| Start (red) | The server is asleep; click to wake it and join once it is ready. |
+| Start (red) | The server is stopped; click to start it and join once it is ready. |
+| Resume (red) | The server is hibernated; click to resume it and join once it is ready. |
 | Can't start (grey) | The player may not start it; the reason appears in the tile's description and in chat. |
 
 ### In-game commands {#commands}
