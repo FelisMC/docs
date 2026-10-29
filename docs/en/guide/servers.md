@@ -242,7 +242,7 @@ Admins and server owners set this under **Edit Server Config → Running and rec
 
 A server stopped for crashing is not woken by players joining. Its owner or an Admin fixes the cause and selects **Wake** on the console page, which also resets the crash count. Exiting the process with an in-game command such as `/stop` also counts as an unexpected exit; to stop a server, use **Stop** on the console page.
 
-The **Activity** list on the console page shows the latest starts, stops, crashes, failed starts and host restarts.
+The **Activity** list on the server's **Monitoring** tab shows the latest starts, stops, crashes, failed starts and host restarts.
 
 ### Resuming after a host restart {#resume-after-host-restart}
 
@@ -304,7 +304,7 @@ An absent world volume or log file displays no history. If the file is replaced 
 
 ### Resource usage {#resource-usage}
 
-Server owners and Admins can view current CPU and memory usage and the last hour of history on the console. The wide server list also displays current usage. CPU percentages use the server's CPU limit: 500 millicores against a limit of two cores is 25%. Without a CPU limit, usage is shown in millicores. Memory shows the working set against the container memory limit, including memory outside the JVM heap.
+Server owners and Admins can view current CPU, memory and disk usage and the last hour of history on the server's **Monitoring** tab. The wide server list also displays current usage. CPU percentages use the server's CPU limit: 500 millicores against a limit of two cores is 25%. Without a CPU limit, usage is shown in millicores. Memory shows the working set against the container memory limit, including memory outside the JVM heap.
 
 The platform samples every 15 seconds and retains at most 240 points per server. Stopped servers and unavailable metrics show no current value; existing history remains for up to one hour. Missing metrics are never shown as zero usage. History is held in the API instance's memory and starts accumulating again after an instance restart or change. Sampling does not include disk usage or network traffic.
 
