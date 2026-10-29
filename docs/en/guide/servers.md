@@ -71,7 +71,7 @@ A server an Admin creates is stopped and belongs to no account until a user clai
    | Display name (optional) | The name shown in the panel and the lobby menu. |
    | Execution node | Shown to Admins only, in a multi-node deployment: an online, approved node. See [Multi-node and high availability](/en/guide/distributed#overview). |
    | Memory | The container memory limit in GiB: 4 by default, at least 1, decimals such as 1.5 allowed. The Java heap is sized from it. |
-   | Storage | The world volume size in whole GiB: 10 by default. It cannot be changed after creation. |
+   | Storage | The space the world files may use, in whole GiB: 10 by default. It can be changed after creation. See [Disk usage and quota](#disk-quota). |
    | Autostart policy | Defaults to **Owner only — wake from the panel**. See [Autostart policy](#autostart). |
 
 4. With server software, accept the Minecraft End User License Agreement (EULA).
@@ -123,12 +123,13 @@ On the server's console page, Admins and server owners select **Edit Server Conf
 - Server software. See [Changing the core or version](/en/guide/software#change).
 - Image (Admins only). See [Images and Minecraft versions](#images-versions).
 - Memory and CPU limit. Enter the CPU limit in cores (for example `1` or `1.5`) or millicores (for example `500m`); leave it empty for no limit.
+- Storage. See [Disk usage and quota](#disk-quota).
 - Idle auto-stop. See [Start, stop and sleep](#power).
 - Restarting after a crash and resuming after a host restart. See [Crashes and host restarts](#recovery).
 - Email notifications. See [Email notifications](#notifications).
 - JVM arguments, server arguments, environment variables and stop commands. See [Advanced startup settings](#startup-settings).
 
-Raising the CPU or memory of an owned server must fit the server owner's quota; lowering them is never held to it. The login space and the lobby are system services, which Admins manage under **Login & lobby**. See [Customizing the login space and lobby](/en/guide/players#customize-login-lobby).
+Raising the CPU, memory or storage of an owned server must fit the server owner's quota; lowering them is never held to it. The login space and the lobby are system services, which Admins manage under **Login & lobby**. See [Customizing the login space and lobby](/en/guide/players#customize-login-lobby).
 
 ### Advanced startup settings {#startup-settings}
 
@@ -157,7 +158,7 @@ Additional connections go directly to the node running the server, without using
 
 ### Disk usage and quota {#disk-quota}
 
-The storage size selected when creating a server is also its disk quota. The console and file page show usage, the quota and the latest measurement time, including while the server is stopped. Usage counts allocated bytes in the world volume, including worlds, plugins, configuration, logs and temporary files within that volume. Sparse files count only allocated space, hard links count once, and symbolic links are not followed.
+The storage size selected when creating a server is also its disk quota, and it can later be changed in **Edit Server Config**. The new storage must exceed the usage of the latest measurement. A server stopped because its disk was full can be started again once the storage is raised and the platform confirms a new measurement below the quota. The change only moves the disk quota the platform enforces; the world volume keeps the size requested at creation, so on a storage class that enforces capacity the storage should not exceed the volume's actual size. The console and file page show usage, the quota and the latest measurement time, including while the server is stopped. Usage counts allocated bytes in the world volume, including worlds, plugins, configuration, logs and temporary files within that volume. Sparse files count only allocated space, hard links count once, and symbolic links are not followed.
 
 At 90% of the quota, the console displays a warning. Server owners with problem notifications enabled also receive an email. At 100%, the platform stops the server through the normal shutdown process, records the `DiskFull` stop reason, and refuses starts, start retries and restarts. File management and downloads remain available for cleanup. Once the platform confirms a new successful measurement below the quota, the server can be started again; it does not start automatically.
 
