@@ -217,7 +217,7 @@ The **Content & maintenance** area offers:
 - **Map backups & restore**: back up before replacing maps, plugins or images, or restore a saved backup.
 - **Lobby builder access**: while the lobby runs, enter a Minecraft player name and select **Allow building** or **Deny building** to grant or revoke `felis.lobby.build`. The permission defaults to operators; you can also run `lp user <name> permission set felis.lobby.build true` in the lobby console.
 
-The file manager requires the space to be stopped. While the login space is stopped, new players cannot join. A replacement image must keep the Felis login or menu plugin and support the proxy's forwarding protocol; images and resources are set under **Edit Server Config** on the system server. For how the images are built and behave, see [Lobby image](/en/reference/lobby#customize) and [Login space image](/en/reference/limbo#customize).
+The file manager requires the space to be stopped. While the login space is stopped, new players cannot join. A replacement image must keep the Felis login or menu plugin and support the proxy's forwarding protocol; images and resources are set on the system server's **Settings** tab. For how the images are built and behave, see [Lobby image](/en/reference/lobby#customize) and [Login space image](/en/reference/limbo#customize).
 
 ## Global blacklist {#blacklist}
 

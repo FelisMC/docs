@@ -14,7 +14,7 @@ Felis has three roles:
 | Role | Rights | Panel navigation |
 | --- | --- | --- |
 | Owner | The platform owner. Has every Admin right and manages users, authentication sources, host operations and platform settings. Can also use the emergency stop and set a server's forwarding mode. | **Platform**: Users, Authentication sources, Maintenance & Backups, Audit log, Platform settings |
-| Admin | Creates servers, edits their configuration and manages every server; maintains the login space and lobby, the image whitelist, builds and submission review; in a multi-node deployment, chooses execution nodes and migrates servers. | **Admin**: Login & lobby, Images, Build Pipeline, Submissions |
+| Admin | Creates servers, changes their settings and manages every server; maintains the login space and lobby, the image whitelist, builds and submission review; in a multi-node deployment, chooses execution nodes and migrates servers. | **Admin**: Login & lobby, Images, Build Pipeline, Submissions |
 | User | Claims servers, manages the servers they own, and submits modpacks. | Dashboard, Servers, My Submissions, Account |
 
 Every role has the Dashboard, Servers, My Submissions and Account. The Owner account is created by the [setup wizard](/en/guide/deployment#setup-wizard). Its role cannot be changed in the panel, and the account cannot be disabled or deleted. If the Owner cannot sign in, recover with `sudo felis breakGlass` on the host. See [Emergency access](/en/operations/access#break-glass).
@@ -73,7 +73,7 @@ The signed-in account cannot change its own role, disable itself or delete itsel
 The Owner can give a server directly to a chosen account, without the account claiming it. Only the Owner can do this: Admins and users do not see the entry points, and the API refuses the same requests for them. Assignment has two entry points, which share one dialog:
 
 - **User details page**: select **Assign server**, then choose the server to hand over from the server list in the dialog. The list can be filtered by name or display name. It omits system servers, servers the account already owns and servers being given up. A disabled account cannot receive servers, and the button is unavailable for it.
-- **Server page**: on the server's console page, open **Edit Server Config**. The **Owner** row shows the current owner. Select **Change owner**, then choose the new owner from the user list. The list can be filtered, and it omits disabled accounts and the current owner. System servers have no owner, so this row does not appear for them.
+- **Server page**: on the server's **Settings** tab, the **Owner** row under **General** shows the current owner. Select **Change owner**, then choose the new owner from the user list. The list can be filtered, and it omits disabled accounts and the current owner. System servers have no owner, so this row does not appear for them.
 
 Once a server and an account are selected, the dialog first shows the current owner and the change from one owner to another. For a server with no owner, it states that the server will be assigned to the chosen account.
 

@@ -217,7 +217,7 @@ description: 玩家如何进入服务器、关联面板账户，以及认证源�
 - **地图备份与恢复**：更换地图、插件或镜像前保存备份，或选择已有备份恢复。
 - **大厅建造权限**：在大厅运行时输入 Minecraft 角色名，选择「允许建造」或「禁止建造」，授予或撤销 `felis.lobby.build` 权限。该权限默认授予 OP；也可在大厅控制台执行 `lp user <名称> permission set felis.lobby.build true`。
 
-文件管理要求空间处于停止状态。登录空间停止期间，新玩家无法进入。更换镜像时，自定义镜像须保留 Felis 登录插件或菜单插件，并支持代理的转发协议；镜像与资源可在系统服务器的「编辑服务器配置」中调整。镜像的构建与行为见[大厅镜像](/reference/lobby#customize)与[登录空间镜像](/reference/limbo#customize)。
+文件管理要求空间处于停止状态。登录空间停止期间，新玩家无法进入。更换镜像时，自定义镜像须保留 Felis 登录插件或菜单插件，并支持代理的转发协议；镜像与资源可在系统服务器的「设置」页调整。镜像的构建与行为见[大厅镜像](/reference/lobby#customize)与[登录空间镜像](/reference/limbo#customize)。
 
 ## 全局黑名单 {#blacklist}
 

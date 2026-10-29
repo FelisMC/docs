@@ -216,8 +216,8 @@ operator 未在处理服务器时，先恢复 operator；相关告警见[监控�
 
 **排查**
 
-1. 在控制台页的提示与「运行记录」中查看最近一次崩溃的原因。
-2. 原因为「内存不足，进程被终止」时，在「编辑服务器配置」中提高内存，或减少插件、模组与视距等占用。
+1. 在控制台页的提示与「监控」页的「运行记录」中查看最近一次崩溃的原因。
+2. 原因为「内存不足，进程被终止」时，在服务器的「设置」页提高内存，或减少插件、模组与视距等占用。
 3. 原因为其他退出码时，选择「启动」并在控制台观察日志中的错误。常见原因包括插件或模组不兼容、配置文件错误与世界数据损坏。
 4. 修复后选择「启动」，崩溃计数随之清零。
 
@@ -246,8 +246,8 @@ sudo k3s kubectl -n minecraft get events --field-selector involvedObject.name=<s
 **解决**
 
 1. 等待提示期和关闭时的保存完成。Pod 退出后，「停止中」变为「已停止」。
-2. 普通停止无响应时，Owner 在服务器控制台选择「更多操作 → 应急停止」，输入服务器名称并重新验证身份。应急停止先保存停止意图（`desiredState=Stopped`），再将服务器的 StatefulSet 缩容至零，绕过游戏的 RCON 和 operator。正常的终止宽限期照常适用，不删除任何世界，但游戏尚未保存的更改可能丢失。副本目标仍大于零，或游戏 Pod 仍在运行或退出时，面板显示「停止中」。缩容失败时，停止意图保持已保存状态，面板提示结果未确认。
-3. 控制 API 本身离线时，在控制台页面展开「主机侧应急停止步骤」，在主机上依次执行其中的命令。部署使用其他命名空间时，替换其中的 `minecraft`：
+2. 普通停止无响应时，Owner 在服务器「设置」页的「危险操作」中选择「应急停止」，输入服务器名称并重新验证身份。应急停止先保存停止意图（`desiredState=Stopped`），再将服务器的 StatefulSet 缩容至零，绕过游戏的 RCON 和 operator。正常的终止宽限期照常适用，不删除任何世界，但游戏尚未保存的更改可能丢失。副本目标仍大于零，或游戏 Pod 仍在运行或退出时，面板显示「停止中」。缩容失败时，停止意图保持已保存状态，面板提示结果未确认。
+3. 控制 API 本身离线时，在服务器页面展开「主机侧应急停止步骤」，在主机上依次执行其中的命令。部署使用其他命名空间时，替换其中的 `minecraft`：
 
    ```bash
    sudo k3s kubectl patch minecraftserver <server> -n minecraft --type=merge -p '{"spec":{"desiredState":"Stopped"}}'
@@ -268,7 +268,7 @@ sudo k3s kubectl -n minecraft get events --field-selector involvedObject.name=<s
 
 **原因**
 
-- 「编辑服务器配置 → 空闲自动停服」设为「从不」。
+- 「设置」页的「空闲自动停服」已关闭。
 - 服务器创建于空闲自动停服成为默认设置之前，没有空闲设置。
 - 服务器未启用 RCON。玩家数来自 RCON 就绪检查执行的 `list` 命令；没有 RCON 时玩家数从未读取，始终为 0，空闲自动停服也不会执行。
 - 服务器的 `list` 回复格式无法识别，例如插件改写了 `/list`，或回复经过翻译。无法读取的玩家数视为未知，不会当作零：服务器继续运行，面板显示「在线人数读取失败，空闲停服已暂停。读取恢复后将继续判断。」，`PlayersCounted` 条件为 `False`，原因为 `ListUnreadable`。
@@ -290,7 +290,7 @@ sudo k3s kubectl -n minecraft get minecraftserver <server> -o jsonpath='{.status
 
 **解决**
 
-1. 在「编辑服务器配置」中将「空闲自动停服」设为 1 分钟到 24 小时之间的时长。
+1. 在「设置」页打开「空闲自动停服」，并选择无人在线多久后停止。
 2. 对于在空闲自动停服或 RCON 成为默认设置之前创建的服务器，执行系统服务器补全：`sudo felis converge` 为没有空闲设置的服务器设定默认值 600 秒，`sudo felis converge -user-rcon` 为旧用户服务器启用 RCON。启用 RCON 之前请阅读[系统服务器字段](#system-server-fields)：镜像没有 RCON 监听器的服务器启用后将无法启动。
 3. 恢复受支持的 `list` 回复，例如移除插件对该消息的改写或翻译。
 
@@ -423,7 +423,7 @@ sudo k3s kubectl -n minecraft get minecraftservers login lobby
 
 | 返回 | 玩家看到的提示 | 原因 | 解决办法 |
 | --- | --- | --- | --- |
-| `403 forbidden` | `你无权启动「<server>」。` | 自动启动策略为「仅所有者」且玩家不是所有者，或为「唤醒名单」且玩家没有唤醒权限 | 在服务器的「唤醒名单」中授予该玩家唤醒权限、由所有者启动服务器，或在「编辑服务器配置」中修改策略（见[自动启动](/guide/servers#autostart)） |
+| `403 forbidden` | `你无权启动「<server>」。` | 自动启动策略为「仅所有者」且玩家不是所有者，或为「唤醒名单」且玩家没有唤醒权限 | 在服务器的「唤醒名单」中授予该玩家唤醒权限、由所有者启动服务器，或在服务器的「设置」页修改策略（见[自动启动](/guide/servers#autostart)） |
 | `409 maintenance_in_progress` | `「<server>」正在维护（回档、备份或改文件），请稍后再试。` | 其他操作正在占用世界 | 等待操作完成，见[操作提示世界正被占用](#world-busy) |
 | `409 world_reclaiming` | `「<server>」闲置太久，世界正在归档回收，现在不能启动。` | 世界清理正在归档空闲世界，完成后服务器以空世界释放 | 旧世界保留在归档中，见[世界清理](/operations/backup#world-cleanup) |
 | `409 server_retiring` | `「<server>」已被放弃或正在删除，不能启动。` | 所有者已放弃该服务器，或管理员正在删除它；在下一次每日清理之前保持停止 | 在面板中撤销该请求，服务器即可再次启动 |
@@ -961,7 +961,7 @@ sudo k3s kubectl -n minecraft get minecraftserver <name> -o jsonpath='{.spec.ima
 将世界迁移到更新的构建或 Minecraft 版本：
 
 1. 备份世界。Minecraft 加载区块时会升级区块格式，旧版本无法再打开这些区块。
-2. 打开「编辑服务器配置」并选择镜像。重新选择当前标签会将服务器更新到该标签的最新构建。
+2. 在服务器的「设置」页选择镜像。重新选择当前标签会将服务器更新到该标签的最新构建。
 3. 勾选「我已备份世界，确认更换镜像」并保存。
 
 如需回退，重新设置之前的构建（审计日志为每次更换记录 `image_from` 和 `image_to`），并恢复升级前的备份。回退的前提是镜像仓库中仍保留旧构建。默认标签移动后，如需继续以指定 Minecraft 版本创建服务器，将该版本标签加入白名单（[镜像](/guide/administration#images)）。
@@ -982,7 +982,7 @@ sudo k3s kubectl -n felis logs deploy/felis-artifacts --tail=50
 | `fetch <路径>: … content does not match its published digest` | 下载内容与官方公布的哈希值不一致，文件损坏或被替换。 | 重试启动。每次都出现时，报告该问题。 |
 | `fetch <路径>: HTTP 403`、`HTTP 5xx` 或超时 | 节点无法访问下载站，或下载站暂时不可用。缓存日志中对应 `artifact download failed`。 | 确认节点可以访问互联网后重试启动。 |
 | `software: <地址> answered HTTP …` | 首次安装时无法读取版本信息。 | 稍后重试启动。已安装的服务器不受影响。 |
-| `the custom jar <路径> is not in the server's files yet` | 自定义 jar 尚未上传。 | 在服务器文件中上传 jar，或在「编辑服务器配置」中更正路径。 |
+| `the custom jar <路径> is not in the server's files yet` | 自定义 jar 尚未上传。 | 在服务器文件中上传 jar，或在服务器的「设置」页更正路径。 |
 | `the forge installer failed`（或 neoforge） | 官方安装器运行失败，常见原因是无法访问其 Maven 仓库或内存不足。安装器使用服务器的内存上限。 | 查看日志中安装器的输出；内存不足时调大服务器内存。 |
 | `a forwarding mod (Modrinth …) for <核心> <版本> not found` | Modrinth 已不再提供创建服务器时可用的转发组件。 | 更换游戏版本，或报告该问题。 |
 

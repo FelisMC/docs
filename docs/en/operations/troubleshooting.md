@@ -295,8 +295,8 @@ The console page shows **The server kept crashing and is no longer restarted** o
 
 **Troubleshooting**
 
-1. Read the cause of the latest crash in the notice and in the **Activity** list on the console page.
-2. For **Out of memory; the process was killed**, raise the memory under **Edit Server Config**, or reduce what uses it, such as plugins, mods and view distance.
+1. Read the cause of the latest crash in the notice and in the **Activity** list on the **Monitoring** tab.
+2. For **Out of memory; the process was killed**, raise the memory on the server's **Settings** tab, or reduce what uses it, such as plugins, mods and view distance.
 3. For another exit code, select **Wake** and watch the log in the console for the error. Common causes are incompatible plugins or mods, broken configuration files and damaged world data.
 4. Once it is fixed, select **Wake**; the crash count starts over.
 
@@ -336,8 +336,8 @@ A `StopNotice` event means the 30-second warning is running.
 
 1. Wait for the warning period and the shutdown save. **Stopping** changes to **Stopped**
    once the pod is gone.
-2. If the normal stop does not respond, the Owner selects **More actions → Emergency stop** on
-   the server's console, types the server's name and confirms their identity. Emergency stop
+2. If the normal stop does not respond, the Owner selects **Emergency stop** in the **Danger zone** of
+   the server's **Settings** tab, types the server's name and confirms their identity. Emergency stop
    saves the stop intent (`desiredState=Stopped`) and then scales the server's StatefulSet to
    zero, bypassing the game's RCON and the operator. The normal termination grace period
    applies and no world is deleted, but changes the game has not saved may be lost. The panel
@@ -345,7 +345,7 @@ A `StopNotice` event means the 30-second warning is running.
    or exiting. If the scale-down fails, the stop intent stays saved and the panel reports the
    result as unconfirmed.
 3. If the control API itself is offline, expand **Host emergency shutdown procedure** on the
-   console page and run its commands on the host in order. Replace `minecraft` if the
+   server page and run its commands on the host in order. Replace `minecraft` if the
    deployment uses another namespace:
 
    ```bash
@@ -372,7 +372,7 @@ with nobody online, or whose player count always shows 0, has one of the causes 
 
 **Cause**
 
-- Idle auto-stop is set to **Never** in **Edit Server Config → Idle auto-stop**.
+- **Idle auto-stop** is turned off on the **Settings** tab.
 - The server was created before idle auto-stop became the default and has no idle setting.
 - RCON is off on the server. The player count comes from the RCON readiness check, which runs
   `list`; without RCON the count is never read and stays at 0, and idle auto-stop never acts.
@@ -401,8 +401,8 @@ Run `list` in the server's console in the panel to see the reply. Felis reads th
 
 **Resolution**
 
-1. Set **Idle auto-stop** in **Edit Server Config** to a duration between 1 minute and 24
-   hours.
+1. Turn on **Idle auto-stop** on the **Settings** tab and choose how long the server waits
+   without players.
 2. For servers created before idle auto-stop or RCON became defaults, run system server
    completion: `sudo felis converge` gives servers without an idle setting the default of 600
    seconds, and `sudo felis converge -user-rcon` turns RCON on for older user servers. Read
@@ -579,7 +579,7 @@ it is ready.
 
 | Answer | The player sees | Cause | Resolution |
 | --- | --- | --- | --- |
-| `403 forbidden` | `You're not allowed to start « <server> ».` | The autostart policy is **Owner only** and the player is not the owner, or **Wake list** and the player has no wake permission | Grant the player wake permission on the server's **Wake list**, have the owner start the server, or change the policy in **Edit Server Config** (see [Autostart](/en/guide/servers#autostart)) |
+| `403 forbidden` | `You're not allowed to start « <server> ».` | The autostart policy is **Owner only** and the player is not the owner, or **Wake list** and the player has no wake permission | Grant the player wake permission on the server's **Wake list**, have the owner start the server, or change the policy on the server's **Settings** tab (see [Autostart](/en/guide/servers#autostart)) |
 | `409 maintenance_in_progress` | `« <server> » is under maintenance (restore, backup or file edit). Please try again shortly.` | Another operation holds the world | Wait for it to finish; see [An operation reports that the world is busy](#world-busy) |
 | `409 world_reclaiming` | `« <server> » sat idle too long and its world is being archived, so it can't start.` | World cleanup is archiving the idle world; afterwards the server is released with an empty world | The old world stays in the archive; see [World cleanup](/en/operations/backup#world-cleanup) |
 | `409 server_retiring` | `« <server> » has been given up or is being deleted, so it can't be started.` | The owner gave the server up or an admin is deleting it; it stays down until the next daily cleanup run | Cancel the request in the panel to make the server startable again |
@@ -1225,7 +1225,7 @@ sudo k3s kubectl -n minecraft get minecraftserver <name> -o jsonpath='{.spec.ima
 To move a world to a newer build or Minecraft version:
 
 1. Back up the world. Minecraft upgrades chunks as it loads them, and the older version cannot open them again.
-2. Open **Edit Server Config** and pick the image. Picking the current tag again moves the server to that tag's newest build.
+2. Pick the image on the server's **Settings** tab. Picking the current tag again moves the server to that tag's newest build.
 3. Tick **I've backed up the world — change the image** and save.
 
 To roll back, set the previous build again (the audit log records `image_from` and `image_to` for every change) and restore the pre-upgrade backup. This works while the registry still holds the old build. To create servers on a specific Minecraft version after the default tag has moved, whitelist its versioned tag ([Images](/en/guide/administration#images)).
@@ -1246,7 +1246,7 @@ sudo k3s kubectl -n felis logs deploy/felis-artifacts --tail=50
 | `fetch <path>: … content does not match its published digest` | The download does not match the hash the official source publishes; the file is damaged or was replaced. | Retry the start. If it happens every time, report it. |
 | `fetch <path>: HTTP 403`, `HTTP 5xx` or a timeout | The node cannot reach the download site, or the site is temporarily unavailable. The cache logs `artifact download failed` for it. | Make sure the node can reach the internet, then retry the start. |
 | `software: <address> answered HTTP …` | Version information could not be read for the first installation. | Retry the start later. Installed servers are not affected. |
-| `the custom jar <path> is not in the server's files yet` | The custom jar has not been uploaded. | Upload the jar to the server files, or correct the path under **Edit Server Config**. |
+| `the custom jar <path> is not in the server's files yet` | The custom jar has not been uploaded. | Upload the jar to the server files, or correct the path on the server's **Settings** tab. |
 | `the forge installer failed` (or neoforge) | The official installer failed, usually because it cannot reach its Maven repository or runs out of memory. The installer runs within the server's memory limit. | Read the installer output in the log; raise the server's memory if it ran out. |
 | `a forwarding mod (Modrinth …) for <core> <version> not found` | Modrinth no longer publishes the forwarding component that was available when the server was created. | Change the game version, or report it. |
 

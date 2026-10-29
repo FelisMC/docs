@@ -14,7 +14,7 @@ What you can do depends on your account role and on who owns the server. In the 
 | Action | Who |
 | --- | --- |
 | Create a server | Admin; an account with a server quota can create servers of its own, see [Self-service creation](#self-service) |
-| Edit the server configuration | Admin; server owners can change their own servers, except the image |
+| Change server settings | Admin; server owners can change their own servers, except the image |
 | Claim an unowned server | Any account with a linked Minecraft account |
 | Start a server | Server owner, Admin; other players as the [autostart policy](#autostart) allows |
 | Stop, restart, force stop, console, player management, files, scheduled tasks, backups and restore | Server owner, Admin |
@@ -34,7 +34,7 @@ The list shows 20 servers per page by default. To change this, select 50 or 100 
 
 ### Tags {#tags}
 
-Tags group servers. Server owners and Admins add or remove tags in the **Tags** field of **Edit Server Config**: type a tag, then press Enter or type a comma to add it.
+Tags group servers. Server owners and Admins add or remove tags in the **Tags** row of the **Settings** tab: type a tag, then press Enter or type a comma to add it.
 
 - A server can have up to 6 tags. Each tag has 1 to 20 characters and cannot contain commas or control characters.
 - Tags that differ only in letter case are treated as the same tag, and the spelling entered first is kept.
@@ -93,7 +93,7 @@ A self-created server runs server software only, and its resources count toward 
 A server that runs an image can use only enabled images from the image whitelist, which Admins maintain. See [Image whitelist](/en/guide/administration#images). Modpacks that players submit join the whitelist once they are reviewed and built. See [Submissions](/en/guide/administration#submissions).
 
 - When a server is created, it is pinned to the build its image tag points to at that moment. When the tag later points to a new build, existing servers stay as they are.
-- After you change the image under **Edit Server Config**, the server uses the build the tag points to now; selecting the same tag again also selects its latest build. A Minecraft version change may upgrade the world on the next start, and upgraded chunks cannot be used by older versions. Before saving, tick **I've backed up the world — change the image**.
+- After you change the image on the **Settings** tab, the server uses the build the tag points to now; selecting the same tag again also selects its latest build. A Minecraft version change may upgrade the world on the next start, and upgraded chunks cannot be used by older versions. Before saving, tick **I've backed up the world — change the image**.
 - The game proxy passes the player's identity to servers with modern forwarding. For Paper-based images, Felis writes the forwarding settings before every start. Other server software must read the environment variable `FELIS_FORWARDING_SECRET` and enable Velocity modern forwarding itself, or use [legacy forwarding](#forwarding-mode).
 - The login space and the lobby run the platform's Minecraft version; the client version players need is shown on the **Account** page. A target server may need another version or mods, which its owner announces.
 
@@ -115,9 +115,9 @@ You can claim:
 
 For claim errors, see [Account link and claim errors](/en/operations/troubleshooting#account-link-errors).
 
-## Editing the server configuration {#edit-server}
+## Server settings {#edit-server}
 
-On the server's console page, Admins and server owners select **Edit Server Config** to change the following; fields left unchanged keep their values:
+Admins and server owners change the following directly on the server's **Settings** tab. The tab groups them into General, Server software, Resources, Start and run, Email notifications, Network and Advanced startup settings. Once something changes, **Discard changes** and **Save Config** appear at the bottom of the page; saving sends only the changed fields, and the rest keep their values. Before the page is closed or reloaded, the browser warns about unsaved changes.
 
 - Display name and autostart policy.
 - Server software. See [Changing the core or version](/en/guide/software#change).
@@ -133,7 +133,7 @@ Raising the CPU, memory or storage of an owned server must fit the server owner'
 
 ### Advanced startup settings {#startup-settings}
 
-Server owners and Admins can expand **Edit Server Config → Advanced startup settings** to read and change that server's JVM arguments, server arguments, environment variables and stop commands. Admins manage the login space and the lobby. Advanced startup settings are excluded from public server status and do not include platform-managed environment variables.
+Server owners and Admins can select **Show startup settings** under **Advanced startup settings** on the **Settings** tab to read and change that server's JVM arguments, server arguments, environment variables and stop commands. Admins manage the login space and the lobby. Advanced startup settings are excluded from public server status and do not include platform-managed environment variables.
 
 | Setting | Input and limits |
 | --- | --- |
@@ -148,9 +148,9 @@ Saved JVM arguments, server arguments and environment variables take effect on t
 
 ### Additional TCP and UDP ports {#extra-ports}
 
-Server owners and administrators can add up to five entries under **Extra ports** in **Edit Server Config**. Select TCP or UDP and enter the internal port on which the plugin or mod listens. Internal ports range from 1 to 65535, and protocol/port pairs must be unique. Managed game, RCON and health-check TCP ports cannot be exposed.
+Server owners and administrators can add up to five entries under **Extra ports** in the **Network** section of the **Settings** tab. Select TCP or UDP and enter the internal port on which the plugin or mod listens. Internal ports range from 1 to 65535, and protocol/port pairs must be unique. Managed game, RCON and health-check TCP ports cannot be exposed.
 
-The platform assigns external ports from 30000–32767. Once applied, the console shows the protocol, internal port, external port and a direct node address that can be copied. IPv6 addresses use brackets. Plugins listen on internal ports, and clients connect to external ports. For example, [Simple Voice Chat](https://modrepo.de/minecraft/voicechat/wiki/server_config) defaults to UDP 24454, [Dynmap](https://github.com/webbukkit/dynmap/wiki/Configuration.txt#webserver-port) to TCP 8123 and [BlueMap](https://bluemap.bluecolored.de/wiki/FAQ.html) to TCP 8100. Keep Simple Voice Chat's `port` set to the configured internal port, and set `voice_host` to the complete external address shown in the console. Open web maps at `http://node-IP:external-port/`.
+The platform assigns external ports from 30000–32767. Once applied, each port shows a direct node address that can be copied. IPv6 addresses use brackets. Plugins listen on internal ports, and clients connect to external ports. For example, [Simple Voice Chat](https://modrepo.de/minecraft/voicechat/wiki/server_config) defaults to UDP 24454, [Dynmap](https://github.com/webbukkit/dynmap/wiki/Configuration.txt#webserver-port) to TCP 8123 and [BlueMap](https://bluemap.bluecolored.de/wiki/FAQ.html) to TCP 8100. Keep Simple Voice Chat's `port` set to the configured internal port, and set `voice_host` to the complete external address shown in the console. Open web maps at `http://node-IP:external-port/`.
 
 Mappings can be changed while the server is running or stopped. Saving does not start or restart the game. Plugin configuration still takes effect as that plugin requires. The panel indicates pending configuration or an unavailable address until a direct address is confirmed. Wait for the confirmed address before configuring clients. Stopping a server retains its configured port allocations. Removing an entry revokes its mapping and releases the corresponding allocation.
 
@@ -158,7 +158,7 @@ Additional connections go directly to the node running the server, without using
 
 ### Disk usage and quota {#disk-quota}
 
-The storage size selected when creating a server is also its disk quota, and it can later be changed in **Edit Server Config**. The new storage must exceed the usage of the latest measurement. A server stopped because its disk was full can be started again once the storage is raised and the platform confirms a new measurement below the quota. The change only moves the disk quota the platform enforces; the world volume keeps the size requested at creation, so on a storage class that enforces capacity the storage should not exceed the volume's actual size. The console and file page show usage, the quota and the latest measurement time, including while the server is stopped. Usage counts allocated bytes in the world volume, including worlds, plugins, configuration, logs and temporary files within that volume. Sparse files count only allocated space, hard links count once, and symbolic links are not followed.
+The storage size selected when creating a server is also its disk quota, and it can later be changed on the **Settings** tab. The new storage must exceed the usage of the latest measurement. A server stopped because its disk was full can be started again once the storage is raised and the platform confirms a new measurement below the quota. The change only moves the disk quota the platform enforces; the world volume keeps the size requested at creation, so on a storage class that enforces capacity the storage should not exceed the volume's actual size. The **Monitoring** tab and the file page show usage, the quota and the latest measurement time, including while the server is stopped. Usage counts allocated bytes in the world volume, including worlds, plugins, configuration, logs and temporary files within that volume. Sparse files count only allocated space, hard links count once, and symbolic links are not followed.
 
 At 90% of the quota, the console displays a warning. Server owners with problem notifications enabled also receive an email. At 100%, the platform stops the server through the normal shutdown process, records the `DiskFull` stop reason, and refuses starts, start retries and restarts. File management and downloads remain available for cleanup. Once the platform confirms a new successful measurement below the quota, the server can be started again; it does not start automatically.
 
@@ -183,7 +183,7 @@ A server is in one of these states:
 
 A server starts:
 
-- When you select **Wake** on its console page.
+- When you select **Wake** at the top of the server page.
 - When a player joins its address, as the [autostart policy](#autostart) allows.
 - When a player runs `/felis go <server>` in game or clicks its tile in the lobby menu.
 - When a scheduled start task runs. See [Scheduled tasks](#schedules).
@@ -194,17 +194,17 @@ While the server starts, its console page shows the current stage and diagnostic
 
 ### Stopping and idle auto-stop {#stop}
 
-Select **Stop** on the console page. If players are online, the server sends them an in-game notice and disconnects them 30 seconds later before stopping; starting the server again within that window calls the stop off. When the online count cannot be read, the panel warns that players may still be connected and asks for confirmation.
+Select **Stop** at the top of the server page. If players are online, the server sends them an in-game notice and disconnects them 30 seconds later before stopping; starting the server again within that window calls the stop off. When the online count cannot be read, the panel warns that players may still be connected and asks for confirmation.
 
-A server whose online count stays at zero for the configured time stops automatically and releases its memory and CPU; the next join wakes it according to the autostart policy. New servers use 600 seconds. Admins change it, or set it to **Never**, under **Edit Server Config → Idle auto-stop**. The online count is read over RCON; while it cannot be read, idle auto-stop pauses and resumes once the count is readable again. The login space and the lobby never stop when idle.
+A server whose online count stays at zero for the configured time stops automatically and releases its memory and CPU; the next join wakes it according to the autostart policy. New servers use 600 seconds. Server owners and Admins turn **Idle auto-stop** off on the **Settings** tab, or choose how long the server waits without players. The online count is read over RCON; while it cannot be read, idle auto-stop pauses and resumes once the count is readable again. The login space and the lobby never stop when idle.
 
 ### Restarting {#restart}
 
-The console page shows **Restart** while the server is running. Restarting saves and shuts down the current process, then starts the server again. The panel asks for confirmation when players are online or the player count cannot be read. Restart requests are refused during maintenance such as backups, restores or file changes.
+The top of the server page shows **Restart** while the server is running. Restarting saves and shuts down the current process, then starts the server again. The panel asks for confirmation when players are online or the player count cannot be read. Restart requests are refused during maintenance such as backups, restores or file changes.
 
 ### Force stop {#force-stop}
 
-When the server process is unresponsive or a normal stop has not completed, the server owner or an Admin can select **More actions → Force stop** on the console page and confirm after reading the data loss warning. Force stop terminates the process immediately, without saving or waiting for the shutdown countdown or termination grace period. Online players will be disconnected. Changes since the last save may be lost.
+When the server process is unresponsive or a normal stop has not completed, the server owner or an Admin can select **Force stop** in the **Danger zone** of the **Settings** tab and confirm after reading the data loss warning. Force stop terminates the process immediately, without saving or waiting for the shutdown countdown or termination grace period. Online players will be disconnected. Changes since the last save may be lost.
 
 After the request is accepted, the platform processes the stop and the panel continues updating the server state. The server cannot start again until the stop request has been processed. Force stop requires the operator; if the operator is unresponsive, the platform Owner uses the emergency stop below.
 
@@ -212,7 +212,7 @@ After the request is accepted, the platform processes the stop and the panel con
 
 When a normal stop does not respond, the Owner can use an emergency stop:
 
-1. On the server's console page, select **More actions → Emergency stop**.
+1. On the server's **Settings** tab, select **Emergency stop** in the **Danger zone**.
 2. Type the server's name and verify your identity.
 
 The emergency stop first saves the stop intent, then sets the workload's replicas directly to zero, bypassing the game process and the operator while keeping the normal termination grace period. World data is not deleted; unsaved changes may be lost. An accepted request does not prove that the process has exited: the panel keeps checking the game pod and shows **Stopping** until it has gone.
@@ -233,20 +233,20 @@ When the server process exits unexpectedly (including being killed for running o
 - Once they exceed the limit, the server stops, and its console page shows why, together with the cause of the latest crash.
 - A crash more than an hour after the previous one starts the count over.
 
-Admins and server owners set this under **Edit Server Config → Running and recovery**:
+Admins and server owners set this under **Start and run** on the **Settings** tab:
 
 | Setting | Default | Description |
 | --- | --- | --- |
 | Restart after a crash | On | When off, the platform stops the server once it detects that the process exited. The process may already have restarted briefly before the stop. |
 | Restart at most | 3 times | From 1 to 20. |
 
-A server stopped for crashing is not woken by players joining. Its owner or an Admin fixes the cause and selects **Wake** on the console page, which also resets the crash count. Exiting the process with an in-game command such as `/stop` also counts as an unexpected exit; to stop a server, use **Stop** on the console page.
+A server stopped for crashing is not woken by players joining. Its owner or an Admin fixes the cause and selects **Wake** at the top of the server page, which also resets the crash count. Exiting the process with an in-game command such as `/stop` also counts as an unexpected exit; to stop a server, use **Stop** at the top of the server page.
 
 The **Activity** list on the server's **Monitoring** tab shows the latest starts, stops, crashes, failed starts and host restarts.
 
 ### Resuming after a host restart {#resume-after-host-restart}
 
-After a power loss or a restart of the host, the platform services start with the host, and servers that were running before resume by default. With **Resume after a host restart** turned off under **Edit Server Config → Running and recovery**, the server stays stopped once the host is back and its console page shows why; select **Wake** when it is needed, and players joining wake it under its autostart policy. A process exit caused by a host restart does not count as a crash.
+After a power loss or a restart of the host, the platform services start with the host, and servers that were running before resume by default. With **Resume after a host restart** turned off on the **Settings** tab, the server stays stopped once the host is back and its console page shows why; select **Wake** when it is needed, and players joining wake it under its autostart policy. A process exit caused by a host restart does not count as a crash.
 
 ::: tip
 Whether the host powers on by itself after a power loss depends on the hardware or virtualization platform, for example the BIOS setting Restore on AC Power Loss. Unattended deployments need that setting turned on at the host.
@@ -256,7 +256,7 @@ The login space and the lobby always restart and resume after a host restart, wh
 
 ## Email notifications {#notifications}
 
-When the platform has a [mail relay](/en/guide/administration#mail-relay), server events are mailed to the verified email of the server's owner; for an unclaimed server, to the platform owners. Admins and server owners choose the events under **Edit Server Config → Email notifications**:
+When the platform has a [mail relay](/en/guide/administration#mail-relay), server events are mailed to the verified email of the server's owner; for an unclaimed server, to the platform owners. Admins and server owners turn on the notifications they want under **Email notifications** on the **Settings** tab:
 
 | Notification | Default | Events |
 | --- | --- | --- |
@@ -276,7 +276,7 @@ The autostart policy decides who may wake a sleeping server. The server owner an
 | Public — any player join wakes it | Any player who joins. |
 | Wake list — previous players with wake permission can start the server | The server owner, Admins, and players on the wake list who hold wake permission. |
 
-Admins set the policy under **Edit Server Config**. With the **Wake list** policy, a player is added to the list on their first join. The server owner or an Admin selects **Revoke** under **Player management → Wake list** to take the permission away and **Allow again** to restore it. Rejoining does not restore a revoked permission. When the server changes owner, the wake list is cleared.
+Server owners and Admins choose the policy under **Autostart policy** on the **Settings** tab. With the **Wake list** policy, a player is added to the list on their first join. The server owner or an Admin selects **Revoke** under **Player management → Wake list** to take the permission away and **Allow again** to restore it. Rejoining does not restore a revoked permission. When the server changes owner, the wake list is cleared.
 
 A player without permission to wake the server is told in game that they cannot start it. When the platform is at its running server limit, the player is told to try again later.
 
@@ -331,7 +331,7 @@ The page offers presets and keeps a **Recent Actions History**, from which **Rev
 
 ## Installed plugins and mods {#extensions}
 
-Server owners and Admins can open **Plugins and mods** from the console sidebar to inspect `.jar` and `.jar.disabled` files in `plugins/` and `mods/`. The page is available while running or fully stopped; wait for startup, shutdown or maintenance to finish before making changes.
+Server owners and Admins can open the server's **Plugins and mods** tab to inspect `.jar` and `.jar.disabled` files in `plugins/` and `mods/`. The page is available while running or fully stopped; wait for startup, shutdown or maintenance to finish before making changes.
 
 The list shows the filename, size, enabled state, and the name, version, authors and loaders declared in readable manifests. It supports Bukkit, Paper, Fabric, Quilt, Forge, NeoForge and Velocity manifests, retaining multiple mod or loader declarations in one JAR. Files with unreadable metadata remain listed and can be disabled or deleted. Consult the server console for actual loading status.
 
@@ -463,14 +463,14 @@ For retention, live backups and restore points in detail, see [World backups](/e
 
 ## Forwarding mode {#forwarding-mode}
 
-The forwarding mode decides how the game proxy passes the player's identity to a server. The Owner sets it under **Forwarding mode** on the server's console page; the login space and the lobby do not offer it.
+The forwarding mode decides how the game proxy passes the player's identity to a server. The Owner sets it under **Forwarding mode** in the **Network** section of the server's **Settings** tab; the login space and the lobby do not offer it.
 
 | Mode | Use |
 | --- | --- |
 | Modern forwarding | The default. Servers on 1.13 or newer use modern forwarding, signed with the proxy's secret. |
 | Legacy forwarding (BungeeCord) | Older backends behind ViaVersion. |
 
-1. Open **Forwarding mode** on the server's console page.
+1. On the server's **Settings** tab, select **Change forwarding** in the **Forwarding mode** row.
 2. Tick or clear **Use legacy forwarding** and select **Save**.
 3. Verify your identity. The proxy applies the change at its next server-list refresh, within 15 seconds.
 
@@ -489,7 +489,7 @@ A server owner can give up a server; Admins can also delete it:
 | Give up | The world is archived and its storage deleted; the server is released for other accounts to claim. |
 | Delete | The world is archived, and its storage and the server record are deleted; the name and subdomain can be reused. |
 
-1. On the server's console page, in the **Give up server** card, select **Give up** or **Delete**.
+1. On the server's **Settings** tab, select **Give up** or **Delete** in the **Danger zone**.
 2. Type the server's name and confirm.
 
 The server then stops and is processed at the next daily reclaim run; until then it stays stopped and cannot be started. Archives are kept for 90 days by default. Before the run, select **Cancel request** on the console to withdraw it; a deletion requested by an Admin can be cancelled only by an Admin. A server that was given up counts toward the account's quota until it has been processed.

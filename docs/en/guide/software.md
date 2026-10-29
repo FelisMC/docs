@@ -88,7 +88,7 @@ On every start the platform writes `eula.txt`, and `server-port`, `online-mode` 
 
 ## Changing the core or version {#change}
 
-Server owners and administrators select "Change server software" in "Edit Server Config" on the server's console page.
+Server owners and administrators select "Change server software" in the **Server software** section of the server's **Settings** tab.
 
 1. Select the core, game version, build and Java version.
 2. When changing the core or game version, select "I've backed up the world — change the software". Changing only the build or Java version needs no confirmation.
@@ -110,7 +110,7 @@ For a new server:
 
 To upload the jar later, select "Enter a path" under "Jar file" and enter where the jar will be.
 
-For an existing server, select "Change server software" and "Custom jar" in "Edit Server Config". While the server is stopped, "Jar file" offers three ways:
+For an existing server, select "Change server software" and "Custom jar" on the **Settings** tab. While the server is stopped, "Jar file" offers three ways:
 
 - "In the server": lists the jar files in the server's root folder to choose from; a lone jar is selected automatically.
 - "Upload": choose a new jar, which is uploaded to the root folder on save, replacing a file of the same name.
