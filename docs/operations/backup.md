@@ -561,7 +561,7 @@ sudo felis restore-host -yes -take-over      # rebuild, then make this host writ
    sudo felis offsite fetch-uploads
    ```
 
-   该命令将最新上传列表（更早的列表用 `-at <stamp>` 指定）中的每个上传写入 `felis-uploads` 卷，逐个核对 sha256，已存在的上传保持不变。
+   该命令将最新上传列表（更早的列表用 `-at <stamp>` 指定）中的每个上传写入 `felis-uploads` 卷，逐个核对 sha256，已存在的上传保持不变。旧主机从未有过上传内容时，存储桶中没有上传列表，命令报告无需恢复并正常结束。
 
 6. 恢复数据库并重建服务器：
 
