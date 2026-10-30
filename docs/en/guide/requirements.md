@@ -173,7 +173,7 @@ The host's clock must be kept by NTP. Sign-in codes and sessions expire by it, S
 Before it changes anything, the installer checks the host, reports every problem at once, and stops with the host untouched. It checks:
 
 - **Platform**: the architecture (`x86_64` or `aarch64`), systemd as init, and the memory cgroup controller k3s needs. On a Raspberry Pi, add `cgroup_memory=1 cgroup_enable=memory` to `/boot/firmware/cmdline.txt` and reboot.
-- **Memory**: less than 1.75 GiB is refused (a "2 GB" VPS passes); a fresh installation with less than 3.5 GiB uses the [small-host profile](#small-hosts), and the standard profile warns.
+- **Memory**: less than 1.5 GiB is refused (a "2 GB" cloud host, which reports 1.6–1.9 GiB after the kernel's share, passes); a fresh installation with less than 3.5 GiB uses the [small-host profile](#small-hosts), and the standard profile warns.
 - **Free disk** on each filesystem the installer writes to, summed when several directories share one filesystem:
 
   | Directory | Free space needed (first installation) | On a rerun or a reused directory |
