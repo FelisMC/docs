@@ -124,7 +124,7 @@ Keep `FELIS_OFFSITE_KEY` somewhere other than the host. Without it, nothing in t
 | --- | --- | --- |
 | `FELIS_GAME_STACK` | `pinned` | `pinned` installs the Limbo, Paper, LuckPerms and Velocity builds the release pins, each checked against its sha256. `latest` resolves upstream's newest builds on every run and builds the game images on the host. |
 | `FELIS_VELOCITY_VERSION` | The pinned version | Another Velocity version installs the newest build of that version. |
-| `FELIS_VELOCITY_XMX` | `1G` | Maximum heap of the game proxy, written `<n>M` or `<n>G`, at least `256M`. Read on every run; a change restarts the proxy, which disconnects every player. The panel can set it. |
+| `FELIS_VELOCITY_XMX` | `1G`, `256M` on the small-host profile | Maximum heap of the game proxy, written `<n>M` or `<n>G`, at least `256M`. Read on every run; a change restarts the proxy, which disconnects every player. The panel can set it. |
 | `FELIS_VELOCITY_FORK_JAR` | — | Path to a Felis-Legacy Velocity fork build, installed as the proxy instead of stock Velocity. |
 | `FELIS_VELOCITY_FORK_JAR_SHA256` | — | sha256 of that jar. Required when the jar is set; a mismatch stops the install. |
 | `FELIS_LEGACY_FORWARDING_SERVERS` | `legacy18` | Comma-separated servers that always receive the player's identity through the handshake address, in addition to servers set to legacy forwarding. See [Forwarding mode](/en/guide/servers#forwarding-mode). |
@@ -162,6 +162,7 @@ The installer's worker, controller-join and reconfigure modes are started by [`f
 | Variable | Default | Description |
 | --- | --- | --- |
 | `FELIS_PREFLIGHT` | `strict` | `strict` stops on any preflight problem and lists them all. `warn` reports them and installs anyway, for a host the checks misjudge. |
+| `FELIS_HOST_PROFILE` | `auto` | Host profile. `auto` picks `small` for a fresh installation with less than 3.5 GiB of memory, and later runs keep the recorded profile; `small` deploys no lobby and shrinks the components' memory; `standard` is the standard profile. See [Small hosts](/en/guide/requirements#small-hosts). |
 | `FELIS_NO_SETUP` | — | `1` ends a full install at its summary. Otherwise an install on a terminal that leaves no Owner continues into `felis setup`. |
 | `FELIS_MANAGE_TIME_SYNC` | `1` | `0` leaves the host's clock alone. By default the installer turns NTP on, installing chrony when nothing else can, and waits for synchronization. |
 | `FELIS_MANAGE_JOURNAL` | `1` | `0` leaves journald alone. By default the installer makes the system journal persistent. |
@@ -317,7 +318,8 @@ The installer sets these keys on every run. Change them through the installer va
 | `[database]` | `url` | Connection URL, including the database password. Change the password with [`felis rotate-token db`](/en/reference/cli#rotate-token). |
 | `[database]` | `deployment` | `felis/felis-postgres`, in the host copy only: `felis db` runs the PostgreSQL tools inside that pod. |
 | `[k8s]` | `namespace` | `minecraft`, the namespace of the game servers. |
-| `[velocity]` | `login_image`, `lobby_image` | Images of the login space and the lobby (`FELIS_LIMBO_IMAGE`, `FELIS_LOBBY_IMAGE`). |
+| `[velocity]` | `login_image`, `lobby_image` | Images of the login space and the lobby (`FELIS_LIMBO_IMAGE`, `FELIS_LOBBY_IMAGE`). An empty `lobby_image` means the platform has no lobby. |
+| `[velocity]` | `login_memory` | Memory of the login space as a Kubernetes quantity; empty means `512Mi`. The small-host profile writes `320Mi`. |
 | `[velocity]` | `game_port` | `FELIS_GAME_PORT`. |
 | `[velocity]` | `game_version` | The Minecraft Java Edition version the login space and lobby images were built for. The panel shows the client version players need from it, and reports it as unknown when empty. |
 | `[registry]` | `url`, `build_namespace` | `registry.felis.svc:5000` and `felis-build`. |
@@ -340,6 +342,7 @@ The installer sets these keys on every run. Change them through the installer va
 | `uploads-s3-access-key`, `uploads-s3-secret-key` | Upload bucket credentials. | `felis setup`, panel | Yes |
 | `watchdog-heartbeat-url` | Heartbeat URL, mode 0600. | Installer | Yes: the path is the check's key |
 | `host-settings.env` | Installer settings saved in the panel: `FELIS_DB_BACKUP_TIME`, `FELIS_DB_BACKUP_KEEP`, `FELIS_VELOCITY_XMX`. | Panel | — |
+| `host-profile` | The host profile (`small` or `standard`), kept by later installer runs. | Installer | — |
 | `panel-tls.crt`, `panel-tls.key` | TLS certificate and key of the panel. The installer issues a self-signed pair valid for 825 days. | Installer, `felis domain set` | The key |
 | `cloudflared.yml` | Cloudflare tunnel configuration. | Cloudflare step of `felis setup`, panel | — |
 | `ha.env` | Controller high availability settings, kept for later installer runs and updates. | Installer | — |

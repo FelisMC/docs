@@ -124,7 +124,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | --- | --- | --- |
 | `FELIS_GAME_STACK` | `pinned` | `pinned` 安装发布版固定的 Limbo、Paper、LuckPerms 和 Velocity 构建，每个都按其 sha256 校验。`latest` 每次运行都解析上游的最新构建，并在主机上构建游戏镜像。 |
 | `FELIS_VELOCITY_VERSION` | 固定版本 | 指定其他 Velocity 版本时，安装该版本的最新构建。 |
-| `FELIS_VELOCITY_XMX` | `1G` | 游戏代理的最大堆内存，格式为 `<n>M` 或 `<n>G`，最小 `256M`。每次运行都会读取；修改会重启代理，所有玩家断开连接。可在面板中设置。 |
+| `FELIS_VELOCITY_XMX` | `1G`，小内存配置为 `256M` | 游戏代理的最大堆内存，格式为 `<n>M` 或 `<n>G`，最小 `256M`。每次运行都会读取；修改会重启代理，所有玩家断开连接。可在面板中设置。 |
 | `FELIS_VELOCITY_FORK_JAR` | — | Felis-Legacy Velocity fork 构建的路径，用于代替官方 Velocity 作为代理安装。 |
 | `FELIS_VELOCITY_FORK_JAR_SHA256` | — | 该 jar 的 sha256。设置 jar 时必须提供；不一致时安装停止。 |
 | `FELIS_LEGACY_FORWARDING_SERVERS` | `legacy18` | 以逗号分隔的服务器列表，这些服务器始终通过握手地址接收玩家身份；设为旧式转发的服务器另外加入。见[转发方式](/guide/servers#forwarding-mode)。 |
@@ -162,6 +162,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `FELIS_PREFLIGHT` | `strict` | `strict` 在发现任何预检问题时停止，并列出全部问题。`warn` 只报告问题并继续安装，用于预检判断有误的主机。 |
+| `FELIS_HOST_PROFILE` | `auto` | 主机配置。`auto` 在全新安装且内存低于 3.5 GiB 时使用 `small`，之后的运行沿用已记录的配置；`small` 不部署大厅并缩小各组件内存；`standard` 为标准配置。见[小内存主机](/guide/requirements#small-hosts)。 |
 | `FELIS_NO_SETUP` | — | 设为 `1` 时，完整安装在输出汇总后结束。未设置时，在终端上运行且尚无所有者的安装会接着进入 `felis setup`。 |
 | `FELIS_MANAGE_TIME_SYNC` | `1` | 设为 `0` 时不管理主机时钟。默认情况下安装器启用 NTP（无其他可用方式时安装 chrony），并等待时钟同步。 |
 | `FELIS_MANAGE_JOURNAL` | `1` | 设为 `0` 时不管理 journald。默认情况下安装器将系统日志设为持久保存。 |
@@ -317,7 +318,8 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 | `[database]` | `url` | 连接地址，包含数据库密码。使用 [`felis rotate-token db`](/reference/cli#rotate-token) 更换密码。 |
 | `[database]` | `deployment` | `felis/felis-postgres`，仅主机副本包含：`felis db` 在该 Pod 中运行 PostgreSQL 工具。 |
 | `[k8s]` | `namespace` | `minecraft`，游戏服务器所在的命名空间。 |
-| `[velocity]` | `login_image`、`lobby_image` | 登录空间和大厅的镜像（`FELIS_LIMBO_IMAGE`、`FELIS_LOBBY_IMAGE`）。 |
+| `[velocity]` | `login_image`、`lobby_image` | 登录空间和大厅的镜像（`FELIS_LIMBO_IMAGE`、`FELIS_LOBBY_IMAGE`）。`lobby_image` 为空表示平台不部署大厅。 |
+| `[velocity]` | `login_memory` | 登录空间的内存，Kubernetes 数量格式，为空时为 `512Mi`。小内存配置写入 `320Mi`。 |
 | `[velocity]` | `game_port` | `FELIS_GAME_PORT`。 |
 | `[velocity]` | `game_version` | 登录空间和大厅镜像构建时对应的 Minecraft Java 版版本。面板据此显示玩家所需的客户端版本；为空时显示为未知。 |
 | `[registry]` | `url`、`build_namespace` | `registry.felis.svc:5000` 和 `felis-build`。 |
@@ -340,6 +342,7 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 | `uploads-s3-access-key`、`uploads-s3-secret-key` | 上传存储桶的凭据。 | `felis setup`、面板 | 是 |
 | `watchdog-heartbeat-url` | 心跳地址，权限 0600。 | 安装器 | 是：路径即该检查的密钥 |
 | `host-settings.env` | 在面板中保存的安装器设置：`FELIS_DB_BACKUP_TIME`、`FELIS_DB_BACKUP_KEEP`、`FELIS_VELOCITY_XMX`。 | 面板 | — |
+| `host-profile` | 主机配置（`small` 或 `standard`），供之后的安装器运行沿用。 | 安装器 | — |
 | `panel-tls.crt`、`panel-tls.key` | 面板的 TLS 证书和私钥。安装器签发有效期 825 天的自签名证书。 | 安装器、`felis domain set` | 私钥是 |
 | `cloudflared.yml` | Cloudflare 隧道配置。 | `felis setup` 的 Cloudflare 步骤、面板 | — |
 | `ha.env` | 主控高可用设置，供之后的安装器运行和更新沿用。 | 安装器 | — |

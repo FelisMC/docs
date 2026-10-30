@@ -46,24 +46,42 @@ Approximate memory use of an idle platform:
 | PostgreSQL | about 40 MiB, plus page cache |
 | **Infrastructure total** | **about 1 GB** |
 
-The system servers come on top: the login space (Limbo, pod limit 512 MiB, about 0.16 GB in use) and the lobby (Paper, pod limit 1 GiB, about 0.7–0.85 GB in use). Every game server adds the memory its owner assigned to it: the pod's limit equals its request, and the Java heap is derived from it. Quotas cap the memory per user ([Quotas](/en/guide/administration#quotas)).
+The system servers come on top: the login space (Limbo, pod limit 512 MiB, about 0.16 GB in use) and the lobby (Paper, pod limit 1 GiB, about 0.7–0.85 GB in use). The [small-host profile](#small-hosts) has no lobby and limits the login space's pod to 320 MiB. Every game server adds the memory its owner assigned to it: the pod's limit equals its request, and the Java heap is derived from it. Quotas cap the memory per user ([Quotas](/en/guide/administration#quotas)).
 
-A release installation builds nothing on the host. When the installer does build images on the host, its peak is the image builds (Docker and a Gradle container); afterwards it stops Docker, so that memory returns to the servers. On a node without swap, the installer creates a `/swapfile` as large as physical memory (at least 2 GiB) to hold the memory of [hibernated](/en/guide/servers#hibernate) servers; it skips the file when the root filesystem would have less than 10% free after the installation. Existing swap is left as it is, and the installer warns when it is smaller than physical memory.
+A release installation builds nothing on the host. When the installer does build images on the host, its peak is the image builds (Docker and a Gradle container); afterwards it stops Docker, so that memory returns to the servers. On a node without swap, the installer creates a `/swapfile` as large as physical memory (at least 2 GiB) to hold the memory of [hibernated](/en/guide/servers#hibernate) servers; it skips the file when the root filesystem would have less than 10% free after the installation. Existing swap is left as it is, and the installer warns when it is smaller than physical memory. Some cloud images set `vm.swappiness` to 0, which keeps the kernel from swapping until memory runs out, so the host stalls reclaiming its page cache; when swap is active and the value is 0, the installer restores the kernel default of 60, writes it to `/etc/sysctl.d/99-zz-felis-swappiness.conf` and reports the change.
 
 ### Recommendations {#recommendations}
 
 | Concurrent players | Game servers running | CPU | RAM | `FELIS_VELOCITY_XMX` |
 | --- | --- | --- | --- | --- |
+| up to 10 | 1 small | 2 vCPU | 2 GB + 2 GB swap, [small-host profile](#small-hosts) | 256M (that profile's default) |
 | up to 20 | 1–2 small | 2 vCPU | 4 GB + 2 GB swap | 1G (default) |
 | up to 100 | 3–5 | 4 vCPU | 8–16 GB | 1G |
 | up to 300 | 5–10 | 8 vCPU | 16–32 GB | 2G |
 | over 300 | more | 8+ vCPU | 32 GB or more | 3G–4G |
 
-The player counts are planning figures: a Minecraft server's cost depends mostly on what its players do (view distance, redstone, mods). Size RAM as follows: about 1 GB for the infrastructure, about 1 GB for the login space and lobby, plus the sum of the servers expected to run at the same time, then add a quarter for the page cache and PostgreSQL.
+The player counts are planning figures: a Minecraft server's cost depends mostly on what its players do (view distance, redstone, mods). Size RAM as follows: about 1 GB for the infrastructure, about 1 GB for the login space and lobby (about 0.2 GB for the login space alone on the small-host profile), plus the sum of the servers expected to run at the same time, then add a quarter for the page cache and PostgreSQL.
+
+### Small hosts {#small-hosts}
+
+A host with less than 3.5 GiB of memory gets the small-host profile on its first installation, which leaves room for one small server:
+
+- No lobby is deployed. Players authenticate in the login space and then enter their destination server directly, waiting in the login space while it starts ([Player entry policy](/en/guide/players#entry-policy));
+- The login space's pod is limited to 320 MiB;
+- The game proxy's heap ceiling defaults to `256M` ([Game proxy memory](#proxy-heap));
+- k3s runs without the Helm controller, which Felis does not use, and with a 400 MiB soft limit on its Go heap.
+
+The installer variable `FELIS_HOST_PROFILE` selects the profile:
+
+| Value | Behavior |
+| --- | --- |
+| `auto` (default) | `small` for a fresh installation with less than 3.5 GiB of memory, otherwise `standard`. Later runs keep the profile recorded in `/etc/felis/host-profile`, also after the host gains memory. |
+| `small` | The small-host profile. The installer refuses to switch an installation that has a lobby to it. |
+| `standard` | The standard profile. After a small-host installation is rerun with this value, the lobby can be created under **Login & lobby**. |
 
 ### Game proxy memory {#proxy-heap}
 
-The game proxy (Velocity) needs little memory per player. Its heap ceiling is `FELIS_VELOCITY_XMX`: default `1G`, at least `256M`, written as `<n>M` or `<n>G`. Raise it when `journalctl -u felis-velocity` shows long garbage-collection pauses or `OutOfMemoryError`.
+The game proxy (Velocity) needs little memory per player. Its heap ceiling is `FELIS_VELOCITY_XMX`: default `1G`, or `256M` on the [small-host profile](#small-hosts); at least `256M`, written as `<n>M` or `<n>G`. Raise it when `journalctl -u felis-velocity` shows long garbage-collection pauses or `OutOfMemoryError`.
 
 - In the panel: **Platform settings → Access and security → Game proxy**, set **Heap ceiling** (256M to 64G) and select **Apply**. The value is kept across installer reruns and updates.
 - On the command line: rerun the installer with `FELIS_VELOCITY_XMX`, for example `FELIS_VELOCITY_XMX=2G`. The installer reads the variable on every run.
@@ -155,7 +173,7 @@ The host's clock must be kept by NTP. Sign-in codes and sessions expire by it, S
 Before it changes anything, the installer checks the host, reports every problem at once, and stops with the host untouched. It checks:
 
 - **Platform**: the architecture (`x86_64` or `aarch64`), systemd as init, and the memory cgroup controller k3s needs. On a Raspberry Pi, add `cgroup_memory=1 cgroup_enable=memory` to `/boot/firmware/cmdline.txt` and reboot.
-- **Memory**: less than 1.75 GiB is refused (a "2 GB" VPS passes); less than 3.5 GiB is a warning.
+- **Memory**: less than 1.75 GiB is refused (a "2 GB" VPS passes); a fresh installation with less than 3.5 GiB uses the [small-host profile](#small-hosts), and the standard profile warns.
 - **Free disk** on each filesystem the installer writes to, summed when several directories share one filesystem:
 
   | Directory | Free space needed (first installation) | On a rerun or a reused directory |

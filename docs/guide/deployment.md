@@ -74,7 +74,8 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | `FELIS_PANEL_NODEPORT` | `30443` | 面板与 API 的本机 HTTPS 端口。 |
 | `FELIS_PREFLIGHT` | `strict` | 设为 `warn` 时，安装前检查发现的问题仅作为警告，安装继续进行。 |
 | `FELIS_WORLDS_HOST_PATH` | 空 | 世界卷所在的节点目录（k3s 为 `/var/lib/rancher/k3s/storage`）。设置后启用闲置世界回收，见[世界回收](/operations/backup#world-cleanup)。 |
-| `FELIS_VELOCITY_XMX` | `1G` | 游戏代理的最大堆内存，至少 `256M`。 |
+| `FELIS_VELOCITY_XMX` | `1G`，小内存配置为 `256M` | 游戏代理的最大堆内存，至少 `256M`。 |
+| `FELIS_HOST_PROFILE` | `auto` | 主机配置：`auto`、`small` 或 `standard`，见[小内存主机](/guide/requirements#small-hosts)。 |
 | `FELIS_DB_BACKUP_TIME` | `*-*-* 03:30:00` | 数据库每日备份时间，使用 systemd 日历表达式。 |
 | `FELIS_DB_BACKUP_KEEP` | `14` | 保留的每日数据库备份份数。 |
 | `FELIS_OFFSITE_BUCKET`、`FELIS_OFFSITE_ENDPOINT` | 空 | 异地副本的存储桶与服务地址，另需 `FELIS_OFFSITE_ACCESS_KEY` 与 `FELIS_OFFSITE_SECRET_KEY`。设置后启用异地副本，见[异地副本](/operations/backup#offsite)。 |
@@ -89,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 - k3s 单节点集群，以及运行在其中的 PostgreSQL（`felis-postgres`，数据位于 `/var/lib/felis/postgres`）、Felis API、operator 与集群内镜像仓库。
 - 游戏代理（Velocity），以 systemd 服务 `felis-velocity` 运行在主机上，使用安装器下载的 Temurin JRE，监听游戏端口 25565。
-- 登录空间（`login`）与正式大厅（`lobby`）两个系统服务器，由设置向导创建。
+- 登录空间（`login`）与正式大厅（`lobby`）两个系统服务器，由设置向导创建；[小内存配置](/guide/requirements#small-hosts)只创建登录空间。
 - 主机节点操作服务 `felis-node-control.service`，供面板执行主机运维任务。
 - systemd 定时任务：数据库每日备份（`felis-db-backup.timer`）、看门狗巡检（`felis-watchdog.timer`，每 2 分钟一次）、版本检查（`felis-update-check.timer`，每天一次），以及配置后启用的异地副本同步（`felis-offsite.timer`，每小时一次）。
 - 已启用的主机防火墙（firewalld 或 ufw）中放行所需端口的规则、NTP 时间同步，以及持久化的系统日志（默认上限 1G）。

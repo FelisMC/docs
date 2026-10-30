@@ -168,6 +168,8 @@ When the destination is offline:
 
 Until a policy is first saved, Felis uses the default: route by hostname, require panel account linking, start automatically and wait in the lobby.
 
+A platform without a lobby ([small-host profile](/en/guide/requirements#small-hosts)) offers no **Lobby** entry mode, and web sign-in and startup waits both take place in the login space: after signing in, players enter their destination server directly, and wait in the login space while it starts. With **Route by hostname** and no default destination, a connection whose hostname matches no server is told after sign-in to reconnect using a server's address. The default policy waits in the login space.
+
 ### Single-server deployment {#single-server}
 
 When you run a single server, players can go straight to it:

@@ -74,7 +74,8 @@ The install command can be run again. A rerun converges the host to the desired 
 | `FELIS_PANEL_NODEPORT` | `30443` | Local HTTPS port of the panel and API. |
 | `FELIS_PREFLIGHT` | `strict` | `warn` reports preflight problems as warnings and installs anyway. |
 | `FELIS_WORLDS_HOST_PATH` | empty | Node directory that holds the world volumes (`/var/lib/rancher/k3s/storage` on k3s). Setting it enables idle world cleanup. See [World cleanup](/en/operations/backup#world-cleanup). |
-| `FELIS_VELOCITY_XMX` | `1G` | Maximum heap of the game proxy, at least `256M`. |
+| `FELIS_VELOCITY_XMX` | `1G`, `256M` on the small-host profile | Maximum heap of the game proxy, at least `256M`. |
+| `FELIS_HOST_PROFILE` | `auto` | Host profile: `auto`, `small` or `standard` ([Small hosts](/en/guide/requirements#small-hosts)). |
 | `FELIS_DB_BACKUP_TIME` | `*-*-* 03:30:00` | Time of the daily database backup, as a systemd calendar expression. |
 | `FELIS_DB_BACKUP_KEEP` | `14` | Number of daily database backups kept. |
 | `FELIS_OFFSITE_BUCKET`, `FELIS_OFFSITE_ENDPOINT` | empty | Bucket and endpoint of the off-site copy, together with `FELIS_OFFSITE_ACCESS_KEY` and `FELIS_OFFSITE_SECRET_KEY`. Setting them enables the off-site copy. See [Off-site copy](/en/operations/backup#offsite). |
@@ -89,7 +90,7 @@ A full installation sets up these components on the host:
 
 - A single-node k3s cluster running PostgreSQL (`felis-postgres`, with its data in `/var/lib/felis/postgres`), the Felis API, the operator and the in-cluster registry.
 - The game proxy (Velocity), which runs on the host as the systemd service `felis-velocity` on a Temurin JRE the installer downloads, and listens on game port 25565.
-- Two system servers, the login space (`login`) and the lobby (`lobby`), created by the setup wizard.
+- Two system servers, the login space (`login`) and the lobby (`lobby`), created by the setup wizard; the [small-host profile](/en/guide/requirements#small-hosts) creates the login space only.
 - The host node operations service `felis-node-control.service`, through which the panel runs host operations.
 - systemd timers: the daily database backup (`felis-db-backup.timer`), the watchdog check (`felis-watchdog.timer`, every 2 minutes), the version check (`felis-update-check.timer`, daily) and, once configured, the off-site copy (`felis-offsite.timer`, hourly).
 - Rules that open the required ports in an active host firewall (firewalld or ufw), NTP time synchronization, and a persistent system journal (capped at 1G by default).
