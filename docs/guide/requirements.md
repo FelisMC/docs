@@ -54,7 +54,6 @@ CentOS Stream 9（aarch64，启用 firewalld 且 SELinux 为 enforcing）和 Ubu
 
 | 同时在线玩家 | 同时运行的游戏服务器 | CPU | 内存 | `FELIS_VELOCITY_XMX` |
 | --- | --- | --- | --- | --- |
-| 不超过 10 | 1 台小型服务器 | 2 vCPU | 2 GB + 2 GB swap，[小内存配置](#small-hosts) | 256M（该配置的默认值） |
 | 不超过 20 | 1–2 台小型服务器 | 2 vCPU | 4 GB + 2 GB swap | 1G（默认） |
 | 不超过 100 | 3–5 台 | 4 vCPU | 8–16 GB | 1G |
 | 不超过 300 | 5–10 台 | 8 vCPU | 16–32 GB | 2G |
@@ -64,12 +63,14 @@ CentOS Stream 9（aarch64，启用 firewalld 且 SELinux 为 enforcing）和 Ubu
 
 ### 小内存主机 {#small-hosts}
 
-内存低于 3.5 GiB 的主机在首次安装时使用小内存配置，为一台小型服务器留出内存：
+内存低于 3.5 GiB 的主机在首次安装时使用小内存配置，以降低平台自身的内存占用：
 
 - 不部署正式大厅。玩家在登录空间完成身份验证后直接进入目标服务器，目标服务器启动期间在登录空间等待，见[玩家进入策略](/guide/players#entry-policy)；
 - 登录空间的 Pod 限制为 320 MiB；
 - 游戏代理的堆内存上限默认为 `256M`，见[游戏代理内存](#proxy-heap)；
 - k3s 不运行 Felis 未使用的 Helm 控制器，其 Go 堆的软上限为 400 MiB。
+
+在系统可见内存约 1.6 GiB 的 2 GB 云主机上，小内存配置下平台空载约占 0.6 GB，系统镜像自带的组件另占约 0.4 GB，剩余内存不足以运行一台 Paper 服务器：服务器启动时主机持续换页，平台随之失去响应。运行游戏服务器的主机应按[配置建议](#recommendations)准备至少 4 GB 内存。
 
 安装器变量 `FELIS_HOST_PROFILE` 选择配置：
 

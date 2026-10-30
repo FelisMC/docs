@@ -54,7 +54,6 @@ A release installation builds nothing on the host. When the installer does build
 
 | Concurrent players | Game servers running | CPU | RAM | `FELIS_VELOCITY_XMX` |
 | --- | --- | --- | --- | --- |
-| up to 10 | 1 small | 2 vCPU | 2 GB + 2 GB swap, [small-host profile](#small-hosts) | 256M (that profile's default) |
 | up to 20 | 1–2 small | 2 vCPU | 4 GB + 2 GB swap | 1G (default) |
 | up to 100 | 3–5 | 4 vCPU | 8–16 GB | 1G |
 | up to 300 | 5–10 | 8 vCPU | 16–32 GB | 2G |
@@ -64,12 +63,14 @@ The player counts are planning figures: a Minecraft server's cost depends mostly
 
 ### Small hosts {#small-hosts}
 
-A host with less than 3.5 GiB of memory gets the small-host profile on its first installation, which leaves room for one small server:
+A host with less than 3.5 GiB of memory gets the small-host profile on its first installation, which lowers the platform's own memory use:
 
 - No lobby is deployed. Players authenticate in the login space and then enter their destination server directly, waiting in the login space while it starts ([Player entry policy](/en/guide/players#entry-policy));
 - The login space's pod is limited to 320 MiB;
 - The game proxy's heap ceiling defaults to `256M` ([Game proxy memory](#proxy-heap));
 - k3s runs without the Helm controller, which Felis does not use, and with a 400 MiB soft limit on its Go heap.
+
+On a "2 GB" cloud host that reports about 1.6 GiB, the idle platform takes about 0.6 GB on the small-host profile and the components shipped with the system image another 0.4 GB, which leaves too little for a Paper server: starting one keeps the host paging, and the platform stops responding. A host that runs game servers needs at least 4 GB of memory, as in [Recommendations](#recommendations).
 
 The installer variable `FELIS_HOST_PROFILE` selects the profile:
 
