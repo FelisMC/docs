@@ -503,9 +503,10 @@ sudo felis restore-host -yes -take-over      # rebuild, then make this host writ
 | --- | --- | --- |
 | `fetch_db` | 用 `felis offsite fetch-db` 将最新备份包（或 `-bundle <name>` 指定的备份包）取到 `/var/lib/felis/restore-host` | 1 |
 | `images` | `felis offsite fetch-images` | 4 |
-| `uploads` | `felis offsite fetch-uploads` | 5 |
+| `uploads` | `felis offsite fetch-uploads -adopt-volume`：新主机尚未设置 S3 上传存储时，先改为本机卷存放 | 5 |
 | `database` | 将 felis-api 和 felis-operator 缩容至 0，执行 `felis db restore -yes -no-safety-backup` 和 `felis migrate up`，再恢复两者，并最多等待 felis-api 5 分钟 | 6 |
-| `servers` | 应用备份包中的 `k8s/minecraftservers.json`：仅用户服务器（新安装已自行创建登录空间和大厅），每台均为 `Stopped`，并去除原集群的节点分配、卷声明名称、锁和进行中标记 | 6 |
+| `servers` | 应用备份包中的 `k8s/minecraftservers.json`：仅用户服务器，每台均为 `Stopped`，并去除原集群的节点分配、卷声明名称、锁和进行中标记 | 6 |
+| `system_servers` | `felis converge`：创建本安装缺少的登录空间和大厅（小内存配置只有登录空间） | 6 |
 | `worlds` | `felis offsite fetch-worlds` | 7 |
 | `restore_worlds` | 通过 felis-api 为每台服务器恢复最新的完好备份，并等待其恢复 Job（每台最多 2 小时）；没有备份的服务器保持空世界 | 7 |
 | `take_over` | `felis offsite take-over -yes`，仅在指定 `-take-over` 时执行 | 8 |

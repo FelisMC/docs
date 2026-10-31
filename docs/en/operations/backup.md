@@ -503,9 +503,10 @@ The command runs the steps of [Rebuild by hand](#rebuild-manual) up to taking th
 | --- | --- | --- |
 | `fetch_db` | `felis offsite fetch-db` of the newest bundle (or `-bundle <name>`) into `/var/lib/felis/restore-host` | 1 |
 | `images` | `felis offsite fetch-images` | 4 |
-| `uploads` | `felis offsite fetch-uploads` | 5 |
+| `uploads` | `felis offsite fetch-uploads -adopt-volume`: a new host with no S3 uploads store set up first switches to keeping uploads on its volume | 5 |
 | `database` | scales felis-api and felis-operator to 0, runs `felis db restore -yes -no-safety-backup` and `felis migrate up`, scales both back and waits up to 5 minutes for felis-api | 6 |
-| `servers` | applies the bundle's `k8s/minecraftservers.json`: user servers only (the new installation created its own login space and lobby), each `Stopped`, without the old cluster's node placement, volume claim names, locks or in-flight marks | 6 |
+| `servers` | applies the bundle's `k8s/minecraftservers.json`: user servers only, each `Stopped`, without the old cluster's node placement, volume claim names, locks or in-flight marks | 6 |
+| `system_servers` | `felis converge`: creates the login space and lobby this installation lacks (the small-host profile has the login space only) | 6 |
 | `worlds` | `felis offsite fetch-worlds` | 7 |
 | `restore_worlds` | restores each server's newest intact backup through felis-api and waits for its restore Job (up to 2 hours each); a server with no backup keeps an empty world | 7 |
 | `take_over` | `felis offsite take-over -yes`, only with `-take-over` | 8 |
