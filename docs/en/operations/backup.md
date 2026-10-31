@@ -561,7 +561,7 @@ The numbered steps are the reference for what `felis restore-host` does, the way
    sudo felis offsite fetch-uploads
    ```
 
-   The command writes every upload of the newest upload list (`-at <stamp>` for an older one) into the `felis-uploads` volume, checks each against its sha256 and leaves uploads already in place alone. When the old host never held an upload, the bucket has no upload list, and the command reports that there is nothing to put back and succeeds.
+   The command writes every upload of the newest upload list (`-at <stamp>` for an older one) into the `felis-uploads` volume, checks each against its sha256 and leaves uploads already in place alone. When the old host never held an upload, the bucket has no upload list, and the command reports that there is nothing to put back and succeeds. Only a host that keeps uploads on its own volume copies them into the bucket; when the new host has no S3 uploads store set up, `felis restore-host` first switches it to keeping uploads on its volume, then writes them back.
 
 6. Restore the database and bring the servers back:
 
