@@ -128,7 +128,7 @@ sudo felis setup
 | Cloudflare Tunnel + Access | 创建 Cloudflare 隧道并配置域名路由，为管理控制台启用 Cloudflare Access，随后对公网关闭面板端口。需要在浏览器中授权 cloudflared，并提供可编辑 Access 应用的 API 令牌。 |
 | Reverse proxy | 由自有反向代理（如 Caddy、nginx、Traefik）终止 TLS，向导输出反向代理的配置指引。 |
 
-在此步骤按 Esc 等同于选择 Local only。Local only 与反向代理方式下，管理控制台仅由所有者的登录凭据（通行密钥或邮箱验证码）保护；Cloudflare Access 在此之前增加一层边缘校验。访问方式可在面板「平台设置 → 访问与安全 → 访问方式与域名」中更改，详见[访问方式](/operations/access#access-methods)。
+从 Cloudflare Tunnel 改为其他方式时，向导停用隧道并恢复面板端口；改用 Local only 时，游戏内显示的面板地址带上面板端口。首次安装时在此步骤按 Esc 等同于选择 Local only；在汇总界面按 `n` 重新选择访问方式时，按 Esc 返回汇总界面，访问方式保持不变。Local only 与反向代理方式下，管理控制台仅由所有者的登录凭据（通行密钥或邮箱验证码）保护；Cloudflare Access 在此之前增加一层边缘校验。访问方式可在面板「平台设置 → 访问与安全 → 访问方式与域名」中更改，详见[访问方式](/operations/access#access-methods)。
 
 ### 邮件服务 {#wizard-mail}
 

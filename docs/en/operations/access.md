@@ -43,7 +43,7 @@ The panel links Felis gives players and server owners follow the access method:
 - With direct access, the panel is served only on the NodePort, so links carry that port, for example `https://console.<root domain>:30443`.
 - Your own reverse proxy and Cloudflare Tunnel serve the panel on port 443, so links carry no port, for example `https://console.<root domain>`.
 
-This applies to the login space's login book and chat hints, the link `/link` gives in game, server notice emails, and the proxy's `/felis web` and `/felis migrate`. After an access method change, felis-api uses the new rule when it restarts; the proxy on the host reads the port from `panel-port` in `felis-link.properties` each time it runs a command, so it needs no restart. A proxy that does not run on the Felis host needs `panel-port` set in its own `felis-link.properties`: the panel port with direct access, empty otherwise.
+This applies to the login space's login book and chat hints, the link `/link` gives in game, server notice emails, and the proxy's `/felis web` and `/felis migrate`. After an access method change, felis-api uses the new rule when it restarts. Each time the proxy runs `/felis web` or `/felis migrate`, it reads the console addresses from felis-api, so a proxy needs no restart and no extra setting, whether or not it runs on the Felis host. When felis-api cannot be reached, the proxy uses `panel-hostname`, `admin-hostname` and `panel-port` from `felis-link.properties`; the installer keeps `panel-port` up to date for the proxy on the host.
 
 ### Changing the access method in the panel {#change-access-method}
 

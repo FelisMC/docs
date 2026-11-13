@@ -116,7 +116,7 @@ Velocity 专用配置键与 `/link` 一样从 `felis-link.properties` 或环境�
 | `lobby-server` | `FELIS_LOBBY_SERVER` | 认证后、后端唤醒期间使用的等待服务器，默认 `lobby`，不得与 `login-server` 相同 |
 | `panel-hostname` | `FELIS_PANEL_HOSTNAME` | 玩家控制台域名，默认 `console.<root-domain>` |
 | `admin-hostname` | `FELIS_ADMIN_HOSTNAME` | 管理控制台域名，默认 `op.console.<root-domain>` |
-| `panel-port` | `FELIS_PANEL_PORT` | `/felis web` 与 `/felis migrate` 链接中的面板端口；留空或为 443 时链接不带端口。每次执行命令时重新读取，见[面板链接](/operations/access#panel-links) |
+| `panel-port` | `FELIS_PANEL_PORT` | felis-api 不可达时 `/felis web` 与 `/felis migrate` 链接使用的面板端口；留空或为 443 时链接不带端口。felis-api 可达时链接以其返回的地址为准，见[面板链接](/operations/access#panel-links) |
 
 **负载限制**：felis-api 调用使用 8 个线程和 64 个等待槽。超过容量时立即拒绝：玩家收到“忙碌”提示，大厅消息得到 `busy` 错误，被丢弃的进服事件记录为警告。注册刷新（15 秒）和队列轮询（2 秒）在上一轮未结束时跳过本轮。操作类命令（`/link`、`/felis claim`、迁移、管理员批准）共用每名玩家的限额：初始 5 次，此后每 5 秒补充 1 次。大厅的 `felis:control` 消息也按玩家限流，菜单状态响应会缓存。
 

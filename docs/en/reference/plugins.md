@@ -116,7 +116,7 @@ Velocity-only configuration keys are read from the same `felis-link.properties` 
 | `lobby-server` | `FELIS_LOBBY_SERVER` | The post-authentication waiting server used while a backend wakes, default `lobby`; it must differ from `login-server` |
 | `panel-hostname` | `FELIS_PANEL_HOSTNAME` | The player console hostname, default `console.<root-domain>` |
 | `admin-hostname` | `FELIS_ADMIN_HOSTNAME` | The operator console hostname, default `op.console.<root-domain>` |
-| `panel-port` | `FELIS_PANEL_PORT` | The panel port in the links of `/felis web` and `/felis migrate`; empty or 443 leaves the port out. Read again each time a command runs; see [Panel links](/en/operations/access#panel-links) |
+| `panel-port` | `FELIS_PANEL_PORT` | The panel port in the links of `/felis web` and `/felis migrate` when felis-api cannot be reached; empty or 443 leaves the port out. When felis-api answers, the links use the addresses it returns; see [Panel links](/en/operations/access#panel-links) |
 
 **Load limits**: felis-api calls run on 8 threads with 64 waiting slots. Beyond that a call is refused at once: the player sees a "busy" message, a lobby frame gets a `busy` error, and a dropped join event is logged as a warning. The registry refresh (15 seconds) and the queue poll (2 seconds) skip a run while the previous one is still going. Acting commands (`/link`, `/felis claim`, migration, staff approval) share a per-player budget of 5, then one more every 5 seconds. `felis:control` frames from the lobby are also limited per player, and menu status answers are cached.
 

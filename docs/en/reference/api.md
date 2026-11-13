@@ -128,6 +128,7 @@ The tables below list the main endpoint groups. `{name}` in a path is the server
 | Account linking | `/api/v1/internal/account/…` | `service` | Link codes, link status, account migration |
 | Staff login | `/api/v1/internal/op-login/…` | `service` | Lists pending staff login requests and approves them in the game |
 | Player entry policy | `/api/v1/internal/settings/entry-policy` | `service` | The game proxy and the login space read the current policy |
+| Console addresses | `/api/v1/internal/console-urls` | `service` | The game proxy reads the player and operator console addresses, with the port the current access method needs |
 | Build context | `/api/v1/internal/submissions/{id}/context` | `service` | Build jobs read a submission's contents |
 | Host commands | `/api/v1/internal/servers/{name}/backup`, `…/restore` | `service` | World backups of stopped servers; world restores during a host rebuild |
 | Job transfers | `/api/v1/internal/file-uploads/{id}`, `/api/v1/internal/file-browser/{id}`, `/api/v1/internal/exports/{id}` | `public` | File and export jobs move data with a one-time token |

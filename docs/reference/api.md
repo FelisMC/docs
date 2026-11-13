@@ -128,6 +128,7 @@ curl -H "Authorization: Bearer $FELIS_API_KEY" https://console.example.com/api/v
 | 账号绑定 | `/api/v1/internal/account/…` | `service` | 生成绑定码、查询绑定状态、账户迁移 |
 | 管理员登录 | `/api/v1/internal/op-login/…` | `service` | 列出待批准的管理员登录请求并在游戏内批准 |
 | 玩家进入策略 | `/api/v1/internal/settings/entry-policy` | `service` | 游戏代理和登录空间读取当前策略 |
+| 控制台地址 | `/api/v1/internal/console-urls` | `service` | 游戏代理读取玩家控制台与管理控制台的地址，地址包含当前访问方式所需的端口 |
 | 构建上下文 | `/api/v1/internal/submissions/{id}/context` | `service` | 构建任务读取投稿内容 |
 | 主机命令 | `/api/v1/internal/servers/{name}/backup`、`…/restore` | `service` | 停服世界备份；整机重建时恢复世界 |
 | 任务传输 | `/api/v1/internal/file-uploads/{id}`、`/api/v1/internal/file-browser/{id}`、`/api/v1/internal/exports/{id}` | `public` | 文件与导出任务使用一次性令牌传输数据 |

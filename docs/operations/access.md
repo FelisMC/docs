@@ -43,7 +43,7 @@ Felis 发给玩家和服务器所有者的面板链接随访问方式变化：
 - 直接访问时，面板只在 NodePort 上提供服务，链接带有该端口，例如 `https://console.<根域名>:30443`。
 - 自有反向代理和 Cloudflare Tunnel 在 443 端口提供服务，链接不带端口，例如 `https://console.<根域名>`。
 
-这一规则适用于登录空间的登录书与聊天提示、游戏中 `/link` 给出的链接、服务器通知邮件，以及代理的 `/felis web` 和 `/felis migrate`。更改访问方式后，felis-api 重启时采用新的规则；主机上的代理从 `felis-link.properties` 的 `panel-port` 读取端口，每次执行命令时重新读取，无须重启代理。代理不在 Felis 主机上时，须在其 `felis-link.properties` 中自行设置 `panel-port`（直接访问时为面板端口，否则留空）。
+这一规则适用于登录空间的登录书与聊天提示、游戏中 `/link` 给出的链接、服务器通知邮件，以及代理的 `/felis web` 和 `/felis migrate`。更改访问方式后，felis-api 重启时采用新的规则。代理每次执行 `/felis web` 或 `/felis migrate` 时向 felis-api 读取面板地址，因此无论代理是否运行在 Felis 主机上，都无须重启或另行配置。felis-api 不可达时，代理改用 `felis-link.properties` 中的 `panel-hostname`、`admin-hostname` 与 `panel-port`；安装器为主机上的代理维护 `panel-port`。
 
 ### 在面板中更改访问方式 {#change-access-method}
 

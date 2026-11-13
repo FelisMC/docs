@@ -128,7 +128,7 @@ When the wizard finishes, it creates the login space and the lobby. A failure of
 | Cloudflare Tunnel + Access | Creates a Cloudflare tunnel, routes the hostnames, puts Cloudflare Access in front of the admin console, and then closes the panel port to the public. You authorize cloudflared in a browser and supply an API token that can edit Access applications. |
 | Reverse proxy | Your own reverse proxy (for example Caddy, nginx or Traefik) terminates TLS; the wizard prints the proxy configuration guide. |
 
-Pressing Esc at this step selects Local only. With Local only or a reverse proxy, the admin console is protected by the Owner's sign-in alone (passkey or email code); Cloudflare Access adds an edge check in front of it. You can change the access method later in the panel under **Platform settings → Access and security → Access and domain**. See [Access methods](/en/operations/access#access-methods).
+When the host moves off Cloudflare Tunnel, the wizard stops the tunnel and reopens the panel port; with Local only, the panel addresses shown in game carry the panel port. During the first installation, pressing Esc at this step selects Local only; when you choose the access method again with `n` on the summary screen, Esc returns to the summary and leaves the access method unchanged. With Local only or a reverse proxy, the admin console is protected by the Owner's sign-in alone (passkey or email code); Cloudflare Access adds an edge check in front of it. You can change the access method later in the panel under **Platform settings → Access and security → Access and domain**. See [Access methods](/en/operations/access#access-methods).
 
 ### Mail {#wizard-mail}
 
