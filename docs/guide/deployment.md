@@ -49,7 +49,7 @@ description: 在 Linux 主机上安装 Felis，完成设置向导并创建首位
    curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh | sudo FELIS_VERSION_BOOTSTRAP=dev bash
    ```
 
-3. 安装器询问安装类型时，选择 `[1] Felis`，即完整控制面。`[2] Felis-nano` 仅安装 Yggdrasil 多认证源聚合服务，供只需要多认证源登录的第三方服务器使用，不包含 k3s、数据库与面板。
+3. 安装器询问安装类型时，选择 `[1] Felis`，即完整控制面。`[2] Felis-nano` 只安装登录控制，供自行管理服务器的 Velocity 网络使用，见 [Felis-nano](/guide/nano)。
 4. 等待安装完成。安装器输出摘要后，在交互式终端中自动启动设置向导，见[设置向导](#setup-wizard)。
 
 `sudo` 会重置环境变量。安装变量须写在 `sudo` 与 `bash` 之间，或先执行 `export` 再使用 `sudo -E bash`：

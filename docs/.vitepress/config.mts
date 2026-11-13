@@ -39,6 +39,7 @@ const operationsSidebar: DefaultTheme.SidebarItem[] = [
     text: '进阶',
     items: [
       { text: '多机部署与高可用', link: '/guide/distributed' },
+      { text: 'Felis-nano', link: '/guide/nano' },
     ],
   },
 ]
@@ -70,6 +71,7 @@ const referenceSidebar: DefaultTheme.SidebarItem[] = [
 
 const sidebar: Record<string, DefaultTheme.SidebarItem[]> = {
   '/guide/distributed': operationsSidebar,
+  '/guide/nano': operationsSidebar,
   '/guide/building': referenceSidebar,
   '/operations/': operationsSidebar,
   '/reference/': referenceSidebar,
@@ -98,6 +100,7 @@ const englishLabels: Record<string, string> = {
   '故障排查': 'Troubleshooting',
   '进阶': 'Advanced',
   '多机部署与高可用': 'Multi-node and high availability',
+  'Felis-nano': 'Felis-nano',
   '参考': 'Reference',
   '命令行参考': 'Command-line reference',
   '配置参考': 'Configuration reference',
@@ -138,8 +141,8 @@ export default withMermaid({
       themeConfig: {
         nav: [
           { text: 'Website', link: 'https://felismc.com/', target: '_self' },
-          { text: 'Getting started', link: '/en/', activeMatch: '^/en/(?:$|guide/(?!distributed$|building$))' },
-          { text: 'Operations', link: '/en/operations/', activeMatch: '^/en/(?:operations/|guide/distributed$)' },
+          { text: 'Getting started', link: '/en/', activeMatch: '^/en/(?:$|guide/(?!distributed$|nano$|building$))' },
+          { text: 'Operations', link: '/en/operations/', activeMatch: '^/en/(?:operations/|guide/(?:distributed|nano)$)' },
           { text: 'Reference', link: '/en/reference/cli', activeMatch: '^/en/(?:reference/|guide/building$)' },
         ],
         sidebar: Object.fromEntries(Object.entries(sidebar).map(([path, items]) => [
@@ -211,8 +214,8 @@ export default withMermaid({
     logo: { src: '/felis-app.svg', alt: 'Felis' },
     nav: [
       { text: '官网', link: 'https://felismc.com/', target: '_self' },
-      { text: '开始使用', link: '/', activeMatch: '^/(?:$|guide/(?!distributed$|building$))' },
-      { text: '运维', link: '/operations/', activeMatch: '^/(?:operations/|guide/distributed$)' },
+      { text: '开始使用', link: '/', activeMatch: '^/(?:$|guide/(?!distributed$|nano$|building$))' },
+      { text: '运维', link: '/operations/', activeMatch: '^/(?:operations/|guide/(?:distributed|nano)$)' },
       { text: '参考', link: '/reference/cli', activeMatch: '^/(?:reference/|guide/building$)' },
     ],
     sidebar,

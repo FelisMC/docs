@@ -34,7 +34,7 @@ Variables that apply only to the first install, or that later runs keep without 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `FELIS_INSTALL_MODE` | Ask on a terminal, otherwise `full` | `full` installs the whole platform. `nano` installs only Felis-nano, the Yggdrasil `hasJoined` multiplexer, without k3s or PostgreSQL. On a host that runs Felis-nano and no full install, the default is `nano`. |
+| `FELIS_INSTALL_MODE` | Ask on a terminal, otherwise `full` | `full` installs the whole platform. `nano` installs Felis-nano, which handles login control only and runs without k3s; see [Felis-nano](/en/guide/nano). On a host that runs Felis-nano and no full install, the default is `nano`. |
 | `FELIS_VERSION_BOOTSTRAP` | `release` | `release` installs the newest published release from its assets, each checked against the release's `SHA256SUMS`. `dev` builds the newest `main` commit from source. A rerun must name the channel again. |
 | `FELIS_RELEASE` | Newest release | A published release tag (`v1.2.3`) to install instead of the newest, from its assets. Use the installer of the same tag. This is the way back to an earlier release. |
 | `FELIS_REF` | — | A branch, tag or commit to build from source. It overrides the channel. |
@@ -73,7 +73,7 @@ The access method (direct access, your own reverse proxy, or Cloudflare Tunnel w
 | `FELIS_K3S_VERSION` | `v1.36.4+k3s1` | k3s release a fresh install gets. An installed k3s is left alone unless `FELIS_UPGRADE_DEPS=1`. |
 | `FELIS_UPGRADE_DEPS` | `0` | `1` moves an installed k3s and cloudflared to the pinned versions (k3s one minor version at a time, never downgraded) and restarts `cloudflared-felis` on the new binary. |
 | `FELIS_JRE_VERSION` | `25` | Temurin feature version the game proxy runs on. The default's build and digests are pinned; another feature version is checked against the digest Adoptium publishes. |
-| `FELIS_GO_VERSION` | `1.27.2` | Go toolchain used to build the Felis-nano binary. |
+| `FELIS_GO_VERSION` | `1.27.4` | Go toolchain used to build the Felis-nano binary. |
 | `FELIS_GO_SHA256` | Pinned for the default version | sha256 of that Go release for this architecture. Required for any other version. |
 
 See [Component versions](/en/operations/upgrade#component-versions).
@@ -131,6 +131,8 @@ Keep `FELIS_OFFSITE_KEY` somewhere other than the host. Without it, nothing in t
 | `FELIS_LIMBO_IMAGE`, `FELIS_LOBBY_IMAGE`, `FELIS_PAPER_IMAGE` | `registry.felis.svc:5000/felis/limbo:demo`, `…/lobby:demo`, `…/paper:demo` | Image references of the login space, the lobby and the Paper base image. |
 | `FELIS_NANO_LISTEN` | The address an installed felis-nano uses, else `127.0.0.1:8081` | Listen address of Felis-nano. Set a private-network address to serve a proxy on another host. |
 | `FELIS_NANO_PROXY_CIDR` | — | The proxy allowed to reach a non-loopback Felis-nano, as an address with a prefix length (for example `10.0.0.7/32`). The host firewall opens the port to that source only. |
+| `FELIS_NANO_PANEL_PORT` | The port an installed felis-nano uses, else `8443` | HTTPS port of the Felis-nano panel. |
+| `FELIS_NANO_PUBLIC_PORT` | The port an installed felis-nano uses, else the panel port | Port in the Felis-nano panel's public address. Set `443` when a reverse proxy serves the panel on port 443; see [Reverse proxy](/en/guide/nano#reverse-proxy). |
 
 See [Sizing](/en/guide/requirements#sizing) for the proxy heap.
 
@@ -231,7 +233,7 @@ prefix = "LS"
 url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJoined"
 ```
 
-The panel's **Platform → Authentication sources** page imports this list on first use. Once the Owner saves a list there, the panel's list takes precedence. Felis-nano always reads `felis.toml`. See [Authentication sources](/en/guide/players#auth-sources).
+The panel's **Platform → Authentication sources** page imports this list on first use. Once the Owner saves a list there, the panel's list takes precedence. See [Authentication sources](/en/guide/players#auth-sources).
 
 ### [offsite] {#offsite}
 
@@ -394,7 +396,7 @@ A setting saved in the panel takes precedence over the same setting in `felis.to
 - The mail relay applies at once, without a restart, to felis-api, the watchdog, the reaper's notices and the break-glass console's codes.
 - Retention applies at once in felis-api, and in the backup Jobs and the reaper at their next run.
 - The heartbeat applies at the next watchdog run.
-- Authentication sources apply at the next game login and name lookup, without a restart. Felis-nano keeps reading `[[auth_source]]` from `felis.toml`.
+- Authentication sources apply at the next game login and name lookup, without a restart.
 
 ### Installer settings saved in the panel {#host-settings}
 

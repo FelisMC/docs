@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `FELIS_INSTALL_MODE` | 在终端上询问，否则为 `full` | `full` 安装完整平台。`nano` 只安装 Felis-nano，即 Yggdrasil `hasJoined` 多路复用器，不含 k3s 和 PostgreSQL。在运行 Felis-nano 且未安装完整平台的主机上，默认值为 `nano`。 |
+| `FELIS_INSTALL_MODE` | 在终端上询问，否则为 `full` | `full` 安装完整平台。`nano` 安装 Felis-nano，只负责登录控制，不含 k3s，见 [Felis-nano](/guide/nano)。在运行 Felis-nano 且未安装完整平台的主机上，默认值为 `nano`。 |
 | `FELIS_VERSION_BOOTSTRAP` | `release` | `release` 从最新发布版的资产安装，每个资产都按该发布版的 `SHA256SUMS` 校验。`dev` 从源码构建 `main` 分支的最新提交。重跑时须再次指定渠道。 |
 | `FELIS_RELEASE` | 最新发布版 | 指定一个已发布的版本标签（`v1.2.3`），以其资产代替最新版安装。应使用同一标签的安装器。这是回退到较早发布版的方式。 |
 | `FELIS_REF` | — | 指定要从源码构建的分支、标签或提交，优先于渠道设置。 |
@@ -73,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | `FELIS_K3S_VERSION` | `v1.36.4+k3s1` | 全新安装时使用的 k3s 版本。已安装的 k3s 保持不变，`FELIS_UPGRADE_DEPS=1` 时除外。 |
 | `FELIS_UPGRADE_DEPS` | `0` | 设为 `1` 时，将已安装的 k3s 和 cloudflared 更新到固定版本（k3s 每次只升一个次版本，且从不降级），并让 `cloudflared-felis` 以新二进制重启。 |
 | `FELIS_JRE_VERSION` | `25` | 游戏代理所用的 Temurin 主版本。默认版本的构建和摘要已固定；其他主版本按 Adoptium 发布的摘要校验。 |
-| `FELIS_GO_VERSION` | `1.27.2` | 构建 Felis-nano 二进制所用的 Go 工具链版本。 |
+| `FELIS_GO_VERSION` | `1.27.4` | 构建 Felis-nano 二进制所用的 Go 工具链版本。 |
 | `FELIS_GO_SHA256` | 默认版本已固定 | 该 Go 版本在本机架构下的 sha256。使用其他版本时必须提供。 |
 
 另见[组件版本](/operations/upgrade#component-versions)。
@@ -131,6 +131,8 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | `FELIS_LIMBO_IMAGE`、`FELIS_LOBBY_IMAGE`、`FELIS_PAPER_IMAGE` | `registry.felis.svc:5000/felis/limbo:demo`、`…/lobby:demo`、`…/paper:demo` | 登录空间、大厅和 Paper 基础镜像的引用。 |
 | `FELIS_NANO_LISTEN` | 已安装的 felis-nano 所用地址，否则为 `127.0.0.1:8081` | Felis-nano 的监听地址。如需为其他主机上的代理提供服务，设为内网地址。 |
 | `FELIS_NANO_PROXY_CIDR` | — | 允许访问非回环地址上的 Felis-nano 的代理，以带前缀长度的地址表示（例如 `10.0.0.7/32`）。主机防火墙只对该来源开放端口。 |
+| `FELIS_NANO_PANEL_PORT` | 已安装的 felis-nano 所用端口，否则为 `8443` | Felis-nano 面板的 HTTPS 端口。 |
+| `FELIS_NANO_PUBLIC_PORT` | 已安装的 felis-nano 所用端口，否则与面板端口相同 | Felis-nano 面板对外地址中的端口。通过反向代理在 443 端口提供面板时设为 `443`，见[反向代理](/guide/nano#reverse-proxy)。 |
 
 代理堆内存的规划见[容量规划](/guide/requirements#sizing)。
 
@@ -231,7 +233,7 @@ prefix = "LS"
 url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJoined"
 ```
 
-面板的「平台 → 认证源」页面首次使用时会导入此列表。所有者在该页面保存列表后，以面板中的列表为准。Felis-nano 始终读取 `felis.toml`。另见[认证源](/guide/players#auth-sources)。
+面板的「平台 → 认证源」页面首次使用时会导入此列表。所有者在该页面保存列表后，以面板中的列表为准。另见[认证源](/guide/players#auth-sources)。
 
 ### [offsite] {#offsite}
 
@@ -394,7 +396,7 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 - 邮件中继立即生效，无需重启，适用于 felis-api、看门狗、reaper 的提醒邮件和应急控制台的验证码。
 - 保留设置在 felis-api 中立即生效，在备份 Job 和 reaper 中于下次运行时生效。
 - 心跳在看门狗下次运行时生效。
-- 认证源在下次游戏登录和角色查询时生效，无需重启。Felis-nano 继续读取 `felis.toml` 中的 `[[auth_source]]`。
+- 认证源在下次游戏登录和角色查询时生效，无需重启。
 
 ### 在面板中保存的安装器设置 {#host-settings}
 

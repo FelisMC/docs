@@ -27,6 +27,7 @@ On some distributions, `sudo` uses a `secure_path` that omits `/usr/local/bin`. 
 | --- | --- | --- | --- |
 | [`felis setup`](#setup) | Install the host when needed, configure access and upload storage, create the first Owner | Yes | Partly: **Platform settings → Access and security** |
 | [`felis breakGlass`](#break-glass) | Emergency console when no Owner can sign in | Yes | None |
+| [`felis nano setup`](#nano-setup) | Creates the Owner on Felis-nano and prints a one-time setup link | Yes | None |
 | [`felis version`](#version) | Print the version of the binary | No | None |
 | [`felis start`](#start) | Start every Felis service this host is set to start at boot, in order, and wait for the control plane | Yes | None |
 | [`felis status`](#status) | Show the platform at a glance | Yes | **Maintenance & Backups → Status** |
@@ -101,6 +102,25 @@ Every run writes an audit row with source `break-glass` and action `break_glass.
 **Panel**: None. The console works without the panel by design.
 
 **See also**: [Emergency access](/en/operations/access#break-glass).
+
+### felis nano setup {#nano-setup}
+
+Creates the Owner on Felis-nano, or issues a new one-time setup link to an Owner who has not completed setup. The link is valid for 30 minutes.
+
+```bash
+sudo felis nano setup [-config path] [-public-port port]
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-config` | `/etc/felis/felis.toml` | Path to the configuration file. |
+| `-public-port` | `8443` | Port in the panel's public address; matches `FELIS_NANO_PUBLIC_PORT` from the installation. |
+
+When the Owner has completed setup, the command prints only the sign-in address.
+
+**Root**: Required.
+
+**See also**: [Felis-nano Owner setup](/en/guide/nano#owner).
 
 ### felis version {#version}
 
@@ -393,7 +413,7 @@ The rebuild replaces this install's database. `-force` replaces an install that 
 
 ### felis update {#update}
 
-Checks installed and available versions; with `--apply`, installs a reviewed Felis target.
+Checks installed and available versions; with `--apply`, installs a reviewed Felis target. A Felis-nano host is upgraded by running the installer again; see [Upgrading Felis-nano](/en/guide/nano#upgrade).
 
 ```bash
 sudo felis update [component selectors] [--version vX.Y.Z | --ref <commit-or-tag> | --dev] [--all]

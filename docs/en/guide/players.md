@@ -134,7 +134,7 @@ Authentication sources decide which game identities the game proxy accepts. Moja
 4. Use **Move source up** and **Move source down** to set the order.
 5. Select **Save & apply** and verify your identity.
 
-A saved configuration applies to the next login and role lookup without a restart, and online players stay connected. The configuration saved in the panel takes precedence over the `[[auth_source]]` list of the installation configuration, which the page imports when it is first opened. Felis-nano keeps using its TOML configuration.
+A saved configuration applies to the next login and role lookup without a restart, and online players stay connected. The configuration saved in the panel takes precedence over the `[[auth_source]]` list of the installation configuration, which the page imports when it is first opened.
 
 ### Identities, disabling and deleting {#auth-identities}
 

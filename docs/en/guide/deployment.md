@@ -49,7 +49,7 @@ Only development snapshots exist at present, so select the `dev` channel explici
    curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh | sudo FELIS_VERSION_BOOTSTRAP=dev bash
    ```
 
-3. When the installer asks what to install, choose `[1] Felis`, the full control plane. `[2] Felis-nano` installs only the Yggdrasil multi-source authentication service, for third-party servers that need nothing but multi-provider sign-in; it includes no k3s, database or panel.
+3. When the installer asks what to install, choose `[1] Felis`, the full control plane. `[2] Felis-nano` installs login control only, for a Velocity network whose servers you manage yourself; see [Felis-nano](/en/guide/nano).
 4. Wait for the installation to finish. After printing its summary, the installer starts the setup wizard when it runs on an interactive terminal. See [Setup wizard](#setup-wizard).
 
 `sudo` resets the environment. Put installer variables between `sudo` and `bash`, or `export` them and run `sudo -E bash`:

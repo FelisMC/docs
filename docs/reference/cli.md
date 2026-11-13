@@ -27,6 +27,7 @@ description: 面向运维人员的全部 felis 子命令：用法、主要参数
 | --- | --- | --- | --- |
 | [`felis setup`](#setup) | 必要时安装主机，配置访问方式和上传存储，创建首位所有者 | 是 | 部分功能：「平台设置 → 访问与安全」 |
 | [`felis breakGlass`](#break-glass) | 无所有者能够登录时使用的应急控制台 | 是 | 无 |
+| [`felis nano setup`](#nano-setup) | 在 Felis-nano 上创建所有者并输出一次性初始化链接 | 是 | 无 |
 | [`felis version`](#version) | 显示二进制版本 | 否 | 无 |
 | [`felis start`](#start) | 按顺序启动本主机设为开机启动的全部 Felis 服务，并等待控制面就绪 | 是 | 无 |
 | [`felis status`](#status) | 概览平台状态 | 是 | 「维护与备份 → 状态」 |
@@ -101,6 +102,25 @@ sudo felis breakGlass [-config path]
 **面板**：无。该控制台按设计在没有面板时也能使用。
 
 **另见**：[应急访问](/operations/access#break-glass)。
+
+### felis nano setup {#nano-setup}
+
+在 Felis-nano 上创建所有者，或为尚未完成初始化的所有者重新生成一次性初始化链接。链接有效期 30 分钟。
+
+```bash
+sudo felis nano setup [-config path] [-public-port 端口]
+```
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `-config` | `/etc/felis/felis.toml` | 配置文件路径。 |
+| `-public-port` | `8443` | 面板对外地址中的端口，与安装时的 `FELIS_NANO_PUBLIC_PORT` 一致。 |
+
+所有者已完成初始化时，命令只输出登录地址。
+
+**root**：需要。
+
+**另见**：[Felis-nano 所有者初始化](/guide/nano#owner)。
 
 ### felis version {#version}
 
@@ -393,7 +413,7 @@ sudo felis restore-host [-yes] [-bundle name] [-take-over] [-force]
 
 ### felis update {#update}
 
-检查已安装版本和可用版本；指定 `--apply` 时安装经审阅的 Felis 目标版本。
+检查已安装版本和可用版本；指定 `--apply` 时安装经审阅的 Felis 目标版本。Felis-nano 主机通过重新执行安装命令升级，见[升级 Felis-nano](/guide/nano#upgrade)。
 
 ```bash
 sudo felis update [组件选择参数] [--version vX.Y.Z | --ref <commit-or-tag> | --dev] [--all]
