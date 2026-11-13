@@ -169,7 +169,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     SetupRequired:
-      description: The session belongs to an account still in first-run setup, which may use only the x-felis-setup-allowed operations until it has a durable sign-in (setup_required).
+      description: The session belongs to a staff account still in first-run setup, which may use only the x-felis-setup-allowed operations until it has a durable sign-in (setup_required).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -333,11 +333,11 @@ components:
       type: object
       required: [mode, defaultServer, requireAccountLink, offlineAction, waitingSpace, fallbackServer, revision]
       properties:
-        mode: { type: string, enum: [lobby, direct, domain] }
+        mode: { type: string, enum: [lobby, direct, domain], description: An install without the formal lobby refuses lobby and reads a stored lobby policy as domain. }
         defaultServer: { type: string, description: Required for direct mode; optional fallback destination for unmatched hostnames. }
         requireAccountLink: { type: boolean, description: Require Limbo web sign-in and panel association in addition to proxy game identity authentication. }
         offlineAction: { type: string, enum: [wake, fallback, disconnect] }
-        waitingSpace: { type: string, enum: [login, lobby], description: Web sign-in currently requires lobby waiting. }
+        waitingSpace: { type: string, enum: [login, lobby], description: "With web sign-in required, players wait in the lobby, or in the login space on an install without a lobby." }
         fallbackServer: { type: string, description: Required for fallback action and distinct from the default server. }
         revision: { type: string, description: Opaque revision; stale or concurrent writes return 409. }
 
@@ -535,10 +535,10 @@ components:
     UpdateWindow:
       type: object
       description: >
-        The SysAdmin-set auto-update maintenance window (internal/api/handlers_updates.go
-        updateWindow). An absolute [start,end) interval during which Felis may apply a
-        Scheduled component's update to itself; both ends null means unset (no apply is
-        ever opened). Keys are always present; their values are null when unset.
+        The optional Owner-set maintenance window (internal/api/handlers_updates.go
+        updateWindow). An absolute [start,end) interval; while it is set, an update starts
+        only inside it. Both ends null means unset, and an update then starts as soon as
+        it is requested. Keys are always present; their values are null when unset.
       required: [start, end]
       properties:
         start:
@@ -647,11 +647,13 @@ components:
         One component's line. available has a newer stable release (latest);
         unknown means the release feed could not be read and unreadable that the
         installed version could not, both with error; pinned never changes by policy.
+        On a development build felis-api follows main instead: available means main
+        has newer commits, and latest is the newest main commit's full SHA.
       required: [name, state]
       properties:
         name: { type: string }
         current: { type: string, description: Installed version; omitted when unreadable. }
-        latest: { type: string, description: The newer stable release; present only when state is available. }
+        latest: { type: string, description: 'The newer stable release, or the full SHA of the newest main commit for felis-api on a development build; present only when state is available.' }
         state: { type: string, enum: [current, available, unknown, unreadable, pinned] }
         selector: { type: string, description: 'The `felis update --<selector>` flag that prints how to apply it; omitted when none.' }
         note: { type: string, description: What the release lookup learned beyond the version; omitted when none. }
@@ -676,7 +678,7 @@ components:
     Phase:
       type: string
       description: MinecraftServer lifecycle phase (internal/apis/felis/v1alpha1).
-      enum: [Unknown, Stopped, Starting, Running, Stopping, Failed]
+      enum: [Unknown, Stopped, Starting, Running, Stopping, Failed, Hibernating, Hibernated]
 
     ExecutionNode:
       type: object
@@ -729,8 +731,9 @@ components:
           enum: [enable, join, approve, upgrade, fence, unfence, enable-ha, join-controller, db-backup, db-verify, db-delete, db-restore, offsite-sync, offsite-list, offsite-check-key, offsite-take-over, offsite-configure, offsite-disable, restore-host, backup-now, rotate-token, domain-check, domain-set, storage-configure, connection-configure, converge, doctor, support-bundle, host-settings, server-forwarding, update]
           description: >-
             The node lifecycle actions (enable to join-controller) and the platform host tasks the panel runs on the controller host.
-            update applies the published release in params.version with `felis update --apply` in its own systemd unit;
-            params.now "true" applies it outside the maintenance window. felis-api restarts during an update, and the task
+            update applies the published release in params.version, or on a development build the main commit whose full SHA
+            is params.commit, with `felis update --apply` in its own systemd unit; params.now "true" applies it outside a set
+            maintenance window. felis-api restarts during an update, and the task
             keeps running and reports its result once the panel reconnects.
         name: { type: string, description: Stable node name; required for every action except enable and enable-ha. }
         sshTarget: { type: string, description: Verified root SSH alias or user@host; required for join, approve, upgrade and join-controller. }
@@ -818,8 +821,13 @@ components:
               hint: { type: string }
               firstSeen: { type: string, format: date-time }
               notified: { type: string, format: date-time }
+              ignored: { type: boolean, description: The Owner ignores this check; it is not mailed. }
         alertsError: { type: string }
         quietUntil: { type: string, format: date-time, description: The watchdog mails nothing until then. }
+        ignored:
+          type: array
+          description: Every check key the Owner ignores, firing or not. Ignored checks still run but are never mailed, reminded or reported as resolved.
+          items: { type: string }
         databaseBackups:
           type: array
           items:
@@ -1060,7 +1068,7 @@ components:
         desiredState:
           type: string
           description: Present only when set; the operator's target state.
-          enum: [Running, Stopped]
+          enum: [Running, Stopped, Hibernated]
         endpointMode: { type: string }
         endpointAddress: { type: string }
         playersOnline: { type: integer, format: int32 }
@@ -1081,6 +1089,11 @@ components:
           type: integer
           format: int32
           description: Seconds the server may sit empty before idle auto-stop scales it down; 0 when it never idles out (off, RCON disabled, or a system server).
+        idleAction:
+          type: string
+          enum: [hibernate, stop]
+          description: Owner and admin only; what an idle server does once idleStopSeconds pass. hibernate freezes the process and moves its memory to swap; a node without enough swap stops it instead.
+        hibernation: { $ref: '#/components/schemas/ServerHibernation' }
         playerCountUnknown:
           type: boolean
           description: Present and true while the operator cannot read the player count over RCON; idle auto-stop waits until it can.
@@ -1184,11 +1197,11 @@ components:
         seq: { type: integer, format: int64 }
         type:
           type: string
-          enum: [Started, Stopped, Crashed, HostRestarted, StartFailed, DiskWarning, DiskFull]
+          enum: [Started, Stopped, Crashed, HostRestarted, StartFailed, DiskWarning, DiskFull, Hibernated]
         at: { type: string, format: date-time }
         reason:
           type: string
-          description: The stop reason of Stopped, the termination reason of Crashed and the failure reason of StartFailed.
+          description: The stop reason of Stopped (WakeFailed or HibernationLost after a hibernation that could not resume), the termination reason of Crashed, the failure reason of StartFailed, and Woke on a Started that resumed a hibernated process.
         exitCode: { type: integer, format: int32 }
         crashes:
           type: integer
@@ -1210,6 +1223,18 @@ components:
         stopped: { type: boolean }
         problems: { type: boolean }
 
+    ServerHibernation:
+      type: object
+      description: Present while the server's process is being frozen, is frozen, or is waking.
+      required: [stage, since]
+      properties:
+        stage:
+          type: string
+          enum: [Freezing, Frozen, Growing, Thawing, Killing]
+          description: Growing waits for the node to give the server its memory back; Thawing reads the memory back from swap.
+        since: { type: string, format: date-time }
+        swappedBytes: { type: integer, format: int64, description: Memory moved to swap by the freeze. }
+        message: { type: string, description: Why a wake is waiting, such as too little free memory on the node. }
     FleetServer:
       description: One row of the fleet-wide admin read (internal/api/handlers_user.go fleetServerView).
       allOf:
@@ -1340,6 +1365,18 @@ components:
           items: { $ref: '#/components/schemas/NodeUsage' }
           description: By node name; only nodes with a running server, and empty while current is null.
         loginFailures24h: { type: integer, minimum: 0, description: Sign-in failures recorded in the last 24 hours. }
+        freeMemory:
+          type: array
+          description: >-
+            Per online, schedulable node, the memory it can still promise a new server: its allocatable
+            memory less what the pods placed on it request. Present only with include=free_memory,
+            and omitted when the host service is absent or does not answer.
+          items:
+            type: object
+            required: [node, bytes]
+            properties:
+              node: { type: string }
+              bytes: { type: integer, format: int64, minimum: 0 }
 
     MyServerView:
       type: object
@@ -1375,7 +1412,7 @@ components:
           description: From live CRD status; omitted when unset or the cluster is unreachable.
         desiredState:
           type: string
-          enum: [Running, Stopped]
+          enum: [Running, Stopped, Hibernated]
           description: Owned rows only, from live CRD status.
         autostartPolicy:
           type: string
@@ -2689,6 +2726,12 @@ paths:
                     cpuRequest: { type: string }
                     memory: { type: string }
                     memoryRequest: { type: string }
+                ownerId:
+                  type: string
+                  description: >-
+                    The account that owns the new server; omitted, the server starts unclaimed. An
+                    administrator may name only themselves (403 forbidden otherwise); the Owner may name
+                    any active account (400 unknown_user otherwise). The owner's quota does not refuse it.
       responses:
         '201':
           description: Created; starts Stopped.
@@ -4086,6 +4129,12 @@ paths:
               required: [command]
               properties:
                 command: { type: string }
+                console:
+                  type: boolean
+                  description: >-
+                    Types the line into the game container's stdin first, as on the
+                    server's own terminal, so its output appears in the console log and
+                    no RCON session is logged. RCON is used only when stdin took nothing.
       responses:
         '200':
           description: RCON reply or acknowledgment that a line was submitted through stdin.
@@ -5427,7 +5476,7 @@ paths:
         '403':
           description: >-
             Local session login is disabled (local_auth_disabled), or the account is
-            staff and must sign in at the operator console (staff_account).
+            staff with a passkey and must sign in with it (staff_passkey).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -5631,7 +5680,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [user_id, username, role, email, email_verified, has_passkey, setup_required]
+                required: [user_id, username, role, email, email_verified, has_passkey, setup_required, mail_available]
                 properties:
                   user_id: { type: string }
                   username: { type: string }
@@ -5640,6 +5689,7 @@ paths:
                   email_verified: { type: boolean }
                   has_passkey: { type: boolean }
                   setup_required: { type: boolean }
+                  mail_available: { type: boolean }
         '400':
           description: >-
             A token is required (bad_request), or it is unknown, already used, or
@@ -5683,7 +5733,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [user_id, username, role, email, email_verified, has_passkey, setup_required]
+                required: [user_id, username, role, email, email_verified, has_passkey, setup_required, mail_available]
                 properties:
                   user_id: { type: string }
                   username: { type: string }
@@ -5692,6 +5742,7 @@ paths:
                   email_verified: { type: boolean }
                   has_passkey: { type: boolean }
                   setup_required: { type: boolean }
+                  mail_available: { type: boolean }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -6078,7 +6129,14 @@ paths:
                 displayName: { type: string, maxLength: 64 }
                 autostartPolicy: { type: string, enum: [ownerOnly, public, allowlist] }
                 idleStopSeconds: { type: integer, format: int32 }
+                idleAction: { type: string, enum: [hibernate, stop] }
                 memory: { type: string }
+                storage:
+                  type: string
+                  description: >-
+                    The world's storage quota. Growth counts against the caller's storage
+                    quota; a size at or below the last measured use is refused with 409
+                    storage_below_usage.
                 cpu: { type: string, description: The CPU limit; empty removes it. }
                 software: { $ref: '#/components/schemas/SoftwareRequest' }
                 confirmSoftwareChange: { type: boolean }
@@ -6266,7 +6324,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Another node task is running or this task cannot be retried. }
+        '409': { description: 'Another node task is running, this task cannot be retried, or the update commit is not the one the last update check found (update_target_unchecked).' }
         '503': { description: Host node execution service is unavailable. }
   /api/v1/settings/node-control/tasks/{id}:
     get:
@@ -6369,6 +6427,35 @@ paths:
                 until: { type: [string, 'null'], format: date-time, description: Null lifts the hold. }
       responses:
         '204': { description: The hold is in place or lifted. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Host node execution service is unavailable. }
+  /api/v1/platform/host/ignore:
+    post:
+      operationId: ignoreAlert
+      summary: Ignore one watchdog check, or restore its mail (Owner, fresh reauthentication).
+      description: >-
+        An ignored check keeps running and stays listed, but the watchdog mails nothing
+        about it and does not count it as open. A restored check that still fires goes
+        back to the usual mail and reminder schedule.
+      tags: [account]
+      x-felis-face: [external]
+      x-felis-tier: owner
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [key, ignored]
+              properties:
+                key: { type: string, minLength: 1, maxLength: 200, description: The alert key, as listed in the host overview. }
+                ignored: { type: boolean }
+      responses:
+        '204': { description: The check is ignored or restored. }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -7269,11 +7356,13 @@ paths:
       summary: Read the Owner-set auto-update maintenance window (Owner).
       description: >-
         Felis applies no update on its own. `felis update` checks versions and
-        prints an explicit apply command. `felis update --apply` reads this
-        platform-wide [start,end) window before backup and before installation,
-        refusing outside it unless `--now` explicitly starts manual maintenance.
-        An unreadable window is always a refusal, including with `--now` or
-        `--force`. An unset window reads back as {start:null,end:null}.
+        prints an explicit apply command. The window is optional. When it is set,
+        `felis update --apply` reads this platform-wide [start,end) window before
+        backup and before installation and refuses outside it unless `--now` starts
+        maintenance at once; an installer rerun on an installed host waits for it
+        too. When it is unset, an update starts as soon as it is requested. For
+        `--apply`, an unreadable window is always a refusal, including with `--now`
+        or `--force`. An unset window reads back as {start:null,end:null}.
       x-felis-face: [external]
       x-felis-tier: owner
       security: [{ sessionCookie: [] }]
@@ -7418,6 +7507,12 @@ paths:
       x-felis-face: [external]
       x-felis-tier: admin
       security: [{ sessionCookie: [] }]
+      parameters:
+        - name: include
+          in: query
+          required: false
+          description: free_memory adds freeMemory, worked out from the cluster on each request, so only a caller about to place a server asks for it.
+          schema: { type: string, enum: [free_memory] }
       responses:
         '200':
           description: The platform usage view.
@@ -8111,8 +8206,8 @@ paths:
         started gets its world volume here, the one its first start then mounts, so
         files can be put in place before that start. Running servers share the RWO
         volume with file Jobs on the game pod's node, using uid/gid 1000. Starting
-        or stopping returns 409 server_transitioning; backup, restore or migration
-        returns 409 maintenance_in_progress. The listing runs as a Job whose output is read
+        or stopping returns 409 server_transitioning, a hibernated server returns 409
+        hibernated, and backup, restore or migration returns 409 maintenance_in_progress. The listing runs as a Job whose output is read
         back through pods/log, so the call is synchronous but takes seconds rather than
         milliseconds. Paths are resolved inside the world root by os.Root, so "..", an
         absolute path, and a symlink leaving the root are all refused with 400 bad_path.
@@ -8164,7 +8259,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Startup or shutdown is in progress (server_transitioning), or backup, restore or migration holds the world (maintenance_in_progress).
+          description: Startup or shutdown is in progress (server_transitioning), or backup, restore or migration holds the world (maintenance_in_progress); a hibernated server returns hibernated until it is woken or stopped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8426,7 +8521,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Startup or shutdown is in progress (server_transitioning or not_stopped), or backup, restore, migration or a stopped-server file change holds the world (maintenance_in_progress).
+          description: Startup or shutdown is in progress (server_transitioning or not_stopped), or backup, restore, migration or a stopped-server file change holds the world (maintenance_in_progress); a hibernated server returns hibernated until it is woken or stopped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8483,7 +8578,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Something is already at the path (file_exists), the server is changing state (server_transitioning or not_stopped), or backup, restore, migration or a stopped-server file change holds the world (maintenance_in_progress).
+          description: Something is already at the path (file_exists), the server is changing state (server_transitioning or not_stopped), or backup, restore, migration or a stopped-server file change holds the world (maintenance_in_progress); a hibernated server returns hibernated until it is woken or stopped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8553,7 +8648,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Something is already at to (file_exists), the server is changing state (server_transitioning or not_stopped), or backup, restore, migration or a stopped-server file change holds the world (maintenance_in_progress).
+          description: Something is already at to (file_exists), the server is changing state (server_transitioning or not_stopped), or backup, restore, migration or a stopped-server file change holds the world (maintenance_in_progress); a hibernated server returns hibernated until it is woken or stopped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8626,7 +8721,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Startup or shutdown is in progress (server_transitioning or not_stopped), or backup, restore, migration or another stopped-server operation holds the world (maintenance_in_progress).
+          description: Startup or shutdown is in progress (server_transitioning or not_stopped), or backup, restore, migration or another stopped-server operation holds the world (maintenance_in_progress); a hibernated server returns hibernated until it is woken or stopped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8722,7 +8817,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: A file already exists without overwrite (file_exists), the server is changing state (server_transitioning or not_stopped), or backup, restore, migration or another stopped-server operation holds the world (maintenance_in_progress).
+          description: A file already exists without overwrite (file_exists), the server is changing state (server_transitioning or not_stopped), or backup, restore, migration or another stopped-server operation holds the world (maintenance_in_progress); a hibernated server returns hibernated until it is woken or stopped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8808,7 +8903,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Startup, shutdown, backup, restore or migration is in progress (server_transitioning or maintenance_in_progress).
+          description: Startup, shutdown, backup, restore or migration is in progress (server_transitioning or maintenance_in_progress); a hibernated server returns hibernated until it is woken or stopped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -9100,7 +9195,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Startup or shutdown is in progress (server_transitioning or not_stopped), or backup, restore, migration or another stopped-server operation holds the world (maintenance_in_progress).
+          description: Startup or shutdown is in progress (server_transitioning or not_stopped), or backup, restore, migration or another stopped-server operation holds the world (maintenance_in_progress); a hibernated server returns hibernated until it is woken or stopped.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -11775,7 +11870,12 @@ paths:
                     re-derives the JVM heap. The CPU limit and request are kept.
                 storage:
                   type: string
-                  description: Rejected with 400 storage_immutable — present for a clear error, not mutation.
+                  description: >-
+                    Sets the world's storage quota, which the disk scans enforce. Growth
+                    counts against the owner's storage quota (403 quota_exceeded); a size
+                    at or below the last measured use is refused with 409
+                    storage_below_usage. The world volume keeps the size it was created
+                    with.
                 resources:
                   type: object
                   description: >-
@@ -11792,6 +11892,10 @@ paths:
                   type: integer
                   format: int32
                   description: Idle auto-stop. 0 turns it off; otherwise the server stops after this many seconds with nobody online (60–86400, else 400 bad_idle_stop).
+                idleAction:
+                  type: string
+                  enum: [hibernate, stop]
+                  description: Whether an idle server hibernates or stops; anything else is a 400 bad_request. System servers reject it.
                 software:
                   allOf: [{ $ref: '#/components/schemas/SoftwareRequest' }]
                   description: >-
