@@ -11,7 +11,7 @@ This page describes the toolchain needed to build Felis from source, and how to 
 
 | Tool | Version | Used for |
 | --- | --- | --- |
-| Go | 1.27.2 (the `go` directive in `go.mod`) | Building the `felis` binary and running the Go tests |
+| Go | 1.27.4 (the `go` directive in `go.mod`) | Building the `felis` binary and running the Go tests |
 | Node.js and npm | Node.js 22 (matching `node:22` in the `Dockerfile`) | Building and testing the panel (`panel/`, with dependencies locked in `panel/package-lock.json`) |
 | JDK | 25 | Building and testing the Velocity, Paper and Limbo plugins; Paper needs a Java 25 toolchain |
 | JDK | 17 | Building the Fabric, Forge and NeoForge mods |

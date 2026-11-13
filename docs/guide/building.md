@@ -11,7 +11,7 @@ description: 构建 Felis 所需的工具链，以及构建后端、面板、镜
 
 | 工具 | 版本 | 用途 |
 | --- | --- | --- |
-| Go | 1.27.2（`go.mod` 中的 `go` 指令） | 构建 `felis` 二进制，运行 Go 测试 |
+| Go | 1.27.4（`go.mod` 中的 `go` 指令） | 构建 `felis` 二进制，运行 Go 测试 |
 | Node.js 与 npm | Node.js 22（与 `Dockerfile` 中的 `node:22` 一致） | 构建和测试面板（`panel/`，依赖由 `panel/package-lock.json` 锁定） |
 | JDK | 25 | 构建并测试 Velocity、Paper、Limbo 插件；Paper 需要 Java 25 工具链 |
 | JDK | 17 | 构建 Fabric、Forge、NeoForge 模组 |
