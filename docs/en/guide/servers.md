@@ -56,7 +56,7 @@ When every server has been processed, the results appear below the batch action 
 
 ## Creating a server {#create-server}
 
-A server an Admin creates is stopped and belongs to no account until a user claims it. See [Claiming a server](#claim). An account with a server quota can create servers it owns itself; see [Self-service creation](#self-service).
+A server an Admin creates is stopped and belongs by default to the Admin who created it. It can instead be created without an owner, in which case it belongs to no account until a user claims it; see [Claiming a server](#claim). An account with a server quota can create servers it owns itself; see [Self-service creation](#self-service).
 
 1. Open **Servers** and select **New server**.
 2. Under **Runs on**, select **Server software** or **Whitelisted image**. Regular accounts can select server software only.
@@ -69,15 +69,20 @@ A server an Admin creates is stopped and belongs to no account until a user clai
    | Name | 3–32 lowercase letters, digits or hyphens, with no hyphen at either end. `login`, `lobby`, `admin`, `panel`, `console`, `api`, `felis`, `velocity`, `registry`, `internal` and `www` are reserved by the platform. |
    | Subdomain | Same rules as the name. Players reach the server at `<subdomain>.<root>`. |
    | Display name (optional) | The name shown in the panel and the lobby menu. |
+   | Server owner | Shown to Admins only; the current Admin by default. With **Nobody — a player can claim it**, the server belongs to no account until a user claims it. The Owner can also select **Another account** and choose the owner from the account list. |
    | Execution node | Shown to Admins only, in a multi-node deployment: an online, approved node. See [Multi-node and high availability](/en/guide/distributed#overview). |
-   | Memory | The container memory limit in GiB: 4 by default, at least 1, decimals such as 1.5 allowed. The Java heap is sized from it. |
+   | Memory | The container memory limit in GiB: at least 1, decimals such as 1.5 allowed. The Java heap is sized from it. When an Admin creates the server, the default is the smaller of 4 and the memory that can still be allocated, rounded down to a multiple of 0.5 GiB, and the field shows how much can still be allocated; see below. For self-service creation, see [Self-service creation](#self-service). |
    | Storage | The space the world files may use, in whole GiB: 10 by default. It can be changed after creation. See [Disk usage and quota](#disk-quota). |
-   | Autostart policy | Defaults to **Owner only — wake from the panel**. See [Autostart policy](#autostart). |
+   | Autostart policy | Defaults to **Wake list** when an Admin creates the server, and to **Owner only — wake from the panel** for self-service creation. See [Autostart policy](#autostart). |
 
 4. With server software, accept the Minecraft End User License Agreement (EULA).
 5. Select **Create**.
 
-A new server stops automatically after 600 seconds with nobody online. A server an Admin creates charges no user's quota; quotas are charged when the server is claimed. A name that matches the leftover world volume of a deleted server is refused until that volume is removed or another name is chosen.
+A new server hibernates after 600 seconds with nobody online; see [Idle handling](#idle).
+
+The memory that can still be allocated is the node's allocatable memory less the memory already requested on it by the login space, the lobby, the control plane components and other servers. A game server requests its full memory limit, so a server whose memory exceeds that figure can still be created but cannot start until memory is freed; the field says so in a warning style. In a multi-node deployment the figure belongs to the selected node, or, before a node is selected, to the node with the most memory left. When the platform cannot read the figure, the memory defaults to 4 and the field does not show it.
+
+A server with an owner gets scheduled restore points while it is in use, and its owner is warned before the world is reclaimed for inactivity; see [World cleanup](/en/operations/backup#world-cleanup). A server without an owner gets no scheduled restore points until it is claimed, and has no account to warn. An owner chosen when an Admin creates the server is not limited by their quota; the server counts toward the owner's quota usage, with the same effect as [Assigning a server](/en/guide/administration#assign-server). A server created without an owner charges no user's quota; quotas are charged when the server is claimed. A name that matches the leftover world volume of a deleted server is refused until that volume is removed or another name is chosen.
 
 ### Self-service creation {#self-service}
 
@@ -86,7 +91,7 @@ A new server stops automatically after 600 seconds with nobody online. A server 
 - It has a linked Minecraft account. See [Linking your account](/en/guide/players#account-linking).
 - It has a server quota: the Owner set a quota for this account, or turned on the default quota under [Self-service servers](/en/guide/administration#self-service).
 
-A self-created server runs server software only, and its resources count toward the account's quota. The panel shows the quota usage and what is left of it, and a server whose memory or storage exceeds what is left cannot be created. Once the server count reaches its cap, **New server** is unavailable. In a multi-node deployment the server is placed on the approved node with the fewest user servers. Server owners can give up their servers; deleting a server remains an Admin action, see [Giving up and deleting a server](#retire).
+A self-created server runs server software only, and its resources count toward the account's quota. The panel shows the quota usage and what is left of it. The memory defaults to the smaller of 4 and what is left of the quota, rounded down to a multiple of 0.5 GiB, and a server whose memory or storage exceeds what is left cannot be created. Once the server count reaches its cap, **New server** is unavailable. In a multi-node deployment the server is placed on the approved node with the fewest user servers. Server owners can give up their servers; deleting a server remains an Admin action, see [Giving up and deleting a server](#retire).
 
 ### Images and Minecraft versions {#images-versions}
 

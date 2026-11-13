@@ -18,6 +18,8 @@ description: 面板的访问方式、面板 TLS 证书、更换根域名、轮�
 
 根域名默认为 `<主机 IP>.nip.io`，无需配置 DNS 即可解析到主机。两个域名保存在 `/etc/felis/felis.host.toml` 的 `[auth]` 中（`panel_hostname`、`admin_hostname`）。面板和 API 在主机的 HTTPS NodePort 上提供服务，默认端口为 30443（`FELIS_PANEL_NODEPORT`）。
 
+管理控制台域名须是面板域名下的域名，例如面板域名为 `play.example.com` 时，管理控制台域名可以是 `op.play.example.com`。Passkey 注册在面板域名上，浏览器只允许在该域名及其下级域名上注册和使用；`play.example.com` 与 `admin.example.com` 这样互不从属的组合会使管理控制台无法注册 Passkey。`felis setup`、面板和 API 都拒绝这样的组合。
+
 管理控制台按请求的主机名识别。裸 IP 地址仅在根域名内含该地址（例如 `<IP>.nip.io` 或 `<IP>.sslip.io`）或 `admin_hostname` 设为该 IP 时才算作管理控制台；其他地址（包括通过 SSH 隧道访问的 `127.0.0.1`）一律按玩家面板处理，管理功能返回 403。Passkey 与面板域名绑定，通过 IP 地址访问时无法使用 Passkey。
 
 Felis 支持三种访问方式：
@@ -34,11 +36,20 @@ Felis 支持三种访问方式：
 直接访问和自有反向代理仅以所有者的登录（Passkey 或邮件验证码）保护管理控制台。Cloudflare Tunnel 在此之前再增加一层 Cloudflare Access 身份检查。无论使用哪种方式，felis-api 都要求自己的登录会话，账号和角色始终以 Felis 数据库为准。
 :::
 
+### 面板链接 {#panel-links}
+
+Felis 发给玩家和服务器所有者的面板链接随访问方式变化：
+
+- 直接访问时，面板只在 NodePort 上提供服务，链接带有该端口，例如 `https://console.<根域名>:30443`。
+- 自有反向代理和 Cloudflare Tunnel 在 443 端口提供服务，链接不带端口，例如 `https://console.<根域名>`。
+
+这一规则适用于登录空间的登录书与聊天提示、游戏中 `/link` 给出的链接、服务器通知邮件，以及代理的 `/felis web` 和 `/felis migrate`。更改访问方式后，felis-api 重启时采用新的规则；主机上的代理从 `felis-link.properties` 的 `panel-port` 读取端口，每次执行命令时重新读取，无须重启代理。代理不在 Felis 主机上时，须在其 `felis-link.properties` 中自行设置 `panel-port`（直接访问时为面板端口，否则留空）。
+
 ### 在面板中更改访问方式 {#change-access-method}
 
 1. 打开「平台设置 → 访问与安全」，找到「访问方式与域名」卡片。
 2. 在「访问方式」中选择「直接访问」「自有反向代理」或「Cloudflare Tunnel」。
-3. 填写「面板域名」和「管理控制台域名」。
+3. 填写「面板域名」和「管理控制台域名」。管理控制台域名不在面板域名之下时，字段下方说明原因，「应用访问方式」不可用。
 4. 选择 Cloudflare Tunnel 时，另外填写：
    - 「允许登录的身份」：邮箱地址，或以 `@` 开头的邮箱域名。
    - 「Cloudflare 账户 ID」。

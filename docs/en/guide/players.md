@@ -75,7 +75,7 @@ Account linking binds a panel account to a verified game identity. Claiming, sta
 Players need no prior registration; a bind code from the game creates their account and signs them in:
 
 1. Connect with Minecraft Java Edition. The login space opens a login book and posts the bind code and the player console link in chat.
-2. Open the link, `https://console.<root>`, in the system browser. Do not use the in-app browser of WeChat or QQ, where passkeys do not work.
+2. Open the link in the system browser. It is usually `https://console.<root>`; when the platform uses direct access, the link carries the panel port, for example `https://console.<root>:30443`, see [Access methods](/en/operations/access#panel-links). Do not use the in-app browser of WeChat or QQ, where passkeys do not work.
 3. Select **Sign in with Bind Code**, enter the code and select **Verify & Sign In**. Felis creates the account, links the game identity and signs you in.
 4. Return to the game. Once the login space sees the link, it sends you to the lobby.
 

@@ -18,6 +18,8 @@ The panel is served on two hostnames, both derived from the root domain:
 
 The root domain defaults to `<host IP>.nip.io`, which resolves to the host without any DNS setup. Both hostnames are stored under `[auth]` in `/etc/felis/felis.host.toml` (`panel_hostname`, `admin_hostname`). The panel and the API are served on the host's HTTPS NodePort, port 30443 by default (`FELIS_PANEL_NODEPORT`).
 
+The admin console hostname must be a name under the panel hostname: with the panel hostname `play.example.com`, the admin console hostname can be `op.play.example.com`. Passkeys are registered on the panel hostname, and browsers allow them only on that name and the names under it, so a pair that does not nest, such as `play.example.com` and `admin.example.com`, leaves the operator console unable to register passkeys. `felis setup`, the panel and the API refuse such a pair.
+
 The operator console is recognized by the request's hostname. A bare IP address counts as the operator console only when the root domain embeds it (such as `<IP>.nip.io` or `<IP>.sslip.io`) or `admin_hostname` is set to that IP; any other address, including `127.0.0.1` through an SSH tunnel, is served as the player panel, and admin features answer 403. Passkeys are bound to the panel hostname, so they cannot be used when the panel is opened by IP address.
 
 Felis supports three access methods:
@@ -34,11 +36,20 @@ The visitor address keys the per-client rate limit on the sign-in endpoints. Dur
 Direct access and your own reverse proxy protect the operator console with the Owner's sign-in alone (a passkey or an email code). Cloudflare Tunnel adds a Cloudflare Access identity check in front of it. Whichever method you use, felis-api requires its own sign-in session, and accounts and roles always come from the Felis database.
 :::
 
+### Panel links {#panel-links}
+
+The panel links Felis gives players and server owners follow the access method:
+
+- With direct access, the panel is served only on the NodePort, so links carry that port, for example `https://console.<root domain>:30443`.
+- Your own reverse proxy and Cloudflare Tunnel serve the panel on port 443, so links carry no port, for example `https://console.<root domain>`.
+
+This applies to the login space's login book and chat hints, the link `/link` gives in game, server notice emails, and the proxy's `/felis web` and `/felis migrate`. After an access method change, felis-api uses the new rule when it restarts; the proxy on the host reads the port from `panel-port` in `felis-link.properties` each time it runs a command, so it needs no restart. A proxy that does not run on the Felis host needs `panel-port` set in its own `felis-link.properties`: the panel port with direct access, empty otherwise.
+
 ### Changing the access method in the panel {#change-access-method}
 
 1. Open **Platform settings → Access and security** and find the **Access and domain** card.
 2. Under **Access method**, select **Direct access**, **Own reverse proxy** or **Cloudflare Tunnel**.
-3. Enter the **Panel hostname** and the **Admin console hostname**.
+3. Enter the **Panel hostname** and the **Admin console hostname**. When the admin console hostname is not under the panel hostname, the field explains why and **Apply access method** stays unavailable.
 4. For Cloudflare Tunnel, also enter:
    - **Who may sign in**: an email address, or `@` followed by an email domain.
    - **Cloudflare account ID**.
