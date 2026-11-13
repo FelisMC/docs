@@ -18,7 +18,7 @@ Make sure that:
 - The host runs a supported Linux distribution and architecture and meets the resource requirements. See [Supported hosts](/en/guide/requirements#supported-hosts) and [Sizing](/en/guide/requirements#sizing).
 - You have root access or can run `sudo`.
 - The host has a fixed IPv4 address (a static address or a DHCP reservation) and can reach the download sources over HTTPS. See [Network](/en/guide/requirements#network).
-- If you use your own domain, `<root>`, `console.<root>`, `op.console.<root>` and `*.<root>` all resolve to the host. The wildcard record does not cover the third-level name `op.console.<root>`, so give it its own record. Without a domain, the installer uses `<node-ip>.nip.io`.
+- If you use your own domain, `<root>`, `console.<root>`, `op.console.<root>` and `*.<root>` all resolve to the host. The wildcard record does not cover the third-level name `op.console.<root>`, so give it its own record. Without a domain, the installer uses `<host-address>.nip.io`, or `<public-address>.nip.io` on a cloud host whose own address is private. See [Public address](/en/guide/requirements#public-address).
 
 Before it changes anything, the installer runs its preflight checks. If any check fails, it lists every problem at once and exits, leaving the host unchanged. The checks are listed under [Preflight checks](/en/guide/requirements#preflight).
 
@@ -58,22 +58,24 @@ Only development snapshots exist at present, so select the `dev` channel explici
 curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh | sudo FELIS_VERSION_BOOTSTRAP=dev FELIS_ROOT_DOMAIN=mc.example.com bash
 ```
 
-The install command can be run again. A rerun converges the host to the desired state, and the generated secrets kept in `/etc/felis/secrets.env` are reused. A rerun keeps the installed root domain; specify the release channel again each time. For upgrades, see [Upgrading](/en/operations/upgrade#update).
+The install command can be run again. A rerun converges the host to the desired state, and the generated secrets kept in `/etc/felis/secrets.env` are reused. A rerun keeps the installed root domain. The release channel, the game port, the panel port and the world cleanup directory are recorded in `/etc/felis/install.env`; reruns and updates started from the panel reuse them, and a variable set explicitly for a run replaces the recorded value. For upgrades, see [Upgrading](/en/operations/upgrade#update).
 
 ### Common installer variables {#installer-variables}
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `FELIS_VERSION_BOOTSTRAP` | `release` | Release channel: `release` or `dev`. |
+| `FELIS_VERSION_BOOTSTRAP` | `release` | Release channel: `release` or `dev`. Recorded for later runs. |
 | `FELIS_REF` | empty | Builds the named branch, tag or commit from source. |
 | `FELIS_RELEASE` | newest release | Installs the named release. |
 | `FELIS_ARTIFACT_DIR` | empty | Installs release assets from a local directory. See [Installing from downloaded release assets](#offline-install). |
 | `FELIS_INSTALL_MODE` | interactive prompt | Installation type: `full` or `nano`. |
 | `FELIS_NO_SETUP` | empty | `1` ends the installation without starting the setup wizard. |
-| `FELIS_ROOT_DOMAIN` | `<node-ip>.nip.io` | Root domain, applied on the first installation only. To change it later, see [Changing the root domain](/en/operations/access#change-domain). |
-| `FELIS_PANEL_NODEPORT` | `30443` | Local HTTPS port of the panel and API. |
+| `FELIS_ROOT_DOMAIN` | `<host-address>.nip.io`; `<public-address>.nip.io` on a cloud host | Root domain, applied on the first installation only. To change it later, see [Changing the root domain](/en/operations/access#change-domain). |
+| `FELIS_PUBLIC_IP` | Looked up when needed | Public IPv4 address given to players and browsers: in the default root domain, the panel certificate and the addresses the installer prints. When empty and the host's own address is private, the installer looks the address up over HTTPS; `none` keeps the host's own address. See [Public address](/en/guide/requirements#public-address). |
+| `FELIS_PANEL_NODEPORT` | `30443` | Local HTTPS port of the panel and API. Recorded for later runs. |
+| `FELIS_GAME_PORT` | `25565` | Port on which the game proxy accepts players. Recorded for later runs. |
 | `FELIS_PREFLIGHT` | `strict` | `warn` reports preflight problems as warnings and installs anyway. |
-| `FELIS_WORLDS_HOST_PATH` | empty | Node directory that holds the world volumes (`/var/lib/rancher/k3s/storage` on k3s). Setting it enables idle world cleanup. See [World cleanup](/en/operations/backup#world-cleanup). |
+| `FELIS_WORLDS_HOST_PATH` | empty | Node directory that holds the world volumes (`/var/lib/rancher/k3s/storage` on k3s). Setting it enables idle world cleanup. Recorded for later runs; an empty value set explicitly turns cleanup off again. See [World cleanup](/en/operations/backup#world-cleanup). |
 | `FELIS_VELOCITY_XMX` | `1G`, `256M` on the small-host profile | Maximum heap of the game proxy, at least `256M`. |
 | `FELIS_HOST_PROFILE` | `auto` | Host profile: `auto`, `small` or `standard` ([Small hosts](/en/guide/requirements#small-hosts)). |
 | `FELIS_DB_BACKUP_TIME` | `*-*-* 03:30:00` | Time of the daily database backup, as a systemd calendar expression. |
@@ -99,7 +101,7 @@ On hosts with little memory, the installer also creates a swap file. The admin k
 
 ## Setup wizard {#setup-wizard}
 
-The setup wizard, `felis setup`, configures how the panel is reached and where uploads are stored, and creates the first Owner. The installer starts it automatically only on an interactive terminal. When the output goes to a log file or the installation runs under cloud-init, run it after the installation finishes:
+The setup wizard, `felis setup`, configures how the panel is reached and the mail relay, and creates the first Owner. The installer starts it automatically only on an interactive terminal. When the output goes to a log file or the installation runs under cloud-init, run it after the installation finishes:
 
 ```bash
 sudo felis setup
@@ -113,7 +115,7 @@ The wizard runs these steps in order; you can review completed steps with the ar
 | --- | --- |
 | Preflight | Confirms that the control plane is ready. |
 | Connection | Chooses how the panel is reached. See [Access method](#access-method). |
-| Storage | Chooses where submission uploads are stored. See [Upload storage](#wizard-storage). |
+| Mail | Configures the mail relay (SMTP). The step can be skipped. See [Mail](#wizard-mail). |
 | Panel login | Creates the Owner account and a one-time setup link. See [Creating the first Owner](#first-owner). |
 
 When the wizard finishes, it creates the login space and the lobby. A failure of either does not block panel initialization; you can investigate it from the panel.
@@ -128,14 +130,17 @@ When the wizard finishes, it creates the login space and the lobby. A failure of
 
 Pressing Esc at this step selects Local only. With Local only or a reverse proxy, the admin console is protected by the Owner's sign-in alone (passkey or email code); Cloudflare Access adds an edge check in front of it. You can change the access method later in the panel under **Platform settings → Access and security → Access and domain**. See [Access methods](/en/operations/access#access-methods).
 
+### Mail {#wizard-mail}
+
+Felis sends email sign-in codes, the Owner's email verification, account recovery codes and alerts through an SMTP relay. Enter the relay host, port, sender address and, when the relay requires it, a username and password. The password is stored in a Kubernetes Secret. Before saving, the wizard sends one test message to the sender address, and it saves nothing unless that message is delivered.
+
+Press Esc to skip the step. Without mail, Felis sends no email codes and no alerts, and the Owner must create a passkey, which requires a trusted certificate. You can configure mail later with `e` on the summary screen of `sudo felis setup`, or under **Platform settings → Notifications and retention → Mail delivery**.
+
 ### Upload storage {#wizard-storage}
 
-The build contexts of modpacks that players submit are stored in the location you choose:
+The build contexts of modpacks that players submit are stored on this host's disk by default, which suits a single-node installation. To use an S3-compatible bucket instead (for example AWS S3, MinIO or Cloudflare R2), press `s` on the summary screen and enter the endpoint, bucket, optional region and access keys; the keys are stored in a Kubernetes Secret. Esc on that screen leaves the current location unchanged.
 
-- Local disk: on this host's disk, which suits a single-node installation.
-- Object storage: in an S3-compatible bucket (for example AWS S3, MinIO or Cloudflare R2). Enter the endpoint, bucket, optional region and access keys. The keys are stored in a Kubernetes Secret.
-
-You can change the location later under **Platform settings → Access and security → Upload storage**. See [Upload storage](/en/operations/storage#upload-storage).
+You can also change the location under **Platform settings → Access and security → Upload storage**. See [Upload storage](/en/operations/storage#upload-storage).
 
 ### Creating the first Owner {#first-owner}
 
@@ -209,8 +214,8 @@ After installation, Felis is reached at these addresses:
 | --- | --- |
 | Operator console (Owner, Admin) | `https://op.console.<root>`; with Local only, `https://op.console.<root>:30443` |
 | Player console | `https://console.<root>`; with Local only, `https://console.<root>:30443` |
-| Direct access by IP | `https://<node-ip>:30443`, with a self-signed certificate the browser asks you to confirm on the first visit; passkeys cannot be used here |
-| Game address | `<node-ip>:25565`; point `mc.<root>` at it. Each server is reached at `<subdomain>.<root>` |
+| Direct access by IP | `https://<address the installer prints>:30443`, with a self-signed certificate the browser asks you to confirm on the first visit; passkeys cannot be used here |
+| Game address | `<public-address>:25565`; point `mc.<root>` at it. Each server is reached at `<subdomain>.<root>` |
 
 The **Account** page shows the join address and the Minecraft Java Edition client version that the login space and the lobby require. The installer records the version it built in `[velocity].game_version` of `felis.toml`; custom login space or lobby images must set it themselves, otherwise the panel reports the version as not configured.
 
@@ -218,7 +223,7 @@ If something is wrong, see [Troubleshooting](/en/operations/troubleshooting#firs
 
 ## Next steps {#next-steps}
 
-- Configure mail delivery under **Platform settings → Notifications and retention → Mail delivery**, for sign-in codes and alerts. See [Platform settings](/en/guide/administration#platform-settings).
+- If you skipped the Mail step, configure mail delivery under **Platform settings → Notifications and retention → Mail delivery**, for sign-in codes and alerts. See [Platform settings](/en/guide/administration#platform-settings).
 - Configure the off-site copy so that backups are kept away from the host. See [Off-site copy](/en/operations/backup#offsite).
 - Set up authentication sources and the player entry policy. See [Authentication sources](/en/guide/players#auth-sources) and [Player entry policy](/en/guide/players#entry-policy).
 - Create your first server. See [Creating a server](/en/guide/servers#create-server).

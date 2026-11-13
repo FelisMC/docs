@@ -18,7 +18,7 @@ description: 面向运维人员的全部 felis 子命令：用法、主要参数
 - 所有者可在面板中执行其中许多操作。面板将操作交给 `felis-node-control.service`，由它运行相同的命令，见[在面板中执行主机操作](/operations/#panel-host-operations)。
 
 ::: tip 提示
-部分发行版的 `sudo` 使用的 `secure_path` 不含 `/usr/local/bin`。如 `sudo felis` 提示 `command not found`，改为执行 `sudo /usr/local/bin/felis …`。
+部分发行版（如 Red Hat 系）的 `sudo` 使用的 `secure_path` 不含 `/usr/local/bin`。安装器因此另建 `/usr/bin/felis` 链接指向该二进制，`sudo felis` 在各发行版上均可直接使用。`/usr/bin/felis` 已被其他文件占用时，安装器保留该文件并给出警告，此时执行 `sudo /usr/local/bin/felis …`。
 :::
 
 ## 命令一览 {#overview}
@@ -57,7 +57,7 @@ sudo felis setup [-config path]
 ```
 
 - 在尚未安装 Felis 的主机上，先运行二进制内置的安装器，再进入向导。如需选择发布渠道或设置安装器变量，应改为运行安装器，见[安装与部署](/guide/deployment#install)。
-- 向导依次完成预检、连接方式（直接访问、自有反向代理或 Cloudflare Tunnel）、上传存储（本地磁盘或 S3 兼容存储桶）和首位所有者。汇总界面还可配置邮件中继。
+- 向导依次完成预检、连接方式（直接访问、自有反向代理或 Cloudflare Tunnel）、邮件中继和首位所有者。按 Esc 可跳过邮件步骤：不配置邮件时不发送邮箱验证码与告警，所有者须创建 Passkey，Passkey 要求受信任的证书。上传存储默认为本地磁盘；在汇总界面按 `s` 可改用 S3 兼容存储桶，按 `e` 可配置邮件中继。
 - 创建所有者后输出一次性链接，用于登记邮箱并创建 Passkey，有效期 30 分钟。浏览器步骤尚未完成时再次执行 `sudo felis setup` 会签发新链接；已拥有登录凭证的账户不会被重置。
 - 登录空间和大厅系统服务器不存在时予以创建。已有系统服务器保持其期望状态；登录空间或大厅启动失败不影响面板设置。
 - 在已安装的主机上运行时显示状态界面，可在其中修改连接方式、上传存储和邮件中继。未做修改即退出不会更改任何内容。

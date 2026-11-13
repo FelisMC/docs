@@ -57,7 +57,7 @@ The installer can be run again. A rerun keeps the generated secrets (`/etc/felis
 | Variable | Default | Description |
 | --- | --- | --- |
 | `FELIS_INSTALL_MODE` | Interactive prompt | Set to `nano`. |
-| `FELIS_ROOT_DOMAIN` | `<node IP>.nip.io` | Root domain. The player panel is `console.<root domain>` and the operator console `op.console.<root domain>`. |
+| `FELIS_ROOT_DOMAIN` | `<host address>.nip.io`, or `<public address>.nip.io` on a cloud host ([Public address](/en/guide/requirements#public-address)) | Root domain. The player panel is `console.<root domain>` and the operator console `op.console.<root domain>`. |
 | `FELIS_NANO_LISTEN` | `127.0.0.1:8081` | Listen address of the internal port. Set a private-network address when the proxy runs on another host. |
 | `FELIS_NANO_PROXY_CIDR` | — | The proxy allowed to reach the internal port, as an address with a prefix length (for example `10.0.0.7/32`). |
 | `FELIS_NANO_PANEL_PORT` | `8443` | HTTPS port of the panel. |

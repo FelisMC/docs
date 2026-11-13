@@ -121,7 +121,7 @@ The Owner can run the host operations of day-to-day running on the operator cons
 | Component versions; the maintenance window | **Maintenance & Backups → Updates** → **Component versions**, **Configure Maintenance Window** | `felis update` (read-only check); the maintenance window is set in the panel only |
 | Access method: direct, own reverse proxy, Cloudflare Tunnel | **Platform settings → Access and security** → **Access and domain** → **Apply access method** | The access step of `felis setup` |
 | Checking and changing the root domain | **Platform settings → Access and security** → **Access and domain** → **Root domain**: **Check current domain**, **Change domain** | `felis domain check`, `felis domain set` |
-| Upload storage: this host or an S3-compatible bucket | **Platform settings → Access and security** → **Upload storage** → **Apply storage** | The storage step of `felis setup` |
+| Upload storage: this host or an S3-compatible bucket | **Platform settings → Access and security** → **Upload storage** → **Apply storage** | `s` on the summary screen of `felis setup` |
 | Credential rotation | **Platform settings → Access and security** → **Credential rotation** → **Rotate** | `felis rotate-token` |
 | Game proxy heap ceiling | **Platform settings → Access and security** → **Game proxy** → **Heap ceiling**, **Apply** | `FELIS_VELOCITY_XMX`, installer re-run |
 | System server completion | **Platform settings → Access and security** → **System server completion** → **Run completion** | `felis converge` (`felis converge -user-rcon` with **Enable RCON on older user servers**) |

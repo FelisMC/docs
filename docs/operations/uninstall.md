@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/uninstall
 两种模式都会移除：
 
 - Felis 的 systemd 单元：各定时任务（`felis-db-backup`、`felis-watchdog`、`felis-offsite`、`felis-build-tools`、`felis-update-check`）及其服务、`felis-watchdog-failed.service`、`felis-velocity.service`、`felis-nano.service`、`cloudflared-felis.service`，以及早期发布版的 `felis-postgres-firewall.service`。
-- 游戏代理的系统用户 `felis-velocity`、Felis-nano 的系统用户 `felis-nano`、`/opt/felis` 和 `/usr/local/bin/felis`。
+- 游戏代理的系统用户 `felis-velocity`、Felis-nano 的系统用户 `felis-nano`、`/opt/felis`、`/usr/local/bin/felis`，以及指向它的链接 `/usr/bin/felis`。
 - 中断的安装留在 `/var/lib/felis/artifacts` 中的发布版附件。
 - 安装器放置的 cloudflared 程序（仍被其他服务单元使用时保留）。
 - nftables 表 `felis_edge`（以及早期发布版的 `felis_postgres`）、安装器在 firewalld 中开放的端口和带 `felis-` 注释的 ufw 规则；k3s 网段的放行规则只在卸载 k3s 时移除。

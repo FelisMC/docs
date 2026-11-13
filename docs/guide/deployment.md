@@ -18,7 +18,7 @@ description: 在 Linux 主机上安装 Felis，完成设置向导并创建首位
 - 主机运行受支持的 Linux 发行版与架构，配置满足资源要求，参见[支持的主机](/guide/requirements#supported-hosts)与[资源规划](/guide/requirements#sizing)。
 - 具有 root 权限，或可以执行 `sudo`。
 - 主机使用固定 IPv4 地址（静态地址或 DHCP 地址保留），并可通过 HTTPS 访问安装所需的下载源，参见[网络](/guide/requirements#network)。
-- 使用自有域名时，`<根域名>`、`console.<根域名>`、`op.console.<根域名>` 与 `*.<根域名>` 均解析到主机。通配符记录不覆盖三级域名 `op.console.<根域名>`，须单独添加记录。未指定域名时，安装器使用 `<节点 IP>.nip.io`。
+- 使用自有域名时，`<根域名>`、`console.<根域名>`、`op.console.<根域名>` 与 `*.<根域名>` 均解析到主机。通配符记录不覆盖三级域名 `op.console.<根域名>`，须单独添加记录。未指定域名时，安装器使用 `<主机地址>.nip.io`；主机自身地址为私有地址的云主机使用 `<公网地址>.nip.io`，见[公网地址](/guide/requirements#public-address)。
 
 安装器在修改主机之前执行安装前检查，发现问题时一次性列出全部问题并退出，主机保持原状。检查项见[安装前检查](/guide/requirements#preflight)。
 
@@ -58,22 +58,24 @@ description: 在 Linux 主机上安装 Felis，完成设置向导并创建首位
 curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh | sudo FELIS_VERSION_BOOTSTRAP=dev FELIS_ROOT_DOMAIN=mc.example.com bash
 ```
 
-安装命令可以重复执行。重复执行会将主机收敛到目标状态，已生成的密钥保存在 `/etc/felis/secrets.env` 中并继续沿用。重复执行时沿用已安装的根域名，发布通道须重新指定。升级流程见[升级](/operations/upgrade#update)。
+安装命令可以重复执行。重复执行会将主机收敛到目标状态，已生成的密钥保存在 `/etc/felis/secrets.env` 中并继续沿用。重复执行时沿用已安装的根域名。发布通道、游戏端口、面板端口与世界回收目录记录在 `/etc/felis/install.env` 中，重复执行与面板发起的更新均沿用这些设置；本次执行时显式设置的变量替换记录的值。升级流程见[升级](/operations/upgrade#update)。
 
 ### 常用安装变量 {#installer-variables}
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `FELIS_VERSION_BOOTSTRAP` | `release` | 发布通道：`release` 或 `dev`。 |
+| `FELIS_VERSION_BOOTSTRAP` | `release` | 发布通道：`release` 或 `dev`。记录供之后的运行沿用。 |
 | `FELIS_REF` | 空 | 从源码构建指定的分支、标签或提交。 |
 | `FELIS_RELEASE` | 最新发布版本 | 安装指定的发布版本。 |
 | `FELIS_ARTIFACT_DIR` | 空 | 从本地目录安装发布附件，见[使用预先下载的发布附件安装](#offline-install)。 |
 | `FELIS_INSTALL_MODE` | 交互式询问 | 安装类型：`full` 或 `nano`。 |
 | `FELIS_NO_SETUP` | 空 | 设为 `1` 时，安装结束后不启动设置向导。 |
-| `FELIS_ROOT_DOMAIN` | `<节点 IP>.nip.io` | 根域名，仅在首次安装时生效。更换根域名见[更换根域名](/operations/access#change-domain)。 |
-| `FELIS_PANEL_NODEPORT` | `30443` | 面板与 API 的本机 HTTPS 端口。 |
+| `FELIS_ROOT_DOMAIN` | `<主机地址>.nip.io`；云主机为 `<公网地址>.nip.io` | 根域名，仅在首次安装时生效。更换根域名见[更换根域名](/operations/access#change-domain)。 |
+| `FELIS_PUBLIC_IP` | 按需查询 | 提供给玩家与浏览器的公网 IPv4 地址，用于默认根域名、面板证书与安装器输出的地址。未设置且主机自身地址为私有地址时，安装器通过 HTTPS 查询该地址；设为 `none` 时使用主机自身地址。见[公网地址](/guide/requirements#public-address)。 |
+| `FELIS_PANEL_NODEPORT` | `30443` | 面板与 API 的本机 HTTPS 端口。记录供之后的运行沿用。 |
+| `FELIS_GAME_PORT` | `25565` | 游戏代理接受玩家连接的端口。记录供之后的运行沿用。 |
 | `FELIS_PREFLIGHT` | `strict` | 设为 `warn` 时，安装前检查发现的问题仅作为警告，安装继续进行。 |
-| `FELIS_WORLDS_HOST_PATH` | 空 | 世界卷所在的节点目录（k3s 为 `/var/lib/rancher/k3s/storage`）。设置后启用闲置世界回收，见[世界回收](/operations/backup#world-cleanup)。 |
+| `FELIS_WORLDS_HOST_PATH` | 空 | 世界卷所在的节点目录（k3s 为 `/var/lib/rancher/k3s/storage`）。设置后启用闲置世界回收，见[世界回收](/operations/backup#world-cleanup)。记录供之后的运行沿用；显式设为空值可再次关闭回收。 |
 | `FELIS_VELOCITY_XMX` | `1G`，小内存配置为 `256M` | 游戏代理的最大堆内存，至少 `256M`。 |
 | `FELIS_HOST_PROFILE` | `auto` | 主机配置：`auto`、`small` 或 `standard`，见[小内存主机](/guide/requirements#small-hosts)。 |
 | `FELIS_DB_BACKUP_TIME` | `*-*-* 03:30:00` | 数据库每日备份时间，使用 systemd 日历表达式。 |
@@ -99,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 ## 设置向导 {#setup-wizard}
 
-设置向导 `felis setup` 配置面板访问方式与上传存储，并创建首位所有者。安装器仅在交互式终端中自动启动向导；输出重定向到日志文件或通过 cloud-init 安装时，在安装结束后执行：
+设置向导 `felis setup` 配置面板访问方式与邮件服务，并创建首位所有者。安装器仅在交互式终端中自动启动向导；输出重定向到日志文件或通过 cloud-init 安装时，在安装结束后执行：
 
 ```bash
 sudo felis setup
@@ -113,7 +115,7 @@ sudo felis setup
 | --- | --- |
 | Preflight | 确认控制面已就绪。 |
 | Connection | 选择面板访问方式，见[访问方式](#access-method)。 |
-| Storage | 选择投稿上传内容的存储位置，见[上传存储](#wizard-storage)。 |
+| Mail | 配置邮件中继（SMTP）。此步骤可以跳过，见[邮件服务](#wizard-mail)。 |
 | Panel login | 创建所有者账户并生成一次性设置链接，见[创建首位所有者](#first-owner)。 |
 
 向导结束时创建登录空间与正式大厅。登录空间或大厅创建失败不影响面板初始化，可在面板中排查。
@@ -128,14 +130,17 @@ sudo felis setup
 
 在此步骤按 Esc 等同于选择 Local only。Local only 与反向代理方式下，管理控制台仅由所有者的登录凭据（通行密钥或邮箱验证码）保护；Cloudflare Access 在此之前增加一层边缘校验。访问方式可在面板「平台设置 → 访问与安全 → 访问方式与域名」中更改，详见[访问方式](/operations/access#access-methods)。
 
+### 邮件服务 {#wizard-mail}
+
+Felis 通过 SMTP 中继发送邮箱登录验证码、所有者邮箱验证、账户找回验证码与告警。填写中继主机、端口、发件地址，中继要求认证时另填用户名与密码。密码保存在 Kubernetes Secret 中。保存前，向导向发件地址发送一封测试邮件，邮件送达后才保存设置。
+
+按 Esc 可跳过此步骤。不配置邮件服务时，Felis 不发送邮箱验证码与告警，所有者须创建通行密钥，通行密钥要求受信任的证书。邮件服务可稍后在 `sudo felis setup` 的汇总界面按 `e` 配置，或在面板「平台设置 → 通知与保留 → 邮件服务」中配置。
+
 ### 上传存储 {#wizard-storage}
 
-玩家投稿的模组包构建上下文保存在所选位置：
+玩家投稿的模组包构建上下文默认保存在本机磁盘，适合单节点安装。如需改用 S3 兼容存储桶（如 AWS S3、MinIO、Cloudflare R2），在汇总界面按 `s`，填写服务地址、存储桶、区域（可选）与访问密钥；密钥保存在 Kubernetes Secret 中。在该界面按 Esc 时，存储位置保持不变。
 
-- Local disk：保存在本机磁盘，适合单节点安装。
-- Object storage：保存在 S3 兼容存储桶（如 AWS S3、MinIO、Cloudflare R2）中，需填写服务地址、存储桶、区域（可选）与访问密钥。密钥保存在 Kubernetes Secret 中。
-
-存储位置可在面板「平台设置 → 访问与安全 → 上传存储」中更改，详见[上传存储](/operations/storage#upload-storage)。
+存储位置也可在面板「平台设置 → 访问与安全 → 上传存储」中更改，详见[上传存储](/operations/storage#upload-storage)。
 
 ### 创建首位所有者 {#first-owner}
 
@@ -209,8 +214,8 @@ Minecraft 角色可稍后在「账户」页关联，见[关联账户](/guide/pla
 | --- | --- |
 | 运维控制台（所有者、管理员） | `https://op.console.<根域名>`；Local only 方式下为 `https://op.console.<根域名>:30443` |
 | 玩家控制台 | `https://console.<根域名>`；Local only 方式下为 `https://console.<根域名>:30443` |
-| 通过 IP 直接访问 | `https://<节点 IP>:30443`，证书为自签名，浏览器首次访问时提示确认；此方式无法使用通行密钥 |
-| 游戏地址 | `<节点 IP>:25565`，可将 `mc.<根域名>` 解析到此地址；各服务器的地址为 `<子域名>.<根域名>` |
+| 通过 IP 直接访问 | `https://<安装器输出的地址>:30443`，证书为自签名，浏览器首次访问时提示确认；此方式无法使用通行密钥 |
+| 游戏地址 | `<公网地址>:25565`，可将 `mc.<根域名>` 解析到此地址；各服务器的地址为 `<子域名>.<根域名>` |
 
 「账户」页显示进服地址，以及登录空间与正式大厅所需的 Minecraft Java 版客户端版本。安装器将实际构建的版本写入 `felis.toml` 的 `[velocity].game_version`；使用自定义登录空间或大厅镜像时须自行填写，未填写时面板显示版本未配置。
 
@@ -218,7 +223,7 @@ Minecraft 角色可稍后在「账户」页关联，见[关联账户](/guide/pla
 
 ## 后续步骤 {#next-steps}
 
-- 在「平台设置 → 通知与保留 → 邮件服务」中配置邮件服务，用于发送登录验证码与告警，见[平台设置](/guide/administration#platform-settings)。
+- 跳过了邮件服务步骤时，在「平台设置 → 通知与保留 → 邮件服务」中配置邮件服务，用于发送登录验证码与告警，见[平台设置](/guide/administration#platform-settings)。
 - 配置异地副本，使备份保存在主机之外，见[异地副本](/operations/backup#offsite)。
 - 设置认证源与玩家进入策略，见[认证源](/guide/players#auth-sources)与[玩家进入策略](/guide/players#entry-policy)。
 - 创建第一台服务器，见[创建服务器](/guide/servers#create-server)。

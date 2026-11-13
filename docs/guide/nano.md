@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `FELIS_INSTALL_MODE` | 交互式询问 | 设为 `nano`。 |
-| `FELIS_ROOT_DOMAIN` | `<节点 IP>.nip.io` | 根域名。玩家面板为 `console.<根域名>`，管理控制台为 `op.console.<根域名>`。 |
+| `FELIS_ROOT_DOMAIN` | `<主机地址>.nip.io`，云主机为 `<公网地址>.nip.io`（见[公网地址](/guide/requirements#public-address)） | 根域名。玩家面板为 `console.<根域名>`，管理控制台为 `op.console.<根域名>`。 |
 | `FELIS_NANO_LISTEN` | `127.0.0.1:8081` | 内部端口的监听地址。代理在其他主机上时，设为内网地址。 |
 | `FELIS_NANO_PROXY_CIDR` | — | 允许访问内部端口的代理地址，带前缀长度（例如 `10.0.0.7/32`）。 |
 | `FELIS_NANO_PANEL_PORT` | `8443` | 面板的 HTTPS 端口。 |

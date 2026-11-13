@@ -143,7 +143,7 @@ Allow outbound UDP 123 for time synchronization ([Time synchronization](#time-sy
 
 ## DNS {#dns}
 
-Felis serves everything under one root domain, set with `FELIS_ROOT_DOMAIN` at the first installation. The default is `<node-ip>.nip.io`, which needs no DNS records of your own. A rerun of the installer keeps the installed domain; `felis domain set` moves it later ([Changing the root domain](/en/operations/access#change-domain)).
+Felis serves everything under one root domain, set with `FELIS_ROOT_DOMAIN` at the first installation. The default is `<host-address>.nip.io`, or `<public-address>.nip.io` on a cloud host ([Public address](#public-address)), which needs no DNS records of your own. A rerun of the installer keeps the installed domain; `felis domain set` moves it later ([Changing the root domain](/en/operations/access#change-domain)).
 
 | Name | Used for |
 | --- | --- |
@@ -155,11 +155,26 @@ With a domain of your own, create records that lead to the host for `<root>`, `*
 
 ## Static address {#static-address}
 
-An installation is bound to the IPv4 address it was made on: the k3s node, the network policies, the panel certificate and the default `nip.io` domain all carry it. Give the host a static address or a DHCP reservation before installing.
+An installation is bound to the IPv4 address it was made on: the k3s node, the network policies and the panel certificate carry it, and the default `nip.io` domain carries it or the [public address](#public-address) forwarded to it. Give the host a static address or a DHCP reservation before installing.
 
 - The installer warns when the address is a DHCP lease.
 - When the host loses its address, the watchdog reports `host-address` (critical, after 5 minutes). See [Troubleshooting](/en/operations/troubleshooting#host-address-changed).
 - The k3s node name is pinned at installation, so changing the hostname is harmless.
+
+## Public address {#public-address}
+
+Players and browsers reach the host at its public IPv4 address. On a cloud host, the host's own address is usually private (in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `100.64.0.0/10`), and the provider forwards a public address to it. When the host's own address is private and a cloud provider's metadata service answers, the installer treats the host as a cloud host and looks up the public address over HTTPS, from `1.1.1.1` and, as a fallback, `api.ipify.org`, and uses it for:
+
+- the default root domain of a first installation (`<public-address>.nip.io`);
+- the panel certificate, which names both addresses;
+- the panel and game addresses the installer prints.
+
+The k3s node, the network policies and the firewall rules keep the host's own address. The installer log states which address it uses and why. An installed root domain is always kept.
+
+- `FELIS_PUBLIC_IP=<address>` sets the public address without a lookup.
+- `FELIS_PUBLIC_IP=none` keeps the host's own address without a lookup.
+- A host on a home or office network is not a cloud host, so the installer keeps its own address; when players reach it through a router's port forwarding, name the public address with `FELIS_PUBLIC_IP`.
+- When the lookup fails, the installer keeps the host's own address and prints a warning.
 
 ## Time synchronization {#time-sync}
 

@@ -28,14 +28,14 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 `sudo` resets the environment, so a variable exported before `sudo` does not reach the installer. Either name it on the `sudo` line as above, or export it and run `sudo -E bash`.
 
-Variables that apply only to the first install, or that later runs keep without being named again, say so in their description. A rerun reuses the generated credentials in `/etc/felis/secrets.env` and keeps the installed root domain.
+Variables that apply only to the first install, or that later runs keep without being named again, say so in their description. A rerun reuses the generated credentials in `/etc/felis/secrets.env` and keeps the installed root domain. `FELIS_VERSION_BOOTSTRAP`, `FELIS_GAME_PORT`, `FELIS_PANEL_NODEPORT` and `FELIS_WORLDS_HOST_PATH` are recorded in `/etc/felis/install.env`: reruns and updates started from the panel use the recorded values, and a variable named for a run replaces its recorded value. The installer reads the file as plain `KEY=value` lines, checks each value as it checks the variable, and ignores any other line.
 
 ### Install mode and channel {#install-source-variables}
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `FELIS_INSTALL_MODE` | Ask on a terminal, otherwise `full` | `full` installs the whole platform. `nano` installs Felis-nano, which handles login control only and runs without k3s; see [Felis-nano](/en/guide/nano). On a host that runs Felis-nano and no full install, the default is `nano`. |
-| `FELIS_VERSION_BOOTSTRAP` | `release` | `release` installs the newest published release from its assets, each checked against the release's `SHA256SUMS`. `dev` builds the newest `main` commit from source. A rerun must name the channel again. |
+| `FELIS_VERSION_BOOTSTRAP` | `release` | `release` installs the newest published release from its assets, each checked against the release's `SHA256SUMS`. `dev` builds the newest `main` commit from source. Later runs keep the channel. To install a release with `FELIS_RELEASE` on a host that follows `dev`, also set `FELIS_VERSION_BOOTSTRAP=release`. |
 | `FELIS_RELEASE` | Newest release | A published release tag (`v1.2.3`) to install instead of the newest, from its assets. Use the installer of the same tag. This is the way back to an earlier release. |
 | `FELIS_REF` | — | A branch, tag or commit to build from source. It overrides the channel. |
 | `FELIS_ARTIFACT_DIR` | — | Absolute path of a directory holding a release's assets. The Felis binary, images and plugin are installed from there; nothing of Felis's own is downloaded or built, and a missing or mismatching file stops the install. Cannot be combined with `FELIS_REF` or `FELIS_SKIP_FETCH`. |
@@ -51,9 +51,10 @@ See [Release channels](/en/guide/deployment#channels) and [Installing from downl
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `FELIS_ROOT_DOMAIN` | `<node-ip>.nip.io` | Root domain of the install. First install only: a rerun keeps the installed domain and stops when given a different one. Move the domain with [`felis domain set`](/en/reference/cli#domain). |
-| `FELIS_PANEL_NODEPORT` | `30443` | NodePort of the built-in HTTPS panel and API. |
-| `FELIS_GAME_PORT` | `25565` | Port on which the game proxy accepts players. The panel adds it to server addresses when it is not `25565`. |
+| `FELIS_ROOT_DOMAIN` | `<host-address>.nip.io`; `<public-address>.nip.io` on a cloud host | Root domain of the install. First install only: a rerun keeps the installed domain and stops when given a different one. Move the domain with [`felis domain set`](/en/reference/cli#domain). |
+| `FELIS_PUBLIC_IP` | — | Public IPv4 address given to players and browsers: in the default root domain, the panel certificate and the addresses the installer prints. Unset, the installer looks it up over HTTPS when the host's own address is private and the host is a cloud host. `none` keeps the host's own address. The cluster and the firewall always use the host's own address. See [Public address](/en/guide/requirements#public-address). |
+| `FELIS_PANEL_NODEPORT` | `30443` | NodePort of the built-in HTTPS panel and API. Later runs keep it. |
+| `FELIS_GAME_PORT` | `25565` | Port on which the game proxy accepts players. The panel adds it to server addresses when it is not `25565`. Later runs keep it. |
 
 See [Network and ports](/en/guide/requirements#network).
 
@@ -84,7 +85,7 @@ See [Component versions](/en/operations/upgrade#component-versions).
 | --- | --- | --- |
 | `FELIS_BACKUP_PVC` | `felis-backups` | World archive volume. An empty value disables world backups; the backup endpoints then answer 503. |
 | `FELIS_ARCHIVE_LOCAL_PATH` | `/var/lib/felis/archives` | Path at which that volume is mounted inside backup Jobs. Written to `[archive] local_path`. |
-| `FELIS_WORLDS_HOST_PATH` | Unset | Node directory holding the world volumes (`/var/lib/rancher/k3s/storage` on the installer's k3s). When set, the daily reaper also archives and then deletes worlds idle for 15 days. When unset, worlds are never deleted and the reaper only removes expired backups. See [World cleanup](/en/operations/backup#world-cleanup). |
+| `FELIS_WORLDS_HOST_PATH` | Unset | Node directory holding the world volumes (`/var/lib/rancher/k3s/storage` on the installer's k3s). When set, the daily reaper also archives and then deletes worlds idle for 15 days. When unset, worlds are never deleted and the reaper only removes expired backups. Later runs keep it; set it to an empty value to turn world cleanup off again. See [World cleanup](/en/operations/backup#world-cleanup). |
 | `FELIS_REGISTRY_STORAGE` | `10Gi` | Capacity the registry volume requests. First install only; k3s local-path storage does not enforce it. |
 | `FELIS_UPLOADS_STORAGE` | `5Gi` | Capacity the uploads volume requests. First install only; not enforced. |
 | `FELIS_BACKUP_STORAGE` | `10Gi` | Capacity the world archive volume requests. First install only; not enforced. |
@@ -278,7 +279,7 @@ The **Backup and audit retention** card in the panel overrides it. See [Audit lo
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `user_uploads_context` | Set by the storage step | Where uploaded build contexts are stored: `/var/lib/felis/uploads` on the local disk, or `s3://<bucket>[/<prefix>]`. Written by the storage step of `felis setup` or the panel's **Upload storage** card. |
+| `user_uploads_context` | `/var/lib/felis/uploads` | Where uploaded build contexts are stored: `/var/lib/felis/uploads` on the local disk, or `s3://<bucket>[/<prefix>]`. The installer writes the local disk when no upload store is configured; the upload storage screen of `felis setup` (`s` on its summary) or the panel's **Upload storage** card changes it. |
 | `user_uploads_max_bytes` | `4Gi` | Total size of all users' uploaded contexts. Each user also has a budget of 2 GiB. |
 | `context_max_bytes` | `1Gi` | Maximum size of one uploaded build context. |
 | `max_concurrent_builds` | `2` | Builds that run at once, 1–6. Later builds queue. |
@@ -304,8 +305,8 @@ Used when `user_uploads_context` is an `s3://` location.
 | --- | --- | --- |
 | `endpoint` | — | Endpoint of the S3-compatible store. |
 | `region` | — | Region of the store. |
-| `access_key_ref` | `FELIS_UPLOADS_S3_ACCESS_KEY`, as written by the storage step | Environment variable that holds the access key. |
-| `secret_key_ref` | `FELIS_UPLOADS_S3_SECRET_KEY`, as written by the storage step | Environment variable that holds the secret key. |
+| `access_key_ref` | `FELIS_UPLOADS_S3_ACCESS_KEY`, as written by the upload storage screen | Environment variable that holds the access key. |
+| `secret_key_ref` | `FELIS_UPLOADS_S3_SECRET_KEY`, as written by the upload storage screen | Environment variable that holds the secret key. |
 
 The keys themselves are kept in `/etc/felis/uploads-s3-access-key`, `/etc/felis/uploads-s3-secret-key` and the `felis-uploads-s3` Secret.
 
@@ -344,6 +345,7 @@ The installer sets these keys on every run. Change them through the installer va
 | `uploads-s3-access-key`, `uploads-s3-secret-key` | Upload bucket credentials. | `felis setup`, panel | Yes |
 | `watchdog-heartbeat-url` | Heartbeat URL, mode 0600. | Installer | Yes: the path is the check's key |
 | `host-settings.env` | Installer settings saved in the panel: `FELIS_DB_BACKUP_TIME`, `FELIS_DB_BACKUP_KEEP`, `FELIS_VELOCITY_XMX`. | Panel | — |
+| `install.env` | Install parameters later installer runs and updates reuse: `FELIS_VERSION_BOOTSTRAP`, `FELIS_GAME_PORT`, `FELIS_PANEL_NODEPORT`, `FELIS_WORLDS_HOST_PATH`. Mode 0600. | Installer | — |
 | `host-profile` | The host profile (`small` or `standard`), kept by later installer runs. | Installer | — |
 | `panel-tls.crt`, `panel-tls.key` | TLS certificate and key of the panel. The installer issues a self-signed pair valid for 825 days. | Installer, `felis domain set` | The key |
 | `cloudflared.yml` | Cloudflare tunnel configuration. | Cloudflare step of `felis setup`, panel | — |
@@ -425,7 +427,7 @@ Saving the daily backup schedule takes one backup at once. Changing the proxy he
 The panel's host operations write the same files as the command line, so the most recent change applies, whichever made it:
 
 - the access method (`[auth]`, `cloudflared.yml`), as the connection step of `felis setup`;
-- upload storage (`[registry]`, `[registry.s3]` and the upload bucket key files), as the storage step of `felis setup`;
+- upload storage (`[registry]`, `[registry.s3]` and the upload bucket key files), as the upload storage screen of `felis setup`;
 - the root domain, through `felis domain set`;
 - the off-site copy (`[offsite]` and `offsite.env`), the same as an installer run with `FELIS_OFFSITE_*`;
 - credential rotation, through `felis rotate-token`.

@@ -28,14 +28,14 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 `sudo` 会重置环境变量，在 `sudo` 之前 export 的变量不会传到安装器。应像上例一样写在 `sudo` 一行中，或先 export 再执行 `sudo -E bash`。
 
-只在首次安装时生效、或之后的运行无需再次指定即可保留的变量，均在其说明中注明。重跑安装器会复用 `/etc/felis/secrets.env` 中生成的凭据，并保留已安装的根域名。
+只在首次安装时生效、或之后的运行无需再次指定即可保留的变量，均在其说明中注明。重跑安装器会复用 `/etc/felis/secrets.env` 中生成的凭据，并保留已安装的根域名。`FELIS_VERSION_BOOTSTRAP`、`FELIS_GAME_PORT`、`FELIS_PANEL_NODEPORT` 与 `FELIS_WORLDS_HOST_PATH` 记录在 `/etc/felis/install.env` 中：重跑与面板发起的更新使用记录的值，某次运行中指定的变量替换其记录的值。安装器按 `KEY=value` 纯文本行读取该文件，按与变量相同的规则校验每个值，并忽略其他行。
 
 ### 安装模式与渠道 {#install-source-variables}
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `FELIS_INSTALL_MODE` | 在终端上询问，否则为 `full` | `full` 安装完整平台。`nano` 安装 Felis-nano，只负责登录控制，不含 k3s，见 [Felis-nano](/guide/nano)。在运行 Felis-nano 且未安装完整平台的主机上，默认值为 `nano`。 |
-| `FELIS_VERSION_BOOTSTRAP` | `release` | `release` 从最新发布版的资产安装，每个资产都按该发布版的 `SHA256SUMS` 校验。`dev` 从源码构建 `main` 分支的最新提交。重跑时须再次指定渠道。 |
+| `FELIS_VERSION_BOOTSTRAP` | `release` | `release` 从最新发布版的资产安装，每个资产都按该发布版的 `SHA256SUMS` 校验。`dev` 从源码构建 `main` 分支的最新提交。之后的运行沿用该渠道。在跟随 `dev` 的主机上用 `FELIS_RELEASE` 安装发布版时，须同时设置 `FELIS_VERSION_BOOTSTRAP=release`。 |
 | `FELIS_RELEASE` | 最新发布版 | 指定一个已发布的版本标签（`v1.2.3`），以其资产代替最新版安装。应使用同一标签的安装器。这是回退到较早发布版的方式。 |
 | `FELIS_REF` | — | 指定要从源码构建的分支、标签或提交，优先于渠道设置。 |
 | `FELIS_ARTIFACT_DIR` | — | 存放某个发布版资产的目录的绝对路径。Felis 二进制、镜像和插件从该目录安装，不下载也不构建 Felis 自身的任何内容；文件缺失或校验不符时安装停止。不能与 `FELIS_REF` 或 `FELIS_SKIP_FETCH` 同时使用。 |
@@ -51,9 +51,10 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `FELIS_ROOT_DOMAIN` | `<node-ip>.nip.io` | 安装的根域名。仅首次安装生效：重跑时保留已安装的域名，指定不同的值会使安装停止。迁移域名使用 [`felis domain set`](/reference/cli#domain)。 |
-| `FELIS_PANEL_NODEPORT` | `30443` | 内置 HTTPS 面板和 API 的 NodePort。 |
-| `FELIS_GAME_PORT` | `25565` | 游戏代理接受玩家连接的端口。不是 `25565` 时，面板会在服务器地址中显示该端口。 |
+| `FELIS_ROOT_DOMAIN` | `<主机地址>.nip.io`；云主机为 `<公网地址>.nip.io` | 安装的根域名。仅首次安装生效：重跑时保留已安装的域名，指定不同的值会使安装停止。迁移域名使用 [`felis domain set`](/reference/cli#domain)。 |
+| `FELIS_PUBLIC_IP` | — | 提供给玩家与浏览器的公网 IPv4 地址，用于默认根域名、面板证书与安装器输出的地址。未设置、主机自身地址为私有地址且主机为云主机时，安装器通过 HTTPS 查询。设为 `none` 时使用主机自身地址。集群与防火墙始终使用主机自身地址。见[公网地址](/guide/requirements#public-address)。 |
+| `FELIS_PANEL_NODEPORT` | `30443` | 内置 HTTPS 面板和 API 的 NodePort。之后的运行沿用该值。 |
+| `FELIS_GAME_PORT` | `25565` | 游戏代理接受玩家连接的端口。不是 `25565` 时，面板会在服务器地址中显示该端口。之后的运行沿用该值。 |
 
 另见[网络与端口](/guide/requirements#network)。
 
@@ -84,7 +85,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | --- | --- | --- |
 | `FELIS_BACKUP_PVC` | `felis-backups` | 世界归档卷。设为空值会禁用世界备份，备份接口随之返回 503。 |
 | `FELIS_ARCHIVE_LOCAL_PATH` | `/var/lib/felis/archives` | 该卷在备份 Job 中的挂载路径，写入 `[archive] local_path`。 |
-| `FELIS_WORLDS_HOST_PATH` | 未设置 | 存放世界卷的节点目录（安装器部署的 k3s 上为 `/var/lib/rancher/k3s/storage`）。设置后，每日运行的 reaper 还会先归档、再删除空闲 15 天的世界；未设置时从不删除世界，reaper 只移除过期备份。见[世界清理](/operations/backup#world-cleanup)。 |
+| `FELIS_WORLDS_HOST_PATH` | 未设置 | 存放世界卷的节点目录（安装器部署的 k3s 上为 `/var/lib/rancher/k3s/storage`）。设置后，每日运行的 reaper 还会先归档、再删除空闲 15 天的世界；未设置时从不删除世界，reaper 只移除过期备份。之后的运行沿用该值；设为空值可再次关闭世界清理。见[世界清理](/operations/backup#world-cleanup)。 |
 | `FELIS_REGISTRY_STORAGE` | `10Gi` | 镜像仓库卷申请的容量。仅首次安装生效；k3s local-path 存储不强制该容量。 |
 | `FELIS_UPLOADS_STORAGE` | `5Gi` | 上传卷申请的容量。仅首次安装生效，不强制。 |
 | `FELIS_BACKUP_STORAGE` | `10Gi` | 世界归档卷申请的容量。仅首次安装生效，不强制。 |
@@ -278,7 +279,7 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `user_uploads_context` | 由存储步骤设置 | 上传的构建上下文的存放位置：本地磁盘为 `/var/lib/felis/uploads`，或为 `s3://<bucket>[/<prefix>]`。由 `felis setup` 的存储步骤或面板的「上传存储」卡片写入。 |
+| `user_uploads_context` | `/var/lib/felis/uploads` | 上传的构建上下文的存放位置：本地磁盘为 `/var/lib/felis/uploads`，或为 `s3://<bucket>[/<prefix>]`。未配置上传存储时由安装器写入本地磁盘；可通过 `felis setup` 的上传存储界面（在其汇总界面按 `s`）或面板的「上传存储」卡片修改。 |
 | `user_uploads_max_bytes` | `4Gi` | 所有用户上传上下文的总容量。每个用户另有 2 GiB 的额度。 |
 | `context_max_bytes` | `1Gi` | 单个构建上下文的最大容量。 |
 | `max_concurrent_builds` | `2` | 同时运行的构建数量，范围 1–6，超出的构建排队。 |
@@ -304,8 +305,8 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 | --- | --- | --- |
 | `endpoint` | — | S3 兼容存储的地址。 |
 | `region` | — | 存储所在区域。 |
-| `access_key_ref` | `FELIS_UPLOADS_S3_ACCESS_KEY`（由存储步骤写入） | 保存访问密钥的环境变量名。 |
-| `secret_key_ref` | `FELIS_UPLOADS_S3_SECRET_KEY`（由存储步骤写入） | 保存私有密钥的环境变量名。 |
+| `access_key_ref` | `FELIS_UPLOADS_S3_ACCESS_KEY`（由上传存储界面写入） | 保存访问密钥的环境变量名。 |
+| `secret_key_ref` | `FELIS_UPLOADS_S3_SECRET_KEY`（由上传存储界面写入） | 保存私有密钥的环境变量名。 |
 
 密钥本身保存在 `/etc/felis/uploads-s3-access-key`、`/etc/felis/uploads-s3-secret-key` 和 `felis-uploads-s3` Secret 中。
 
@@ -344,6 +345,7 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 | `uploads-s3-access-key`、`uploads-s3-secret-key` | 上传存储桶的凭据。 | `felis setup`、面板 | 是 |
 | `watchdog-heartbeat-url` | 心跳地址，权限 0600。 | 安装器 | 是：路径即该检查的密钥 |
 | `host-settings.env` | 在面板中保存的安装器设置：`FELIS_DB_BACKUP_TIME`、`FELIS_DB_BACKUP_KEEP`、`FELIS_VELOCITY_XMX`。 | 面板 | — |
+| `install.env` | 之后的安装器运行与更新沿用的安装参数：`FELIS_VERSION_BOOTSTRAP`、`FELIS_GAME_PORT`、`FELIS_PANEL_NODEPORT`、`FELIS_WORLDS_HOST_PATH`。权限 0600。 | 安装器 | — |
 | `host-profile` | 主机配置（`small` 或 `standard`），供之后的安装器运行沿用。 | 安装器 | — |
 | `panel-tls.crt`、`panel-tls.key` | 面板的 TLS 证书和私钥。安装器签发有效期 825 天的自签名证书。 | 安装器、`felis domain set` | 私钥是 |
 | `cloudflared.yml` | Cloudflare 隧道配置。 | `felis setup` 的 Cloudflare 步骤、面板 | — |
@@ -425,7 +427,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 面板中的主机操作与命令行写入相同的文件，因此以最近一次修改为准，无论修改来自何处：
 
 - 访问方式（`[auth]`、`cloudflared.yml`），等同于 `felis setup` 的连接步骤；
-- 上传存储（`[registry]`、`[registry.s3]` 和上传存储桶的密钥文件），等同于 `felis setup` 的存储步骤；
+- 上传存储（`[registry]`、`[registry.s3]` 和上传存储桶的密钥文件），等同于 `felis setup` 的上传存储界面；
 - 根域名，通过 `felis domain set`；
 - 异地副本（`[offsite]` 和 `offsite.env`），等同于带 `FELIS_OFFSITE_*` 运行安装器；
 - 凭据轮换，通过 `felis rotate-token`。

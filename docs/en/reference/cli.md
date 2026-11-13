@@ -18,7 +18,7 @@ This page describes the subcommands of the `felis` binary that operators run on 
 - The Owner can run many of these operations from the panel. The panel hands them to `felis-node-control.service`, which runs the same commands. See [Running host operations from the panel](/en/operations/#panel-host-operations).
 
 ::: tip
-On some distributions, `sudo` uses a `secure_path` that omits `/usr/local/bin`. If `sudo felis` reports `command not found`, run `sudo /usr/local/bin/felis …`.
+On some distributions, such as the Red Hat family, `sudo` uses a `secure_path` that omits `/usr/local/bin`. The installer therefore also creates `/usr/bin/felis` as a link to the binary, so `sudo felis` works everywhere. When another file already occupies `/usr/bin/felis`, the installer leaves it in place and prints a warning; on such a host, run `sudo /usr/local/bin/felis …`.
 :::
 
 ## Command overview {#overview}
@@ -57,7 +57,7 @@ sudo felis setup [-config path]
 ```
 
 - On a host where Felis is not installed yet, it first runs the installer built into the binary, then continues with the wizard. To choose a release channel or set installer variables, run the installer instead; see [Installation](/en/guide/deployment#install).
-- The wizard covers preflight, the connection (direct access, your own reverse proxy, or Cloudflare Tunnel), upload storage (the local disk or an S3-compatible bucket) and the first Owner. Its summary screen also configures the mail relay.
+- The wizard covers preflight, the connection (direct access, your own reverse proxy, or Cloudflare Tunnel), the mail relay and the first Owner. Esc skips the mail step: without mail there are no email codes and no alerts, and the Owner must create a passkey, which requires a trusted certificate. Upload storage defaults to the local disk; `s` on the summary screen moves it to an S3-compatible bucket, and `e` configures the mail relay.
 - When it creates the Owner, it prints a one-time URL for recording an email address and creating a passkey. The URL is valid for 30 minutes. Running `sudo felis setup` again while that browser step is unfinished issues a new URL; an account that already has a sign-in factor is never reset.
 - It creates the login space and lobby system servers when they are missing. Existing system servers keep their desired state, and a login space or lobby that fails to start does not block panel setup.
 - On an installed host it opens on the status screen, from which the connection, the upload storage and the mail relay can be changed. Leaving that screen without a change changes nothing.

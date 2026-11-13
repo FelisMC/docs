@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/uninstall
 Both modes remove:
 
 - The Felis systemd units: the timers (`felis-db-backup`, `felis-watchdog`, `felis-offsite`, `felis-build-tools`, `felis-update-check`) and their services, `felis-watchdog-failed.service`, `felis-velocity.service`, `felis-nano.service`, `cloudflared-felis.service`, and `felis-postgres-firewall.service` from early releases.
-- The game proxy's system user `felis-velocity`, Felis-nano's system user `felis-nano`, `/opt/felis` and `/usr/local/bin/felis`.
+- The game proxy's system user `felis-velocity`, Felis-nano's system user `felis-nano`, `/opt/felis`, `/usr/local/bin/felis` and the link to it at `/usr/bin/felis`.
 - The release assets an interrupted installation left in `/var/lib/felis/artifacts`.
 - The cloudflared binary the installer placed (kept when another service unit uses it).
 - The nftables table `felis_edge` (and `felis_postgres` from early releases), the firewalld ports the installer opened and its `felis-`-commented ufw rules; the rules admitting the k3s ranges go only when k3s goes too.
