@@ -28,7 +28,7 @@ Felis-nano does not include server management, the lobby and login space, backup
 
 ## Requirements {#requirements}
 
-- A Linux host with systemd, on the distributions the full installation supports; see [Requirements](/en/guide/requirements).
+- A Linux host with systemd, on the distributions the full installation supports; see [Requirements](/en/guide/requirements). Felis-nano has no memory minimum.
 - Where the distribution ships a PostgreSQL older than 13 (for example Ubuntu 20.04), install 13 or later from the PostgreSQL project's repository first. On RHEL-family distributions the installer enables the newest PostgreSQL module stream.
 - The Velocity proxy runs with `online-mode` enabled.
 - The proxy's host can reach Felis-nano's internal port.

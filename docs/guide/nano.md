@@ -28,7 +28,7 @@ Felis-nano 不包含服务器管理、大厅与登录空间、备份、镜像构
 
 ## 环境要求 {#requirements}
 
-- 使用 systemd 的 Linux 主机，发行版范围与完整安装相同，见[环境要求](/guide/requirements)。
+- 使用 systemd 的 Linux 主机，发行版范围与完整安装相同，见[环境要求](/guide/requirements)。Felis-nano 不设内存下限。
 - 发行版提供的 PostgreSQL 低于 13 时（例如 Ubuntu 20.04），须先从 PostgreSQL 官方软件源安装 13 或更高版本。RHEL 系发行版由安装器启用最新的 PostgreSQL 模块流。
 - Velocity 代理开启 `online-mode`。
 - 代理所在主机可以访问 Felis-nano 的内部端口。

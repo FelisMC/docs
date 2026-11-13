@@ -70,7 +70,7 @@ A host with less than 3.5 GiB of memory gets the small-host profile on its first
 - The game proxy's heap ceiling defaults to `256M` ([Game proxy memory](#proxy-heap));
 - k3s runs without the Helm controller, which Felis does not use, and with a 400 MiB soft limit on its Go heap.
 
-On a "2 GB" cloud host that reports about 1.6 GiB, the idle platform takes about 0.6 GB on the small-host profile and the components shipped with the system image another 0.4 GB, which leaves too little for a Paper server: starting one keeps the host paging, and the platform stops responding. A host that runs game servers needs at least 4 GB of memory, as in [Recommendations](#recommendations).
+On a "2 GB" cloud host that reports about 1.6 GiB, the idle platform takes about 0.6 GB on the small-host profile and the components shipped with the system image another 0.4 GB, which leaves too little for a Paper server: starting one keeps the host paging, and the platform stops responding. A single-node installation whose host has less than 3.5 GiB of memory therefore runs only the platform: the panel and the API refuse new game servers (error code `host_too_small`), and existing servers are unaffected. Game servers need a host with at least 4 GB of memory (see [Recommendations](#recommendations)), or a worker node in a [multi-node deployment](/en/guide/distributed). The check uses the host's actual memory, whatever the profile: a small-profile host can create servers once it has more memory.
 
 The installer variable `FELIS_HOST_PROFILE` selects the profile:
 
@@ -189,7 +189,7 @@ The host's clock must be kept by NTP. Sign-in codes and sessions expire by it, S
 Before it changes anything, the installer checks the host, reports every problem at once, and stops with the host untouched. It checks:
 
 - **Platform**: the architecture (`x86_64` or `aarch64`), systemd as init, and the memory cgroup controller k3s needs. On a Raspberry Pi, add `cgroup_memory=1 cgroup_enable=memory` to `/boot/firmware/cmdline.txt` and reboot.
-- **Memory**: less than 1.5 GiB is refused (a "2 GB" cloud host, which reports 1.6–1.9 GiB after the kernel's share, passes); a fresh installation with less than 3.5 GiB uses the [small-host profile](#small-hosts), and the standard profile warns.
+- **Memory**: less than 1.5 GiB is refused (a "2 GB" cloud host, which reports 1.6–1.9 GiB after the kernel's share, passes); a fresh installation with less than 3.5 GiB uses the [small-host profile](#small-hosts), and the installer notes that such a host runs only the platform and cannot create game servers. [Felis-nano](/en/guide/nano) has no memory minimum.
 - **Free disk** on each filesystem the installer writes to, summed when several directories share one filesystem:
 
   | Directory | Free space needed (first installation) | On a rerun or a reused directory |
