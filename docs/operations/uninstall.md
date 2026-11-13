@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/uninstall
 
 | 选项 | 说明 |
 | --- | --- |
-| `--purge` | 同时删除 `/etc/felis` 和 `/var/lib/felis`（数据库集群、数据库备份包以及之前卸载时保留的数据），以及世界、归档、Felis 镜像和 Docker 构建缓存 |
+| `--purge` | 同时删除 `/etc/felis` 和 `/var/lib/felis`（数据库集群、数据库备份包以及之前卸载时保留的数据），以及世界、归档、Felis 镜像和 Docker 构建缓存（仅在主机上存在 Felis 镜像时清理构建缓存） |
 | `--keep-k3s` | 保留 k3s，只删除 Felis 的命名空间和 CRD |
 | `--remove-k3s` | 即使集群中还有其他工作负载，也运行 k3s 自身的卸载程序 |
 | `--no-backup` | 跳过保留数据模式在卸载前创建的最终数据库备份包 |
@@ -50,7 +50,7 @@ k3s 的处理方式：集群中只有 Felis 的命名空间时，用 k3s 自带�
 | `/etc/felis`（机密、`felis.toml`、`offsite.env`、`felis setup` 记录的邮件中继密码和上传存储密钥、隧道配置） | 保留；删除 `bootstrap.done` 和每次运行的记录 | 连同隧道凭据文件一起删除 |
 | `/var/lib/felis`（数据库及其备份包） | 保留 | 删除 |
 | 世界、归档、镜像仓库、上传文件 | 移至 `/var/lib/felis/retained/k3s-storage-<时间戳>/`；使用 `--keep-k3s` 时，其卷的回收策略改为 `Retain` 并留在原处 | 删除 |
-| Felis 镜像、Docker 构建缓存 | 保留 | 删除 |
+| Felis 镜像、Docker 构建缓存 | 保留 | 删除；主机上没有 Felis 镜像时保留构建缓存 |
 
 ### 清理主机软件包 {#remove-packages}
 

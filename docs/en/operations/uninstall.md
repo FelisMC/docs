@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/uninstall
 
 | Option | Description |
 | --- | --- |
-| `--purge` | Also deletes `/etc/felis` and `/var/lib/felis` (the database cluster, the database bundles and anything an earlier keep-data run set aside), plus the worlds, archives, Felis images and Docker's build cache |
+| `--purge` | Also deletes `/etc/felis` and `/var/lib/felis` (the database cluster, the database bundles and anything an earlier keep-data run set aside), plus the worlds, archives, Felis images and Docker's build cache (the build cache only where Felis images are present) |
 | `--keep-k3s` | Leaves k3s installed and removes only Felis's namespaces and CRD |
 | `--remove-k3s` | Runs k3s's own uninstaller even when other workloads live in the cluster |
 | `--no-backup` | Skips the final database bundle the keep-data mode takes first |
@@ -50,7 +50,7 @@ How k3s is handled: when the cluster holds nothing but Felis's namespaces, k3s i
 | `/etc/felis` (secrets, `felis.toml`, `offsite.env`, the mail relay password and upload storage keys `felis setup` recorded, the tunnel configuration) | Kept; `bootstrap.done` and the per-run records are removed | Deleted, together with the tunnel's credentials file |
 | `/var/lib/felis` (the database and its bundles) | Kept | Deleted |
 | Worlds, archives, the image registry, uploads | Moved to `/var/lib/felis/retained/k3s-storage-<stamp>/`; with `--keep-k3s`, their volumes switch to the `Retain` reclaim policy and stay in place | Deleted |
-| Felis images, Docker's build cache | Kept | Deleted |
+| Felis images, Docker's build cache | Kept | Deleted; the build cache stays where the host has no Felis images |
 
 ### Removing host packages {#remove-packages}
 
