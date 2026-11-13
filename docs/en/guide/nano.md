@@ -93,8 +93,9 @@ Players of a third-party authentication source start their client through [authl
 
 ## Owner setup {#owner}
 
-The installer ends with a setup link that is valid for 30 minutes. The setup page records an email address and then creates a passkey. Browsers create passkeys only under a trusted certificate, so use one of the following:
+The installer ends with a setup link that is valid for 30 minutes. When `/etc/felis/felis.toml` has an `[smtp]` section, the setup page sends a code to the email address the Owner enters, and verifying it completes setup; a passkey can be added later on the **Account** page. Without mail delivery, the setup page records an email address and then creates a passkey. Browsers create passkeys only under a trusted certificate, so use one of the following:
 
+- Add an `[smtp]` section to `/etc/felis/felis.toml`, run `sudo systemctl restart felis-nano`, then open the setup page again and complete setup with an email code.
 - Write a trusted certificate and key to `/etc/felis/panel-tls.crt` and `/etc/felis/panel-tls.key`, then run `sudo systemctl restart felis-nano`. The certificate must cover both panel hostnames.
 - Serve the panel through a reverse proxy on port 443; see [Reverse proxy](#reverse-proxy).
 

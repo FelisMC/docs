@@ -93,8 +93,9 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 ## 所有者初始化 {#owner}
 
-安装结束时输出初始化链接，有效期 30 分钟。初始化页面先记录邮箱，然后创建 Passkey。浏览器只在受信任的证书下创建 Passkey，因此须采用以下任一方式：
+安装结束时输出初始化链接，有效期 30 分钟。`/etc/felis/felis.toml` 中配置了 `[smtp]` 时，初始化页面向所有者填写的邮箱发送验证码，验证后即完成初始化，Passkey 可稍后在「账户」页添加。未配置邮件服务时，初始化页面先记录邮箱，然后创建 Passkey。浏览器只在受信任的证书下创建 Passkey，因此须采用以下任一方式：
 
+- 在 `/etc/felis/felis.toml` 中添加 `[smtp]`，执行 `sudo systemctl restart felis-nano` 后重新打开初始化页面，改用邮箱验证码完成初始化。
 - 将受信任的证书和私钥写入 `/etc/felis/panel-tls.crt` 与 `/etc/felis/panel-tls.key`，然后执行 `sudo systemctl restart felis-nano`。证书须覆盖两个面板域名。
 - 通过反向代理在 443 端口提供面板，见[反向代理](#reverse-proxy)。
 
