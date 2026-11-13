@@ -163,7 +163,7 @@ An installation is bound to the IPv4 address it was made on: the k3s node, the n
 
 ## Public address {#public-address}
 
-Players and browsers reach the host at its public IPv4 address. On a cloud host, the host's own address is usually private (in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `100.64.0.0/10`), and the provider forwards a public address to it. When the host's own address is private and a cloud provider's metadata service answers, the installer treats the host as a cloud host and looks up the public address over HTTPS, from `1.1.1.1` and, as a fallback, `api.ipify.org`, and uses it for:
+Players and browsers reach the host at its public IPv4 address. On a cloud host, the host's own address is usually private (in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `100.64.0.0/10`), and the provider forwards a public address to it. When the host's own address is private and a cloud provider's metadata service answers, the installer treats the host as a cloud host. It reads the public address from the metadata service (Alibaba Cloud, Tencent Cloud and providers that serve `public-ipv4`), otherwise looks it up over HTTPS from `1.1.1.1` and, as a fallback, `api.ipify.org`, and uses it for:
 
 - the default root domain of a first installation (`<public-address>.nip.io`);
 - the panel certificate, which names both addresses;
