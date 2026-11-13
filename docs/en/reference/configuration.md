@@ -43,6 +43,7 @@ Variables that apply only to the first install, or that later runs keep without 
 | `FELIS_REPO_URL` | `https://github.com/FelisMC/Felis.git` | Git repository to build from and to look up releases in. |
 | `FELIS_GITHUB_TOKEN` | — | GitHub token, needed only to install from a private fork. Secret. |
 | `FELIS_FORCE_UPDATE` | — | `1` reinstalls the binary even when its version already matches. |
+| `FELIS_IGNORE_MAINTENANCE_WINDOW` | — | `1` lets an installer rerun on an installed host skip the [maintenance window](/en/operations/upgrade#maintenance-window) check. `felis update --apply` sets it for the installer it runs. |
 | `FELIS_IMAGE` | `registry.felis.svc:5000/felis/felis:<version>` | Control-plane image reference. An image outside the in-cluster registry is used as it is and is not copied into the registry. |
 
 See [Release channels](/en/guide/deployment#channels) and [Installing from downloaded assets](/en/guide/deployment#offline-install).

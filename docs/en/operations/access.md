@@ -201,7 +201,7 @@ Notes on individual kinds:
 
 ## Emergency access {#break-glass}
 
-`sudo felis breakGlass` opens a root-only, full-screen console that works directly on the database and depends on neither the panel nor web sign-in. It is for local recovery when no Owner can sign in; use it only in an emergency.
+`sudo felis break-glass` opens a root-only, full-screen console that works directly on the database and depends on neither the panel nor web sign-in. It is for local recovery when no Owner can sign in; use it only in an emergency.
 
 The console offers these operations:
 

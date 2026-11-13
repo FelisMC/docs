@@ -17,7 +17,7 @@ Felis has three roles:
 | Admin | Creates servers, changes their settings and manages every server; maintains the login space and lobby, the image whitelist, builds and submission review; in a multi-node deployment, chooses execution nodes and migrates servers. | **Admin**: Login & lobby, Images, Build Pipeline, Submissions |
 | User | Claims servers, manages the servers they own, and submits modpacks. | Dashboard, Servers, My Submissions, Account |
 
-Every role has the Dashboard, Servers, My Submissions and Account. The Owner account is created by the [setup wizard](/en/guide/deployment#setup-wizard). Its role cannot be changed in the panel, and the account cannot be disabled or deleted. If the Owner cannot sign in, recover with `sudo felis breakGlass` on the host. See [Emergency access](/en/operations/access#break-glass).
+Every role has the Dashboard, Servers, My Submissions and Account. The Owner account is created by the [setup wizard](/en/guide/deployment#setup-wizard). Its role cannot be changed in the panel, and the account cannot be disabled or deleted. If the Owner cannot sign in, recover with `sudo felis break-glass` on the host. See [Emergency access](/en/operations/access#break-glass).
 
 ### Sign-in {#sign-in}
 

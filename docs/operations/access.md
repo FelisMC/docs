@@ -201,7 +201,7 @@ sudo felis rotate-token -yes velocity   # 执行轮换
 
 ## 应急访问 {#break-glass}
 
-`sudo felis breakGlass` 打开一个仅限 root 的全屏控制台，直接操作数据库，不依赖面板和 Web 登录。它用于所有者无法登录时的本地恢复，仅在紧急情况下使用。
+`sudo felis break-glass` 打开一个仅限 root 的全屏控制台，直接操作数据库，不依赖面板和 Web 登录。它用于所有者无法登录时的本地恢复，仅在紧急情况下使用。
 
 控制台提供以下操作：
 

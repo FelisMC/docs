@@ -596,7 +596,7 @@ Felis 根据请求的域名识别运维控制台：`admin_hostname`，默认为 
 | --- | --- | --- | --- |
 | 「Owner 账户未初始化，登录不可用」 | — | 尚未创建 Owner | 在主机上执行 `sudo felis setup`，打开其输出的一次性设置链接（见[初始化向导](/guide/deployment#setup-wizard)） |
 | 「设置链接无效或已被使用」 | — | 一次性设置链接已过期或已使用 | 再次执行 `sudo felis setup` 获取新链接 |
-| 「当前部署已禁用本地登录，请通过组织的安全入口访问控制台。」 | `403 local_auth_disabled` | 平台设置 `local_auth_enabled` 关闭或缺失。创建首个 Owner 时会开启该设置。关闭期间，已有会话同样会被拒绝 | 执行 `sudo felis breakGlass` 创建或恢复 Owner，该操作会开启本地登录（见[应急访问](/operations/access#break-glass)） |
+| 「当前部署已禁用本地登录，请通过组织的安全入口访问控制台。」 | `403 local_auth_disabled` | 平台设置 `local_auth_enabled` 关闭或缺失。创建首个 Owner 时会开启该设置。关闭期间，已有会话同样会被拒绝 | 执行 `sudo felis break-glass` 创建或恢复 Owner，该操作会开启本地登录（见[应急访问](/operations/access#break-glass)） |
 | 「登录请求已触发限流，请等待限流解除后重试。」 | `429 rate_limited` | 同一客户端地址发出的登录请求过多 | 按 `Retry-After` 响应头给出的时间等待。所有人同时受影响时，见[所有人同时被限流](#sign-in-rate-limited) |
 | 「邮件服务未配置，无法发送验证码。…」 | `503 mail_unavailable` | 面板和配置文件中均未配置邮件中继 | 使用 Passkey 登录，玩家也可使用游戏绑定码登录。配置邮件中继（见[邮件中继](/operations/monitoring#mail-relay)） |
 | 「邮件发送已触发限流，…」 | `429 mail_rate_limited` | 整个安装的邮件额度已用完，即「每小时发信上限」（默认每小时 120 封） | 见[邮件问题](#mail-problems) |
@@ -681,7 +681,7 @@ sudo k3s kubectl -n felis exec deploy/felis-postgres -c postgres -- psql -U post
 
 1. 请一位在游戏内在线的管理员执行 `/felis web op approve <code>`。该命令显示请求所属的账户；管理员执行 `/felis web op approve <code> <account>` 并写明账户名即可批准。
 2. 改用 Passkey 登录，Passkey 登录无需游戏内批准。
-3. 没有任何工作人员账户能够登录时，在主机上执行 `sudo felis breakGlass` 恢复访问（见[应急访问](/operations/access#break-glass)）。
+3. 没有任何工作人员账户能够登录时，在主机上执行 `sudo felis break-glass` 恢复访问（见[应急访问](/operations/access#break-glass)）。
 
 ## 内部 API 与游戏插件 {#internal-api}
 

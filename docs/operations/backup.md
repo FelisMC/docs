@@ -594,7 +594,7 @@ sudo felis restore-host -yes -take-over      # rebuild, then make this host writ
 
    演练机跳过此步骤。
 
-9. 原主机配置过邮件中继时，确认本机能够发送邮件。执行 `sudo felis setup`，在状态页按 `e`（configure email），重新输入密码后保存预填的中继。保存时会向 From 地址发送一封测试邮件，邮件送达后才写入配置。按发件地址放行的中继，或列出原主机地址的 SPF 记录，会拒绝本机或使邮件进入垃圾箱，应在其中加入新地址。所有者在面板中保存的中继已在第 6 步随数据库恢复，并处于生效状态；面板可访问后，在「平台设置 → 通知与保留 → 邮件服务」中使用「发送测试邮件」检查。没有任何中继且所有者无法登录时，使用 `sudo felis breakGlass` 恢复访问（见[应急访问](/operations/access#break-glass)）。
+9. 原主机配置过邮件中继时，确认本机能够发送邮件。执行 `sudo felis setup`，在状态页按 `e`（configure email），重新输入密码后保存预填的中继。保存时会向 From 地址发送一封测试邮件，邮件送达后才写入配置。按发件地址放行的中继，或列出原主机地址的 SPF 记录，会拒绝本机或使邮件进入垃圾箱，应在其中加入新地址。所有者在面板中保存的中继已在第 6 步随数据库恢复，并处于生效状态；面板可访问后，在「平台设置 → 通知与保留 → 邮件服务」中使用「发送测试邮件」检查。没有任何中继且所有者无法登录时，使用 `sudo felis break-glass` 恢复访问（见[应急访问](/operations/access#break-glass)）。
 
 10. 安装的域名仍指向原主机时，将其迁移到本机。安装器沿用了备份包中的根域名（日志显示 `(reusing the installed domain)`）。
 

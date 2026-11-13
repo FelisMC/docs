@@ -43,6 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | `FELIS_REPO_URL` | `https://github.com/FelisMC/Felis.git` | 构建所用、以及查询发布版所用的 Git 仓库。 |
 | `FELIS_GITHUB_TOKEN` | — | GitHub 令牌，仅在从私有 fork 安装时需要。属于密钥。 |
 | `FELIS_FORCE_UPDATE` | — | 设为 `1` 时，即使版本相同也重新安装二进制。 |
+| `FELIS_IGNORE_MAINTENANCE_WINDOW` | — | 设为 `1` 时，在已安装的主机上重新运行安装器不检查[维护窗口](/operations/upgrade#maintenance-window)。`felis update --apply` 运行安装器时自动设置。 |
 | `FELIS_IMAGE` | `registry.felis.svc:5000/felis/felis:<version>` | 控制面镜像引用。集群内镜像仓库以外的镜像按原样使用，不会复制到镜像仓库。 |
 
 另见[发布渠道](/guide/deployment#channels)和[使用预先下载的资产安装](/guide/deployment#offline-install)。

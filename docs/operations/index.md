@@ -82,7 +82,7 @@ API 中断较久时，代理日志依次出现 `server list refresh failed ... k
 | 配置外部心跳，以便主机整体失联时收到通知 | 安装后一次 | [外部心跳](/operations/monitoring#heartbeat) |
 | 配置异地副本，并将加密密钥保存在主机之外 | 安装后一次 | [异地副本](/operations/backup#offsite)、[加密密钥](/operations/backup#offsite-key) |
 | 检查数据库备份和异地副本是否按时完成 | 每周，或依赖看门狗告警 | [数据库备份](/operations/backup#database-backups) |
-| 查看可用更新，并在维护窗口内应用 | 每月或随发布版 | [升级](/operations/upgrade#update) |
+| 查看可用更新并应用；设置了维护窗口时在窗口内应用 | 每月或随发布版 | [升级](/operations/upgrade#update) |
 | 在备用主机上演练整机重建 | 每个发布版一次 | [整机重建](/operations/backup#rebuild-host) |
 | 具备主机权限的人员离开后轮换凭据 | 按需 | [轮换凭据](/operations/access#rotate-credentials) |
 | 在审计记录超过保留期前导出 | 按保留期 | [导出审计日志](/operations/monitoring#audit-export) |
@@ -118,7 +118,8 @@ API 中断较久时，代理日志依次出现 `server list refresh failed ... k
 | 从异地副本重建本主机 | 「维护与备份 → 异地副本」→「从异地副本重建」 | `felis restore-host` |
 | 健康检查 | 「维护与备份 → 诊断」→「健康检查」→「执行健康检查」 | `felis doctor` |
 | 生成支持包并经浏览器下载 | 「维护与备份 → 诊断」→「支持包」→「生成支持包」 | `felis support-bundle` |
-| 查看组件版本；设置维护窗口 | 「维护与备份 → 版本更新」→「组件版本」「配置维护窗口」 | `felis update`（只读检查）；维护窗口只能在面板中设置 |
+| 查看组件版本；设置可选的维护窗口 | 「维护与备份 → 版本更新」→「组件版本」「维护窗口（可选）」 | `felis update`（只读检查）；维护窗口只能在面板中设置 |
+| 将 Felis 更新到每日检查发现的新版本（发布版主机为新发布版，开发版主机为 main 的最新提交） | 「维护与备份 → 版本更新」→「立即更新」 | `felis update --apply` |
 | 访问方式：直接访问、自有反向代理、Cloudflare Tunnel | 「平台设置 → 访问与安全」→「访问方式与域名」→「应用访问方式」 | `felis setup` 的访问方式步骤 |
 | 检查和更换根域名 | 「平台设置 → 访问与安全」→「访问方式与域名」→「根域名」：「检查当前域名」「更换域名」 | `felis domain check`、`felis domain set` |
 | 上传存储：本机或兼容 S3 的存储桶 | 「平台设置 → 访问与安全」→「上传存储」→「应用存储设置」 | `felis setup` 汇总界面中的 `s` |
@@ -144,8 +145,8 @@ API 中断较久时，代理日志依次出现 `server list refresh failed ... k
 
 - **安装及重新运行安装器**，包括新主机的首次安装，以及使用 `FELIS_RESTORE_FROM_OFFSITE=1` 重建丢失的主机。面板在安装完成后才存在。
 - **`felis setup`**：创建首位所有者。在此之前无人能够登录面板。
-- **`felis breakGlass`**：在没有所有者能够登录时恢复访问，因此不依赖面板，见[应急访问](/operations/access#break-glass)。
-- **版本变更**：`felis update --apply` 和为新发布版运行安装器。「版本更新」标签页报告可用版本并给出命令；应用新版本会替换面板和主机服务所运行的程序，见[升级](/operations/upgrade#update)。
+- **`felis break-glass`**：在没有所有者能够登录时恢复访问，因此不依赖面板，见[应急访问](/operations/access#break-glass)。
+- **指定目标的版本变更与依赖升级**：更新到指定的发布版或提交（`felis update --version`、`--ref`）、重新安装同一版本或降级（`--force`），以及升级 k3s 和 cloudflared（`--all`）。面板只提供更新到每日检查发现的 Felis 新版本，见[在面板中更新](/operations/upgrade#panel-update)。
 - **卸载**，见[卸载与重装](/operations/uninstall#uninstall)。
 - **由服务单元和安装器运行的命令**，例如 `felis api`、`felis operator`、`felis watchdog`、`felis ha leader` 和 `felis ha migrate-storage`。
 - **主机操作服务本身**。`felis-node-control` 停止时，面板无法执行任何主机任务，须在主机上检查并重启：

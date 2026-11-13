@@ -26,7 +26,7 @@ On some distributions, such as the Red Hat family, `sudo` uses a `secure_path` t
 | Command | Purpose | Root | Panel equivalent |
 | --- | --- | --- | --- |
 | [`felis setup`](#setup) | Install the host when needed, configure access and upload storage, create the first Owner | Yes | Partly: **Platform settings → Access and security** |
-| [`felis breakGlass`](#break-glass) | Emergency console when no Owner can sign in | Yes | None |
+| [`felis break-glass`](#break-glass) | Emergency console when no Owner can sign in | Yes | None |
 | [`felis nano setup`](#nano-setup) | Creates the Owner on Felis-nano and prints a one-time setup link | Yes | None |
 | [`felis version`](#version) | Print the version of the binary | No | None |
 | [`felis start`](#start) | Start every Felis service this host is set to start at boot, in order, and wait for the control plane | Yes | None |
@@ -38,7 +38,7 @@ On some distributions, such as the Red Hat family, `sudo` uses a `secure_path` t
 | [`felis migrate up`](#migrate) | Apply pending database migrations | Yes | Part of **Restore the database** |
 | [`felis offsite`](#offsite) | Inspect, check and fetch the off-site copy | Yes | **Maintenance & Backups → Off-site copy** |
 | [`felis restore-host`](#restore-host) | Rebuild this host from the off-site copy | Yes | **Maintenance & Backups → Off-site copy** |
-| [`felis update`](#update) | Check versions and apply a reviewed update | For `--apply` | **Maintenance & Backups → Updates** (check only) |
+| [`felis update`](#update) | Check versions and apply a reviewed update | For `--apply` | **Maintenance & Backups → Updates** (version check; update to the newer version the check found) |
 | [`felis domain`](#domain) | Check or move the root domain | Yes | **Platform settings → Access and security** |
 | [`felis rotate-token`](#rotate-token) | Replace a generated credential | Yes | **Platform settings → Access and security** |
 | [`felis converge`](#converge) | Fill in fields that older server specifications lack | Yes | **Platform settings → Access and security** |
@@ -76,13 +76,15 @@ sudo felis setup [-config path]
 
 **See also**: [The setup wizard](/en/guide/deployment#setup-wizard), [Access methods](/en/operations/access#access-methods).
 
-### felis breakGlass {#break-glass}
+### felis break-glass {#break-glass}
 
 Opens the local emergency console, which restores access when no Owner can sign in.
 
 ```bash
-sudo felis breakGlass [-config path]
+sudo felis break-glass [-config path]
 ```
+
+`felis breakGlass` is an alias of this command.
 
 The console offers four operations:
 
@@ -418,10 +420,12 @@ Checks installed and available versions; with `--apply`, installs a reviewed Fel
 ```bash
 sudo felis update [component selectors] [--version vX.Y.Z | --ref <commit-or-tag> | --dev] [--all]
 sudo felis update --apply (--version vX.Y.Z --expect-commit <sha> | --ref <sha>) [--now] [--all] [--force]
+sudo felis update --window-check
 ```
 
 - Without `--apply` the command changes nothing. It reports each component's installed and newest version and the maintenance window, resolves the Felis target, downloads and syntax-checks the target's installer, and prints the exact `--apply` command to run.
-- `--apply` checks the maintenance window, backs up the database, `/etc/felis` and the MinecraftServer specifications, checks the window again, runs the target's installer and verifies the installed binary. A failed backup stops the update with nothing applied.
+- Without `--version`, `--ref` or `--dev`, the target depends on the version the host runs: the newest stable release for a release, and the newest commit on the main branch for a development build (a version that carries a commit, such as `v0.1.0+g1a2b3c4`), in which case the check reports whether main has newer commits. See [Development channel](/en/operations/upgrade#dev-channel).
+- `--apply` first checks that the current time is inside the maintenance window when one is set, and continues at once when none is set. It then backs up the database, `/etc/felis` and the MinecraftServer specifications, checks the window again, runs the target's installer and verifies the installed binary. Outside the window it refuses and gives the window's start and end. A failed backup stops the update with nothing applied.
 - Applying updates the felis binary, felis-api, felis-operator and the embedded panel, the platform manifests, Velocity and the Felis plugins, the login space and lobby images, and the release-pinned JRE and PostgreSQL. User server images stay pinned.
 
 | Flag | Default | Description |
@@ -429,34 +433,35 @@ sudo felis update --apply (--version vX.Y.Z --expect-commit <sha> | --ref <sha>)
 | `--panel`, `--self`, `--velocity`, `--plugins`, `--k3s`, `--cloudflared`, `--jre`, `--postgres` | — | Narrow the report to these components. Applying always reconciles the whole platform bundle. |
 | `--mc` | — | Report Minecraft only. A server's Minecraft version belongs to its image. |
 | `--all` | off | Also include the release-pinned k3s and cloudflared upgrades. |
-| `--version` | newest | A published stable release, such as `v0.2.0`. |
+| `--version` | newest, on a release | A published stable release, such as `v0.2.0`. |
 | `--ref` | — | An exact commit, tag or branch, built from source. |
-| `--dev` | off | The newest `main` commit. |
+| `--dev` | on for a development build | The newest `main` commit. |
 | `--apply` | off | Apply the target. |
 | `--expect-commit` | — | With `--apply`: refuse unless the target is this full 40-character commit SHA. |
-| `--now` | off | With `--apply`: start one-off manual maintenance now instead of using the configured window. |
+| `--now` | off | With `--apply`: start one-off manual maintenance now when a set maintenance window has not opened yet. |
 | `--force` | off | Reinstall the same version, or allow a requested downgrade. It bypasses no window, backup or compatibility check. |
 | `--record` | off | Store the check for the panel's **Updates** tab. `felis-update-check.timer` runs it daily. |
 | `--check` | on | Check only. |
+| `--window-check` | off | Check only the maintenance window: exit with status 1 when a set window has not opened yet; warn and exit with status 0 when the window cannot be read. The installer runs this check before it changes an installed host. Combines with `--config` only. |
 | `--config` | `/etc/felis/felis.toml` | Host configuration for the maintenance window and the backup. |
 | `--velocity-jar` | `/opt/felis/velocity/velocity.jar` | The installed Velocity jar. |
 
 Only one of `--version`, `--ref` and `--dev` may be given. `--apply` cannot be combined with `--check` or `--record`. `FELIS_REPO_URL` names another repository and `FELIS_GITHUB_TOKEN` (a secret) gives access to a private fork; the printed apply command keeps both.
 
 ```bash
-sudo felis update                     # newest stable release; installs nothing
+sudo felis update                     # the default target; installs nothing
 sudo felis update --all               # also plan the pinned k3s and cloudflared upgrades
 sudo felis update --version v0.2.0    # inspect a named release
 sudo felis update --apply --version v0.2.0 --expect-commit <full-sha>   # as printed by the check
 ```
 
 ::: warning
-Applying may restart felis-api, the game proxy and the system servers. Run it inside the maintenance window.
+Applying may restart felis-api, the game proxy and the system servers. Run it at a quiet hour.
 :::
 
 **Root**: Required for `--apply`. Run the check with `sudo` too, so that it can read the maintenance window.
 
-**Panel**: **Maintenance & Backups → Updates** shows the component versions, the maintenance window and the command to run. Applying stays on the command line.
+**Panel**: **Maintenance & Backups → Updates** shows the component versions, the maintenance window and the command to run. When the check finds a newer Felis version, the Owner can update to it on that page; see [Updating from the panel](/en/operations/upgrade#panel-update). Choosing a target, reinstalling or downgrading (`--force`), and the k3s and cloudflared upgrades (`--all`) stay on the command line.
 
 **See also**: [Upgrading](/en/operations/upgrade#update), [Maintenance window](/en/operations/upgrade#maintenance-window), [Component versions](/en/operations/upgrade#component-versions).
 

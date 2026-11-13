@@ -82,7 +82,7 @@ During a longer outage the proxy logs `server list refresh failed ... keeping cu
 | Set up the external heartbeat, so that you hear when the whole host goes down | Once after installation | [External heartbeat](/en/operations/monitoring#heartbeat) |
 | Configure the off-site copy and keep its encryption key off the host | Once after installation | [Off-site copy](/en/operations/backup#offsite), [Encryption key](/en/operations/backup#offsite-key) |
 | Check that database backups and the off-site copy run on time | Weekly, or rely on watchdog alerts | [Database backups](/en/operations/backup#database-backups) |
-| Review available updates and apply them in a maintenance window | Monthly or per release | [Upgrading](/en/operations/upgrade#update) |
+| Review available updates and apply them, inside the maintenance window when one is set | Monthly or per release | [Upgrading](/en/operations/upgrade#update) |
 | Rehearse a host rebuild on a spare machine | Once per release | [Host rebuild](/en/operations/backup#rebuild-host) |
 | Rotate credentials when staff with host access leave | As needed | [Rotating credentials](/en/operations/access#rotate-credentials) |
 | Export audit records before they pass their retention | According to the retention | [Exporting the audit log](/en/operations/monitoring#audit-export) |
@@ -118,7 +118,8 @@ The Owner can run the host operations of day-to-day running on the operator cons
 | Rebuilding this host from the off-site copy | **Maintenance & Backups → Off-site copy** → **Rebuild from the off-site copy** | `felis restore-host` |
 | Health check | **Maintenance & Backups → Diagnostics** → **Health check** → **Run health check** | `felis doctor` |
 | Support bundle, downloaded through the browser | **Maintenance & Backups → Diagnostics** → **Support bundle** → **Create support bundle** | `felis support-bundle` |
-| Component versions; the maintenance window | **Maintenance & Backups → Updates** → **Component versions**, **Configure Maintenance Window** | `felis update` (read-only check); the maintenance window is set in the panel only |
+| Component versions; the optional maintenance window | **Maintenance & Backups → Updates** → **Component versions**, **Maintenance window (optional)** | `felis update` (read-only check); the maintenance window is set in the panel only |
+| Update Felis to the newer version the daily check found (a newer release on a release build, the newest main commit on a development build) | **Maintenance & Backups → Updates** → **Update now** | `felis update --apply` |
 | Access method: direct, own reverse proxy, Cloudflare Tunnel | **Platform settings → Access and security** → **Access and domain** → **Apply access method** | The access step of `felis setup` |
 | Checking and changing the root domain | **Platform settings → Access and security** → **Access and domain** → **Root domain**: **Check current domain**, **Change domain** | `felis domain check`, `felis domain set` |
 | Upload storage: this host or an S3-compatible bucket | **Platform settings → Access and security** → **Upload storage** → **Apply storage** | `s` on the summary screen of `felis setup` |
@@ -144,8 +145,8 @@ The panel does not offer the following:
 
 - **Installation and installer re-runs**, including the first installation on a new host and rebuilding a lost host with `FELIS_RESTORE_FROM_OFFSITE=1`. The panel exists only after installation.
 - **`felis setup`**, which creates the first Owner. Until then nobody can sign in to the panel.
-- **`felis breakGlass`**, which restores access when no Owner can sign in and therefore does not depend on the panel; see [Emergency access](/en/operations/access#break-glass).
-- **Version changes**: `felis update --apply` and installer runs for a new release. The **Updates** tab reports available versions and shows the command; applying a version replaces the programs the panel and the host service run from. See [Upgrading](/en/operations/upgrade#update).
+- **`felis break-glass`**, which restores access when no Owner can sign in and therefore does not depend on the panel; see [Emergency access](/en/operations/access#break-glass).
+- **Version changes with a chosen target, and dependency upgrades**: updating to a named release or commit (`felis update --version`, `--ref`), reinstalling the same version or downgrading (`--force`), and upgrading k3s and cloudflared (`--all`). The panel offers only the update to the newer Felis version the daily check found; see [Updating from the panel](/en/operations/upgrade#panel-update).
 - **Uninstalling**; see [Uninstall and reinstall](/en/operations/uninstall#uninstall).
 - **Commands run by service units and the installer**, such as `felis api`, `felis operator`, `felis watchdog`, `felis ha leader` and `felis ha migrate-storage`.
 - **The host operations service itself.** When `felis-node-control` is down, the panel cannot run any host task. Check and restart it on the host:

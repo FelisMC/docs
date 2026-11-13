@@ -12,20 +12,22 @@ This page is for operators. It explains how to check for and apply Felis updates
 By default `felis update` only checks; it changes nothing on the host. It reports each component's installed and available upstream version, resolves the Felis target, downloads the installer that matches the target and checks its syntax, and prints an explicit apply command.
 
 ```bash
-sudo felis update                        # check the newest stable release
+sudo felis update                        # check the default target
 sudo felis update --all                  # also plan the release-pinned k3s and cloudflared upgrades
 sudo felis update --version v0.2.0       # check a named published release
 sudo felis update --dev                  # check the newest commit on main
 sudo felis update --ref <commit-or-tag>  # check a specific source tree
 ```
 
+Without a target, the default target depends on the version the host runs: for a release it is the newest stable release; for a development build (a version that carries a commit, such as `v0.1.0+g1a2b3c4`) it is the newest commit on the main branch. See [Development channel](#dev-channel).
+
 The upstream table is advisory. Applying uses the target's mutually compatible pinned versions; it does not install each component's newest upstream release on its own. User servers' game images stay as they are. Options such as `--k3s`, `--cloudflared`, `--jre` and `--postgres` only narrow the report; applying any core component reconciles the whole platform bundle.
 
 To apply an update:
 
-1. Set a [maintenance window](#maintenance-window) in **Maintenance & Backups → Updates**.
+1. To limit when updates may start, set a [maintenance window](#maintenance-window) in **Maintenance & Backups → Updates**. The window is optional.
 2. Run the check and review the target, the full commit, the scope and the restart impact it prints.
-3. Inside the maintenance window, run the `--apply` command the check printed, exactly as printed. For a release it carries `--version <tag> --expect-commit <full SHA>`, which refuses a tag that has moved; for a source build it carries `--ref <full SHA>`.
+3. Run the `--apply` command the check printed, exactly as printed; when a maintenance window is set, run it inside the window. For a release it carries `--version <tag> --expect-commit <full SHA>`, which refuses a tag that has moved; for a source build it carries `--ref <full SHA>`.
 
 ```bash
 sudo felis update --apply --version v0.2.0 --expect-commit <full SHA>
@@ -33,7 +35,7 @@ sudo felis update --apply --version v0.2.0 --expect-commit <full SHA>
 
 The apply runs these steps and stops at the first one that fails:
 
-1. Checks the maintenance window.
+1. Checks the maintenance window. Without a window, it continues at once.
 2. Backs up the database, `/etc/felis` and every MinecraftServer resource into a `pre-migrate` database bundle. If the backup fails, nothing is changed.
 3. Checks the maintenance window again.
 4. Runs the target's installer, which reconciles the `felis` command, the API, operator and panel, the manifests and RBAC, the game plugins, the game proxy and the system server images, and streams the installer's progress. The installer's rollout checks decide whether the update succeeds.
@@ -47,7 +49,7 @@ Other options:
 An older `felis` whose `felis update -h` has no `--apply` needs one installer run to acquire this updater. On a completed installation, `sudo felis setup` opens the configuration console only; it is not an upgrade path.
 
 ::: warning
-Applying an update can restart the API, the game proxy and the system servers: the panel is briefly unavailable, and a proxy restart disconnects every player online. Apply inside the maintenance window, at a quiet hour.
+Applying an update can restart the API, the game proxy and the system servers: the panel is briefly unavailable, and a proxy restart disconnects every player online. Apply at a quiet hour.
 :::
 
 ### Restarts during an update {#restarts}
@@ -69,14 +71,14 @@ A platform upgrade does not restart running game servers. Their init containers 
 
 The Owner can update Felis from the panel directly, without logging in to the host to run `felis update --apply`.
 
-**Entry and permissions**: the entry point is **Maintenance & Backups → Updates**. When the daily version check finds a newer release for felis-api, a card titled **Update now to** followed by the target version appears below the **Component versions** card. It shows the current version, the target version and a description of the component. Only the Owner can use it; Admins do not see the card. After you select **Update now** and confirm in the dialog, identity verification is required before the update starts. While another host task is running on the host, the button is unavailable; use it once that task ends.
+**Entry and permissions**: the entry point is **Maintenance & Backups → Updates**. When the daily version check finds a newer release for felis-api, a card titled **Update now to** followed by the target version appears below the **Component versions** card. It shows the current version, the target version and a description of the component. On a development build, the same card appears when the main branch has newer commits: its title is **Update now to development build** followed by the first 7 characters of the target commit, the card shows the full target commit, and the update installs exactly that commit; see [Development channel](#dev-channel). Only the Owner can use it; Admins do not see the card. After you select **Update now** and confirm in the dialog, identity verification is required before the update starts. While another host task is running on the host, the button is unavailable; use it once that task ends.
 
 **What it does**: the update is the same as `--apply` on the command line. Felis backs up the database and the deployment state first, then runs the installer of the target version. felis-api, the game proxy and the system servers restart, and players who are online may be disconnected; see [Restarts during an update](#restarts).
 
 **Maintenance window**:
 
-- Inside the [maintenance window](#maintenance-window), the dialog asks only for confirmation.
-- Outside the window, the dialog shows “The current time is outside the maintenance window. The update starts immediately.” The update can be confirmed only after you tick **I confirm updating immediately outside the maintenance window**. This is the same as `--apply --now`, which explicitly starts one-off manual maintenance.
+- Without a [maintenance window](#maintenance-window), or inside the window, the dialog asks only for confirmation.
+- With a window set and the current time outside it, the dialog shows “The current time is outside the maintenance window. The update starts immediately.” The update can be confirmed only after you tick **I confirm updating immediately outside the maintenance window**. This is the same as `--apply --now`, which explicitly starts one-off manual maintenance.
 
 **How it runs**: the update runs in a transient systemd unit named `felis-update-<task ID>.service` on the host. It does not depend on the felis-api or node-control processes, so restarting either of them during the update does not interrupt it. Panel requests fail briefly while the update runs; the page shows “The panel is restarting. Reconnecting…” and keeps retrying. When node-control restarts, it reattaches to the same task, and the stage shows “Reconnected; waiting for the update to finish”. A task runs for at most 90 minutes; on timeout, the task is marked as failed and the update unit on the host is not stopped. If the host restarts during the update, the task ends as failed. Run `felis version` and `felis update --check` on the host to confirm the installed version before deciding whether to retry.
 
@@ -89,32 +91,36 @@ The Owner can update Felis from the panel directly, without logging in to the ho
 
 ## Maintenance window {#maintenance-window}
 
-The maintenance window decides when `felis update --apply` may run. Set it under **Maintenance & Backups → Updates** → **Configure Maintenance Window**:
+The maintenance window is optional and limits when an update may start. Without a window, `felis update --apply`, [an update from the panel](#panel-update) and an installer rerun all start as soon as they are requested; with a window, they wait until it opens; once it has ended it no longer applies. Set it under **Maintenance & Backups → Updates** → **Maintenance window (optional)**:
 
 1. Choose a **Start Time** and an **End Time**. Times are chosen and shown in your browser's local time zone; the end must be after the start.
-2. Select **Save Maintenance Window**. **Clear Maintenance Window** removes a window.
+2. Select **Save Maintenance Window**. **Clear Maintenance Window** removes a window, after which updates are no longer limited to a time span.
 
-The window's status reads **Currently Active**, **Scheduled (Future)**, **Expired (Past)** or **Unset**.
+The window's status reads **Currently Active**, **Scheduled (Future)**, **Expired (Past)** or **Unset**. An expired window no longer restricts updates.
 
 When applying, `felis update` reads the window before the backup and again before installation:
 
-- An unset, future or expired window refuses the apply.
+- Without a window, or once the window has ended, the apply goes ahead.
+- A window that has not opened yet refuses the apply, and the message gives the window's start and end.
+- When the window was open as the backup started but has closed by the time it finishes, the apply is refused.
 - `--apply --now` explicitly starts one-off manual maintenance instead of using the window.
 - A window that cannot be read is always refused, `--now` included.
 - `--force` never skips the window check.
 - The daily check (`felis update --record`) never applies anything.
 
-An installer run started by hand does not read the maintenance window; schedule such runs for a quiet hour yourself.
+When the installer is run again on an installed host, it checks the maintenance window before it changes the host: with a window set that has not opened yet, the installer stops and gives the window's start and end. Set `FELIS_IGNORE_MAINTENANCE_WINDOW=1` to run it outside the window; `felis update --apply` has already checked the window, so the installer it runs does not check again. When the window cannot be read (for example, while the database is down), the installer warns and continues, so a rerun can still repair the host. A first installation and node operations started from the panel do not check the window.
 
 ## Development channel {#dev-channel}
 
-A host installed from the development channel (`FELIS_VERSION_BOOTSTRAP=dev`) follows the main branch and builds from source. To check and apply a development version:
+A host installed from the development channel (`FELIS_VERSION_BOOTSTRAP=dev`) runs a development build, which is built from source and follows the main branch. A development build's version carries the commit it was built from, such as `v0.1.0+g1a2b3c4`. On such a host, `felis update` without a target is the same as `felis update --dev`:
 
 ```bash
-sudo felis update --dev
+sudo felis update
 ```
 
-The check prints the full SHA of the newest commit on main and an apply command with `--ref <full SHA>`, pinned to the commit you checked. `--apply --dev` resolves main again when it runs; use it only when that is what you want.
+The check reports whether main has newer commits, and prints the full SHA of the newest commit on main and an apply command with `--ref <full SHA>`, pinned to the commit you checked. `--apply` without a target (or `--apply --dev`) resolves main again when it runs; use it only when that is what you want. `--version` or `--ref` selects the named target instead.
+
+The daily check (`felis update --record`) also compares the installed commit with the newest commit on main. When main has newer commits, felis-api shows **Update available** on the **Component versions** card, with the first 7 characters of the target commit in the **Newer release** column, and the Owner can update to that commit from the panel; see [Updating from the panel](#panel-update).
 
 You can also upgrade by re-running the installer. A re-run keeps the installed root domain, but the channel must be given again; otherwise the installer installs from the default release channel:
 

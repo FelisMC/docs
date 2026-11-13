@@ -9716,7 +9716,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           description: >-
-            Not an owner (forbidden); a change to the caller's own role (self_protected); a role change on the owner account (owner_protected), which only the host's break-glass console (sudo felis breakGlass) may make; or a change to the caller's own email without a reauth in the last 5 minutes (reauth_required).
+            Not an owner (forbidden); a change to the caller's own role (self_protected); a role change on the owner account (owner_protected), which only the host's break-glass console (sudo felis break-glass) may make; or a change to the caller's own email without a reauth in the last 5 minutes (reauth_required).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -9750,7 +9750,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           description: >-
-            Not an owner (forbidden); the caller's own account (self_protected); or the owner account (owner_protected), which only the host's break-glass console (sudo felis breakGlass) may remove.
+            Not an owner (forbidden); the caller's own account (self_protected); or the owner account (owner_protected), which only the host's break-glass console (sudo felis break-glass) may remove.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

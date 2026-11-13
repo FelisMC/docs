@@ -26,7 +26,7 @@ description: 面向运维人员的全部 felis 子命令：用法、主要参数
 | 命令 | 用途 | root | 面板对应位置 |
 | --- | --- | --- | --- |
 | [`felis setup`](#setup) | 必要时安装主机，配置访问方式和上传存储，创建首位所有者 | 是 | 部分功能：「平台设置 → 访问与安全」 |
-| [`felis breakGlass`](#break-glass) | 无所有者能够登录时使用的应急控制台 | 是 | 无 |
+| [`felis break-glass`](#break-glass) | 无所有者能够登录时使用的应急控制台 | 是 | 无 |
 | [`felis nano setup`](#nano-setup) | 在 Felis-nano 上创建所有者并输出一次性初始化链接 | 是 | 无 |
 | [`felis version`](#version) | 显示二进制版本 | 否 | 无 |
 | [`felis start`](#start) | 按顺序启动本主机设为开机启动的全部 Felis 服务，并等待控制面就绪 | 是 | 无 |
@@ -38,7 +38,7 @@ description: 面向运维人员的全部 felis 子命令：用法、主要参数
 | [`felis migrate up`](#migrate) | 应用待执行的数据库迁移 | 是 | 「恢复数据库」的一部分 |
 | [`felis offsite`](#offsite) | 查看、检查和取回异地副本 | 是 | 「维护与备份 → 异地副本」 |
 | [`felis restore-host`](#restore-host) | 从异地副本重建本主机 | 是 | 「维护与备份 → 异地副本」 |
-| [`felis update`](#update) | 检查版本并应用经审阅的更新 | `--apply` 时需要 | 「维护与备份 → 版本更新」（仅检查） |
+| [`felis update`](#update) | 检查版本并应用经审阅的更新 | `--apply` 时需要 | 「维护与备份 → 版本更新」（版本检查；更新到检查发现的新版本） |
 | [`felis domain`](#domain) | 检查或迁移根域名 | 是 | 「平台设置 → 访问与安全」 |
 | [`felis rotate-token`](#rotate-token) | 替换安装器生成的凭据 | 是 | 「平台设置 → 访问与安全」 |
 | [`felis converge`](#converge) | 补全旧服务器规格缺少的字段 | 是 | 「平台设置 → 访问与安全」 |
@@ -76,13 +76,15 @@ sudo felis setup [-config path]
 
 **另见**：[设置向导](/guide/deployment#setup-wizard)、[访问方式](/operations/access#access-methods)。
 
-### felis breakGlass {#break-glass}
+### felis break-glass {#break-glass}
 
 打开本地应急控制台，在没有所有者能够登录时恢复访问。
 
 ```bash
-sudo felis breakGlass [-config path]
+sudo felis break-glass [-config path]
 ```
+
+`felis breakGlass` 是该命令的别名。
 
 控制台提供四项操作：
 
@@ -418,10 +420,12 @@ sudo felis restore-host [-yes] [-bundle name] [-take-over] [-force]
 ```bash
 sudo felis update [组件选择参数] [--version vX.Y.Z | --ref <commit-or-tag> | --dev] [--all]
 sudo felis update --apply (--version vX.Y.Z --expect-commit <sha> | --ref <sha>) [--now] [--all] [--force]
+sudo felis update --window-check
 ```
 
 - 未指定 `--apply` 时不做任何更改：报告各组件的已安装版本、最新版本和维护窗口，解析 Felis 目标版本，下载目标版本的安装器并检查语法，然后输出应执行的完整 `--apply` 命令。
-- `--apply` 先检查维护窗口，备份数据库、`/etc/felis` 和 MinecraftServer 规格，再次检查维护窗口，然后运行目标版本的安装器并校验安装后的二进制。备份失败时更新中止，不应用任何更改。
+- 未指定 `--version`、`--ref` 或 `--dev` 时，目标取决于主机运行的版本：发布版为最新稳定发布版；开发版（版本号带有提交，例如 `v0.1.0+g1a2b3c4`）为 main 分支的最新提交，此时检查报告 main 是否有新提交。见[开发通道](/operations/upgrade#dev-channel)。
+- `--apply` 在设置了维护窗口时先检查当前是否在窗口内，未设置时直接继续；随后备份数据库、`/etc/felis` 和 MinecraftServer 规格，再次检查维护窗口，然后运行目标版本的安装器并校验安装后的二进制。窗口外拒绝执行，并给出窗口的起止时间。备份失败时更新中止，不应用任何更改。
 - 应用更新的范围包括：felis 二进制、felis-api、felis-operator 和内嵌面板、平台清单、Velocity 及 Felis 插件、登录空间和大厅镜像，以及发布版固定的 JRE 和 PostgreSQL。用户服务器镜像保持固定。
 
 | 参数 | 默认值 | 说明 |
@@ -429,34 +433,35 @@ sudo felis update --apply (--version vX.Y.Z --expect-commit <sha> | --ref <sha>)
 | `--panel`、`--self`、`--velocity`、`--plugins`、`--k3s`、`--cloudflared`、`--jre`、`--postgres` | — | 仅报告这些组件。应用时总是协调整个平台组件包。 |
 | `--mc` | — | 仅报告 Minecraft。服务器的 Minecraft 版本由其镜像决定。 |
 | `--all` | 关 | 同时包含发布版固定的 k3s 和 cloudflared 升级。 |
-| `--version` | 最新 | 已发布的稳定版本，例如 `v0.2.0`。 |
+| `--version` | 发布版主机上为最新版本 | 已发布的稳定版本，例如 `v0.2.0`。 |
 | `--ref` | — | 精确的提交、标签或分支，从源码构建。 |
-| `--dev` | 关 | `main` 分支的最新提交。 |
+| `--dev` | 开发版主机上为开 | `main` 分支的最新提交。 |
 | `--apply` | 关 | 应用目标版本。 |
 | `--expect-commit` | — | 与 `--apply` 一起使用：目标不是该完整 40 位提交 SHA 时拒绝执行。 |
-| `--now` | 关 | 与 `--apply` 一起使用：立即开始一次性手动维护，而不使用已配置的维护窗口。 |
+| `--now` | 关 | 与 `--apply` 一起使用：设置的维护窗口尚未开始时，立即开始一次性手动维护。 |
 | `--force` | 关 | 重新安装相同版本，或允许明确请求的降级。不会绕过维护窗口、备份或兼容性检查。 |
 | `--record` | 关 | 保存检查结果供面板「版本更新」标签页显示。`felis-update-check.timer` 每天以此方式运行。 |
 | `--check` | 开 | 仅检查。 |
+| `--window-check` | 关 | 只检查维护窗口：设置的窗口尚未开始时以状态码 1 退出；无法读取窗口时给出警告并以 0 退出。安装器在修改已安装的主机前执行此检查。只能与 `--config` 同时使用。 |
 | `--config` | `/etc/felis/felis.toml` | 用于读取维护窗口和执行备份的主机配置。 |
 | `--velocity-jar` | `/opt/felis/velocity/velocity.jar` | 已安装的 Velocity jar。 |
 
 `--version`、`--ref` 和 `--dev` 只能指定其一。`--apply` 不能与 `--check` 或 `--record` 同时使用。`FELIS_REPO_URL` 指定其他仓库，`FELIS_GITHUB_TOKEN`（属于密钥）用于访问私有 fork；输出的应用命令会保留这两个变量。
 
 ```bash
-sudo felis update                     # 最新稳定版本；不安装任何内容
+sudo felis update                     # 默认目标；不安装任何内容
 sudo felis update --all               # 同时规划固定版本的 k3s 和 cloudflared 升级
 sudo felis update --version v0.2.0    # 查看指定发布版
 sudo felis update --apply --version v0.2.0 --expect-commit <full-sha>   # 按检查输出的命令执行
 ```
 
 ::: warning 注意
-应用更新可能重启 felis-api、游戏代理和系统服务器，应在维护窗口内执行。
+应用更新可能重启 felis-api、游戏代理和系统服务器，应在玩家较少的时段执行。
 :::
 
 **root**：`--apply` 需要。检查也应以 `sudo` 运行，以便读取维护窗口。
 
-**面板**：「维护与备份 → 版本更新」显示组件版本、维护窗口和应执行的命令。应用更新仍在命令行执行。
+**面板**：「维护与备份 → 版本更新」显示组件版本、维护窗口和应执行的命令。检查发现 Felis 的新版本时，所有者可在该页直接更新，见[在面板中更新](/operations/upgrade#panel-update)。指定目标、重新安装或降级（`--force`）以及 k3s 和 cloudflared 升级（`--all`）只能在命令行执行。
 
 **另见**：[升级](/operations/upgrade#update)、[维护窗口](/operations/upgrade#maintenance-window)、[组件版本](/operations/upgrade#component-versions)。
 

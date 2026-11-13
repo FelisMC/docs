@@ -806,7 +806,7 @@ on the **Access and domain** card in **Platform settings → Access and security
 | --- | --- | --- | --- |
 | **Owner account not initialized; sign-in unavailable** | — | No Owner exists yet | Run `sudo felis setup` on the host and open the one-time setup link it prints (see [Setup wizard](/en/guide/deployment#setup-wizard)) |
 | **The setup link is invalid or has already been used** | — | The one-time setup link expired or was used | Run `sudo felis setup` again to get a new link |
-| **Local sign-in is disabled in this deployment. Access the console through the organization's secure entry point.** | `403 local_auth_disabled` | The `local_auth_enabled` platform setting is off or missing. Creating the first Owner turns it on. While it is off, existing sessions are refused too | Run `sudo felis breakGlass` to create or recover the Owner, which turns local sign-in on (see [Emergency access](/en/operations/access#break-glass)) |
+| **Local sign-in is disabled in this deployment. Access the console through the organization's secure entry point.** | `403 local_auth_disabled` | The `local_auth_enabled` platform setting is off or missing. Creating the first Owner turns it on. While it is off, existing sessions are refused too | Run `sudo felis break-glass` to create or recover the Owner, which turns local sign-in on (see [Emergency access](/en/operations/access#break-glass)) |
 | **Sign-in requests are rate-limited. Retry after the limit resets.** | `429 rate_limited` | One client address made too many sign-in calls | Wait for the time in the `Retry-After` header. If everyone is affected at once, see [Everyone is rate-limited at once](#sign-in-rate-limited) |
 | **Mail delivery is not configured, so verification codes cannot be sent. …** | `503 mail_unavailable` | No mail relay is configured, in the panel or in the configuration file | Sign in with a passkey, or players with a bind code. Configure a relay (see [Mail relay](/en/operations/monitoring#mail-relay)) |
 | **Mail delivery is rate-limited. …** | `429 mail_rate_limited` | The installation's mail budget is spent: the **Hourly mail cap** (default 120 messages per hour) | See [mail problems](#mail-problems) |
@@ -929,7 +929,7 @@ account can approve. The request expires after a short time.
    command shows whose request it is; the administrator approves it with
    `/felis web op approve <code> <account>`, naming the account.
 2. Sign in with a passkey instead, which needs no in-game approval.
-3. If no staff account can sign in, restore access on the host with `sudo felis breakGlass`
+3. If no staff account can sign in, restore access on the host with `sudo felis break-glass`
    (see [Emergency access](/en/operations/access#break-glass)).
 
 ## Internal API and game plugins {#internal-api}
