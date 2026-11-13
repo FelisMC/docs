@@ -146,16 +146,17 @@ You can also change the location under **Platform settings → Access and securi
 
 1. At the Panel login step, the wizard creates the Owner account (passwordless) and prints a one-time setup link in the terminal. The link is valid for 30 minutes.
 2. Open the link in a browser.
-3. Enter an email address and select **Save & continue**. Mail delivery can be configured later and is not needed for initialization.
-4. Select **Create passkey** and register a passkey with a fingerprint, face recognition or device PIN. A passkey is required to complete initialization.
-5. You enter the operator console. Minecraft is not needed at any point.
+3. Complete the sign-in setup:
+   - With mail delivery configured, enter an email address, select **Send code**, enter the code from the email and select **Verify and finish**. A passkey can be added later on the **Account** page.
+   - Without mail delivery, enter an email address and select **Save & continue**, then select **Create passkey** and register a passkey with a fingerprint, face recognition or device PIN.
+4. You enter the operator console. Minecraft is not needed at any point.
 
 You can link a Minecraft profile later on the **Account** page. See [Account linking](/en/guide/players#account-linking).
 
 If the link has expired or the browser setup is unfinished, run `sudo felis setup` again for a new link; accounts that already have a sign-in method are never reset. Once the Owner exists, running `sudo felis setup` again lets you change the mail relay, the access method and upload storage. If no Owner can sign in, see [Emergency access](/en/operations/access#break-glass).
 
 ::: tip
-Passkeys are bound to the panel hostname. They cannot be used when the panel is opened by IP address; register and sign in on the configured hostname.
+Passkeys are bound to the panel hostname, and browsers create them only under a trusted certificate. When the panel is opened by IP address or with the installer's default self-signed certificate, no passkey can be created: configure mail delivery and finish setup with an email code, or serve a trusted certificate through a reverse proxy or Cloudflare Tunnel. See [Access methods](/en/operations/access#access-methods).
 :::
 
 ## Installing from downloaded release assets {#offline-install}

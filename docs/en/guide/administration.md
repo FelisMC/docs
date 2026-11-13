@@ -24,7 +24,9 @@ Every role has the Dashboard, Servers, My Submissions and Account. The Owner acc
 | Console | Address | Used by | Sign-in methods |
 | --- | --- | --- | --- |
 | Player console | `https://console.<root>` | Users | Bind code from the game, email code, passkey |
-| Operator console | `https://op.console.<root>` | Owner, Admins | Passkey, email code, operator sign-in request |
+| Operator console | `https://op.console.<root>` | Owner, Admins | Passkey; an email code when the account has no passkey; operator sign-in request |
+
+A staff account that has a passkey must sign in with it. A staff account without a passkey can sign in with a code sent to its verified email address, and every such sign-in sends a security notice to that address.
 
 An operator sign-in request works like this: on the operator console, select **Operator sign-in**, enter your email address and select **Request operator sign-in**. A code is emailed to you, and an online Admin or Owner with a linked game identity must approve the request in game with `/felis web op approve <code>`. Once it is approved, enter the code from the email to sign in.
 
