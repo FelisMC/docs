@@ -467,7 +467,7 @@ How tasks run:
 - A start, stop, restart or force stop whose goal already holds (for example, a stop or restart on a server that is already stopped) is recorded as **Skipped** when the task consists of that step alone, and is passed over in a longer task. A command step on a server that is not running records the whole run as **Skipped**.
 - The result shows as **Succeeded**, **Skipped**, **Failed** or **Missed**, with details.
 - **Run now** also works on a task that is off. It skips the players' warning, disconnects online players right away, and keeps the next scheduled run. While a run is in progress, the task cannot be edited, deleted or run again.
-- When the server changes owner, its tasks are switched off; the new owner reviews and saves them to turn them back on.
+- When the server changes owner, any run in progress ends at once as **Skipped** and its tasks are switched off; the new owner reviews and saves them to turn them back on.
 - A time the clock skips at a daylight-saving change runs an hour early; a time it repeats runs once. A time zone the host does not know runs in UTC.
 - Deleting a server deletes its tasks.
 
