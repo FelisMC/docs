@@ -169,7 +169,7 @@ curl -H "Authorization: Bearer $FELIS_API_KEY" https://console.example.com/api/v
 
 管理者状态与自己的服务器列表可返回 `extraPorts`，每项包含 `protocol`、`port`，以及确认应用后的 `nodePort` 和可用时的完整直连 `address`。`extraPortsPending` 表示尚未确认应用；未确认的外口和地址不会充作有效映射。公共状态不返回这些字段。地址使用节点对外 IP，不使用 Cloudflare Tunnel 域名。
 
-账户删除或世界释放会等待端口撤销确认；清理未完成时保留所有权，HTTP 请求可返回 `409 extra_ports_pending`，稍后可重试。使用方式见[额外 TCP 与 UDP 端口](/guide/servers#extra-ports)。
+世界释放、服务器认领、服务器分配与账户删除会清空额外端口和高级启动设置，将自动启动策略恢复为 `owner-only`，并等待端口撤销确认；清理未完成时保留原所有权，HTTP 请求可返回 `409 extra_ports_pending`，稍后可重试。使用方式见[额外 TCP 与 UDP 端口](/guide/servers#extra-ports)。
 
 ### 磁盘用量 {#server-disk-usage}
 

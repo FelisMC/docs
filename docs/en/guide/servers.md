@@ -149,7 +149,7 @@ Server owners and Admins can select **Show startup settings** under **Advanced s
 
 All advanced settings together are limited to 64 KiB, measured in UTF-8 bytes. Environment variables cannot override `FELIS_*` or reserved runtime variables such as `JAVA_MEMORY`, `JAVA_FLAGS`, `JAVA_TOOL_OPTIONS`, `RCON_PASSWORD`, `PATH` and `HOME`. Removing an item and saving removes that value; unchanged settings keep their values.
 
-Saved JVM arguments, server arguments and environment variables take effect on the next start or restart. Saving while the server is running or starting does not immediately restart it. On the next normal stop or explicit restart, stop commands are attempted over RCON in order after the world save attempt and before the process shuts down; the group has a total time limit of 30 seconds. Unavailable RCON, a command failure or a timeout does not prevent shutdown. Commands may run again after a failed attempt is retried. Force stop, emergency stop and automatic retries after a failed start skip these commands.
+Saved JVM arguments, server arguments and environment variables take effect on the next start or restart. Saving while the server is running or starting does not immediately restart it. On the next normal stop or explicit restart, stop commands are attempted over RCON in order after the world save attempt and before the process shuts down; the group has a total time limit of 30 seconds. Unavailable RCON, a command failure or a timeout does not prevent shutdown. Commands may run again after a failed attempt is retried. Force stop, emergency stop and automatic retries after a failed start skip these commands. Releasing, claiming or assigning the server clears its advanced startup settings; account migration preserves them.
 
 ### Additional TCP and UDP ports {#extra-ports}
 
@@ -313,7 +313,7 @@ The autostart policy decides who may wake a stopped or hibernated server. The se
 | Public — any player join wakes it | Any player who joins. |
 | Wake list — previous players with wake permission can start the server | The server owner, Admins, and players on the wake list who hold wake permission. |
 
-Server owners and Admins choose the policy under **Autostart policy** on the **Settings** tab. With the **Wake list** policy, a player is added to the list on their first join. The server owner or an Admin selects **Revoke** under **Player management → Wake list** to take the permission away and **Allow again** to restore it. Rejoining does not restore a revoked permission. When the server changes owner, the wake list is cleared.
+Server owners and Admins choose the policy under **Autostart policy** on the **Settings** tab. With the **Wake list** policy, a player is added to the list on their first join. The server owner or an Admin selects **Revoke** under **Player management → Wake list** to take the permission away and **Allow again** to restore it. Rejoining does not restore a revoked permission. Releasing, claiming or assigning the server clears the wake list and resets the autostart policy to **Owner only**; account migration clears the wake list and preserves the policy.
 
 A player without permission to wake the server is told in game that they cannot start it. When the platform is at its running server limit, the player is told to try again later.
 

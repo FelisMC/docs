@@ -79,7 +79,7 @@ The Owner can give a server directly to a chosen account, without the account cl
 
 Once a server and an account are selected, the dialog first shows the current owner and the change from one owner to another. For a server with no owner, it states that the server will be assigned to the chosen account.
 
-An assignment has the same effect as a claim: the server's wake list and tags are cleared, the server counts toward the new owner's quota, and the previous owner no longer owns it. A server that is being given up or deleted cannot be assigned; cancel the request first. See [Giving up and deleting servers](/en/guide/servers#retire).
+An assignment has the same effect as a claim: the server's wake list, tags, advanced startup settings and extra ports are cleared, the autostart policy resets to **Owner only**, the server counts toward the new owner's quota, and the previous owner no longer owns it. A server that is being given up or deleted cannot be assigned; cancel the request first. See [Giving up and deleting servers](/en/guide/servers#retire).
 
 Before assigning, the dialog checks the new owner's quota. If the assignment would exceed it, the dialog lists the totals after assignment and the limits in warning style, item by item, covering the number of servers, CPU, memory and storage. The Owner must tick **Assign anyway, exceeding the quota** before confirming; until then the confirm button is unavailable. No confirmation is needed when the quota is not exceeded. An excess confirmed this way is handled like a lowered quota: it restricts only the account's later creations, claims and resource changes, and existing servers are not affected. See [Quotas](#quotas).
 

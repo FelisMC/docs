@@ -169,7 +169,7 @@ Owners use `PATCH /api/v1/me/servers/{name}` and administrators use `PATCH /api/
 
 Manager status and owned server-list rows can include `extraPorts`, with `protocol`, `port`, and a confirmed external `nodePort` plus a complete direct `address` when available. `extraPortsPending` indicates that application is not yet confirmed; unconfirmed external ports and addresses are not presented as valid mappings. Public status omits these fields. Addresses use the node's external IP rather than a Cloudflare Tunnel hostname.
 
-Account deletion and world release wait for port removal to be confirmed. Incomplete cleanup retains ownership; HTTP requests can return `409 extra_ports_pending` and be retried later. See [Additional TCP and UDP ports](/en/guide/servers#extra-ports).
+World release, server claim, server assignment and account deletion clear extra ports and advanced startup settings, reset the autostart policy to `owner-only`, and wait for port removal to be confirmed. Incomplete cleanup retains the current ownership; HTTP requests can return `409 extra_ports_pending` and be retried later. See [Additional TCP and UDP ports](/en/guide/servers#extra-ports).
 
 ### Disk usage {#server-disk-usage}
 
