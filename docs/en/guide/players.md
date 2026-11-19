@@ -17,7 +17,7 @@ With the default player entry policy, joining works like this:
 
 1. The game proxy (Velocity) verifies the player's game identity: first with Mojang, then with the enabled third-party sources in order. See [Authentication sources](#auth-sources).
 2. The player enters the login space. A player without a linked panel account gets a bind code there and completes the web sign-in (see [Account linking](#account-linking)); a linked player passes straight through.
-3. If the target server is running, the player is moved there directly. If it is stopped or hibernated, Felis starts or resumes it according to its [autostart policy](/en/guide/servers#autostart); the player waits in the lobby, hears a progress line every minute, and is moved over once the server is ready.
+3. If the target server is running, the player is moved there directly. If it is stopped or hibernated, Felis starts or resumes it according to its [autostart policy](/en/guide/servers#autostart); the player waits in the login space (or the lobby when the lobby server is enabled), hears a progress line every minute, and is moved over once the server is ready.
 
 The Owner can change how players enter, for example straight to a main server or without account linking. See [Player entry policy](#entry-policy).
 
@@ -77,7 +77,7 @@ Players need no prior registration; a bind code from the game creates their acco
 1. Connect with Minecraft Java Edition. The login space opens a login book and posts the bind code and the player console link in chat.
 2. Open the link in the system browser. It is usually `https://console.<root>`; when the platform uses direct access, the link carries the panel port, for example `https://console.<root>:30443`, see [Access methods](/en/operations/access#panel-links). Do not use the in-app browser of WeChat or QQ, where passkeys do not work.
 3. Select **Sign in with Bind Code**, enter the code and select **Verify & Sign In**. Felis creates the account, links the game identity and signs you in.
-4. Return to the game. Once the login space sees the link, it sends you to the lobby.
+4. Return to the game. Once the login space sees the link, it sends you to the target server (or to the lobby when the lobby server is enabled and no server was matched).
 
 The login space waits 600 seconds by default and then disconnects; reconnect for a new bind code. Afterwards, run `/link` in game at any time for a new code to sign in with. Once you verify an email address or register a passkey on the **Account** page, you can also sign in with an email code or a passkey.
 
@@ -150,11 +150,13 @@ A saved configuration applies to the next login and role lookup without a restar
 
 The player entry policy decides where the proxy sends a player after verifying their identity, independently of game identity verification and panel account linking. The Owner configures it under **Platform settings → Player entry → Player entry policy**.
 
+On standard installations, **Use lobby server** controls whether the lobby system server runs. Saving with it enabled automatically creates or starts the lobby (about 800 MB of memory) for post-login server selection and startup waits; saving with it turned off stops the lobby, hides the **Lobby** entry mode, and handles web sign-in and startup waits in the login space (Limbo).
+
 | Entry mode | Destination after authentication |
 | --- | --- |
-| Lobby | The lobby, where the player chooses a server. |
+| Lobby | The lobby, where the player chooses a server (available when **Use lobby server** is enabled). |
 | Direct to main server | The selected **Main server**, whatever hostname the player connected with. The main server's autostart policy still decides who may start it. |
-| Route by hostname | The server matching the connection hostname. **Default destination (optional)** handles unmatched hostnames; without one, connections that require web sign-in enter the lobby and all others are refused. |
+| Route by hostname | The server matching the connection hostname. **Default destination (optional)** handles unmatched hostnames; without one, connections that require web sign-in enter the lobby when the lobby is enabled, or are told after sign-in to reconnect using a server's address when the lobby is disabled, and all others are refused. |
 
 With **Require panel account linking** on, players must complete web sign-in in the login space. With it off, game identity is still verified, and players can link a panel account separately with `/link`.
 
@@ -162,13 +164,13 @@ When the destination is offline:
 
 | Option | Behavior |
 | --- | --- |
-| Start automatically and wait | Applies the usual wake permission, maintenance, running limit and cooldown checks. Choose a running **Startup waiting space**: the login space (Limbo) or the lobby; with web sign-in required, the lobby is used. An unlinked player can start the destination only if its autostart policy permits their game identity; being the main server grants no startup right. If the start fails or times out, the player is told why, and a connection waiting in the login space is then disconnected. |
+| Start automatically and wait | Applies the usual wake permission, maintenance, running limit and cooldown checks. Choose a running **Startup waiting space**: the login space (Limbo) or the lobby; with web sign-in required, the lobby is used when enabled, otherwise the login space. An unlinked player can start the destination only if its autostart policy permits their game identity; being the main server grants no startup right. If the start fails or times out, the player is told why, and a connection waiting in the login space is then disconnected. |
 | Enter a fallback server | Sends the player to another running **Fallback server**. The proxy never starts the fallback server itself, and refuses the connection when neither destination is available. |
 | Reject with an explanation | Refuses the connection with an explanation; no waiting space is needed. |
 
-Until a policy is first saved, Felis uses the default: route by hostname, require panel account linking, start automatically and wait in the lobby.
+Until a policy is first saved, a fresh installation with the lobby left off uses the default: lobby disabled, route by hostname, require panel account linking, start automatically and wait in the login space; an installation that enabled the lobby at install time or an existing deployment keeps the lobby enabled and waits in the lobby.
 
-A platform without a lobby ([small-host profile](/en/guide/requirements#small-hosts)) offers no **Lobby** entry mode, and web sign-in and startup waits both take place in the login space: after signing in, players enter their destination server directly, and wait in the login space while it starts. With **Route by hostname** and no default destination, a connection whose hostname matches no server is told after sign-in to reconnect using a server's address. The default policy waits in the login space.
+A platform without a lobby ([small-host profile](/en/guide/requirements#small-hosts)) offers neither **Use lobby server** nor the **Lobby** entry mode, and web sign-in and startup waits always take place in the login space.
 
 ### Single-server deployment {#single-server}
 
@@ -181,7 +183,7 @@ When you run a single server, players can go straight to it:
 
 A running main server then accepts authenticated players directly, without the login space or the lobby. Game identity verification and the global blacklist still apply; the setting does not enable offline mode or change authentication sources.
 
-The proxy reads a saved policy within 15 seconds and applies it to new connections; players already online keep the policy they connected with. An unused login space or lobby keeps running until you stop it under **Login & lobby**; running `felis setup` again preserves the desired state of the system servers. The API and the game plugins must be on the same version to use this feature.
+The proxy reads a saved policy within 15 seconds and applies it to new connections; players already online keep the policy they connected with. Turning off **Use lobby server** and saving stops the lobby automatically; an unused login space can be stopped under **Login & lobby**. Running `felis setup` again preserves the desired state of the system servers. The API and the game plugins must be on the same version to use this feature.
 
 The **Startup and wake policy** card on the same tab sets the running server limit and the wake cooldown. See [Startup and wake policy](/en/guide/administration#wake-policy).
 

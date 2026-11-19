@@ -46,7 +46,7 @@ CentOS Stream 9（aarch64，启用 firewalld 且 SELinux 为 enforcing）和 Ubu
 | PostgreSQL | 约 40 MiB，另有页面缓存 |
 | **基础设施合计** | **约 1 GB** |
 
-系统服务器另计：登录空间（Limbo，Pod 限制 512 MiB，实际占用约 0.16 GB）和大厅（Paper，Pod 限制 1 GiB，实际占用约 0.7–0.85 GB）。[小内存配置](#small-hosts)不部署大厅，登录空间的 Pod 限制为 320 MiB。每台游戏服务器另需其所有者分配的内存：Pod 的 limit 等于 request，Java 堆大小据此计算。每位用户可用的内存受配额限制（见[配额](/guide/administration#quotas)）。
+系统服务器另计：登录空间（Limbo，Pod 限制 512 MiB，实际占用约 0.16 GB）和可选的正式大厅（Paper，Pod 限制 1 GiB，启用时实际占用约 0.7–0.85 GB）。全新安装默认停用正式大厅（可通过 `FELIS_WITH_LOBBY=1` 在安装时启用，或安装后在[玩家进入策略](/guide/players#entry-policy)中随时开关）；[小内存配置](#small-hosts)不部署大厅，登录空间的 Pod 限制为 320 MiB。每台游戏服务器另需其所有者分配的内存：Pod 的 limit 等于 request，Java 堆大小据此计算。每位用户可用的内存受配额限制（见[配额](/guide/administration#quotas)）。
 
 安装发布版时不在主机上构建任何内容。安装器需要在主机上构建镜像时，峰值占用来自镜像构建（Docker 及 Gradle 容器）；构建完成后安装器停止 Docker，释放的内存归还给服务器使用。没有交换空间的节点上，安装器创建与物理内存等大的 `/swapfile`（至少 2 GiB），供服务器[休眠](/guide/servers#hibernate)时存放内存；根文件系统在安装后剩余空间不足 10% 时不创建。节点已有交换空间时保持不变，交换空间小于物理内存时安装器给出提示。部分云厂商的系统镜像将 `vm.swappiness` 设为 0，此时内核在内存耗尽前不使用交换空间，主机会因反复回收页面缓存而失去响应；安装器发现交换空间已启用而该值为 0 时，将其恢复为内核默认值 60，写入 `/etc/sysctl.d/99-zz-felis-swappiness.conf` 并给出提示。
 
@@ -59,7 +59,7 @@ CentOS Stream 9（aarch64，启用 firewalld 且 SELinux 为 enforcing）和 Ubu
 | 不超过 300 | 5–10 台 | 8 vCPU | 16–32 GB | 2G |
 | 300 以上 | 更多 | 8 vCPU 以上 | 32 GB 以上 | 3G–4G |
 
-玩家数为规划估算值：Minecraft 服务器的开销主要取决于玩家行为（视距、红石、模组）。内存按以下方式估算：基础设施约 1 GB，登录空间和大厅约 1 GB（小内存配置只有登录空间，约 0.2 GB），加上预计同时运行的各服务器内存之和，再增加四分之一供页面缓存和 PostgreSQL 使用。
+玩家数为规划估算值：Minecraft 服务器的开销主要取决于玩家行为（视距、红石、模组）。内存按以下方式估算：基础设施约 1 GB，登录空间约 0.2 GB（启用正式大厅时合计约 1 GB），加上预计同时运行的各服务器内存之和，再增加四分之一供页面缓存和 PostgreSQL 使用。
 
 ### 小内存主机 {#small-hosts}
 

@@ -167,6 +167,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | --- | --- | --- |
 | `FELIS_PREFLIGHT` | `strict` | `strict` 在发现任何预检问题时停止，并列出全部问题。`warn` 只报告问题并继续安装，用于预检判断有误的主机。 |
 | `FELIS_HOST_PROFILE` | `auto` | 主机配置。`auto` 在全新安装且内存低于 3.5 GiB 时使用 `small`，之后的运行沿用已记录的配置；`small` 不部署大厅并缩小各组件内存；`standard` 为标准配置。见[小内存主机](/guide/requirements#small-hosts)。 |
+| `FELIS_WITH_LOBBY` | `auto` | 安装时是否启用正式大厅。`auto` 在全新标准安装的交互式终端上询问是否启动大厅（默认 `N`），非交互式全新安装设为 `0`，之后的运行沿用 `/etc/felis/with-lobby` 中记录的值（无记录的既有安装默认为 `1`）；`0` 将大厅创建为停止状态并在首次保存策略前默认停用大厅；`1` 在安装时启动大厅。小内存配置不支持设为 `1`。安装后可在面板[玩家进入策略](/guide/players#entry-policy)中随时更改。 |
 | `FELIS_NO_SETUP` | — | 设为 `1` 时，完整安装在输出汇总后结束。未设置时，在终端上运行且尚无所有者的安装会接着进入 `felis setup`。 |
 | `FELIS_MANAGE_TIME_SYNC` | `1` | 设为 `0` 时不管理主机时钟。默认情况下安装器启用 NTP（无其他可用方式时安装 chrony），并等待时钟同步。 |
 | `FELIS_MANAGE_JOURNAL` | `1` | 设为 `0` 时不管理 journald。默认情况下安装器将系统日志设为持久保存。 |
@@ -323,6 +324,7 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 | `[database]` | `deployment` | `felis/felis-postgres`，仅主机副本包含：`felis db` 在该 Pod 中运行 PostgreSQL 工具。 |
 | `[k8s]` | `namespace` | `minecraft`，游戏服务器所在的命名空间。 |
 | `[velocity]` | `login_image`、`lobby_image` | 登录空间和大厅的镜像（`FELIS_LIMBO_IMAGE`、`FELIS_LOBBY_IMAGE`）。`lobby_image` 为空表示平台不部署大厅。 |
+| `[velocity]` | `lobby_enabled` | 安装时未启用正式大厅（`FELIS_WITH_LOBBY=0`）时写入 `false`：`felis setup` 将缺失的 `lobby` 创建为停止状态，且在面板首次保存进入策略前默认停用大厅。省略或为 `true` 时启动 `lobby`。 |
 | `[velocity]` | `login_memory` | 登录空间的内存，Kubernetes 数量格式，为空时为 `512Mi`。小内存配置写入 `320Mi`。 |
 | `[velocity]` | `game_port` | `FELIS_GAME_PORT`。 |
 | `[velocity]` | `game_version` | 登录空间和大厅镜像构建时对应的 Minecraft Java 版版本。面板据此显示玩家所需的客户端版本；为空时显示为未知。 |
@@ -348,6 +350,7 @@ url = "https://littleskin.cn/api/yggdrasil/sessionserver/session/minecraft/hasJo
 | `host-settings.env` | 在面板中保存的安装器设置：`FELIS_DB_BACKUP_TIME`、`FELIS_DB_BACKUP_KEEP`、`FELIS_VELOCITY_XMX`。 | 面板 | — |
 | `install.env` | 之后的安装器运行与更新沿用的安装参数：`FELIS_VERSION_BOOTSTRAP`、`FELIS_GAME_PORT`、`FELIS_PANEL_NODEPORT`、`FELIS_WORLDS_HOST_PATH`。权限 0600。 | 安装器 | — |
 | `host-profile` | 主机配置（`small` 或 `standard`），供之后的安装器运行沿用。 | 安装器 | — |
+| `with-lobby` | 安装时是否启用正式大厅（`0` 或 `1`），供之后的安装器运行沿用。 | 安装器 | — |
 | `panel-tls.crt`、`panel-tls.key` | 面板的 TLS 证书和私钥。安装器签发有效期 825 天的自签名证书。 | 安装器、`felis domain set` | 私钥是 |
 | `cloudflared.yml` | Cloudflare 隧道配置。 | `felis setup` 的 Cloudflare 步骤、面板 | — |
 | `ha.env` | 主控高可用设置，供之后的安装器运行和更新沿用。 | 安装器 | — |

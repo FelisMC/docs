@@ -167,6 +167,7 @@ The installer's worker, controller-join and reconfigure modes are started by [`f
 | --- | --- | --- |
 | `FELIS_PREFLIGHT` | `strict` | `strict` stops on any preflight problem and lists them all. `warn` reports them and installs anyway, for a host the checks misjudge. |
 | `FELIS_HOST_PROFILE` | `auto` | Host profile. `auto` picks `small` for a fresh installation with less than 3.5 GiB of memory, and later runs keep the recorded profile; `small` deploys no lobby and shrinks the components' memory; `standard` is the standard profile. See [Small hosts](/en/guide/requirements#small-hosts). |
+| `FELIS_WITH_LOBBY` | `auto` | Whether to enable the lobby at install time. `auto` asks on an interactive fresh standard install whether to start the lobby (default `N`), defaults to `0` on a non-interactive fresh install, and on later runs keeps the value recorded in `/etc/felis/with-lobby` (`1` on an existing install without the file); `0` creates the lobby stopped and leaves it disabled in the default entry policy; `1` starts it at install time. Refused with `1` on the small-host profile. Can be changed at any time under [Player entry policy](/en/guide/players#entry-policy). |
 | `FELIS_NO_SETUP` | — | `1` ends a full install at its summary. Otherwise an install on a terminal that leaves no Owner continues into `felis setup`. |
 | `FELIS_MANAGE_TIME_SYNC` | `1` | `0` leaves the host's clock alone. By default the installer turns NTP on, installing chrony when nothing else can, and waits for synchronization. |
 | `FELIS_MANAGE_JOURNAL` | `1` | `0` leaves journald alone. By default the installer makes the system journal persistent. |
@@ -323,6 +324,7 @@ The installer sets these keys on every run. Change them through the installer va
 | `[database]` | `deployment` | `felis/felis-postgres`, in the host copy only: `felis db` runs the PostgreSQL tools inside that pod. |
 | `[k8s]` | `namespace` | `minecraft`, the namespace of the game servers. |
 | `[velocity]` | `login_image`, `lobby_image` | Images of the login space and the lobby (`FELIS_LIMBO_IMAGE`, `FELIS_LOBBY_IMAGE`). An empty `lobby_image` means the platform has no lobby. |
+| `[velocity]` | `lobby_enabled` | `false` when the lobby was left off at install time (`FELIS_WITH_LOBBY=0`): `felis setup` creates a missing `lobby` stopped, and the default player entry policy leaves the lobby disabled until saved in the panel. Omitted or `true` starts `lobby`. |
 | `[velocity]` | `login_memory` | Memory of the login space as a Kubernetes quantity; empty means `512Mi`. The small-host profile writes `320Mi`. |
 | `[velocity]` | `game_port` | `FELIS_GAME_PORT`. |
 | `[velocity]` | `game_version` | The Minecraft Java Edition version the login space and lobby images were built for. The panel shows the client version players need from it, and reports it as unknown when empty. |
@@ -348,6 +350,7 @@ The installer sets these keys on every run. Change them through the installer va
 | `host-settings.env` | Installer settings saved in the panel: `FELIS_DB_BACKUP_TIME`, `FELIS_DB_BACKUP_KEEP`, `FELIS_VELOCITY_XMX`. | Panel | — |
 | `install.env` | Install parameters later installer runs and updates reuse: `FELIS_VERSION_BOOTSTRAP`, `FELIS_GAME_PORT`, `FELIS_PANEL_NODEPORT`, `FELIS_WORLDS_HOST_PATH`. Mode 0600. | Installer | — |
 | `host-profile` | The host profile (`small` or `standard`), kept by later installer runs. | Installer | — |
+| `with-lobby` | Whether the lobby was enabled at install time (`0` or `1`), kept by later installer runs. | Installer | — |
 | `panel-tls.crt`, `panel-tls.key` | TLS certificate and key of the panel. The installer issues a self-signed pair valid for 825 days. | Installer, `felis domain set` | The key |
 | `cloudflared.yml` | Cloudflare tunnel configuration. | Cloudflare step of `felis setup`, panel | — |
 | `ha.env` | Controller high availability settings, kept for later installer runs and updates. | Installer | — |

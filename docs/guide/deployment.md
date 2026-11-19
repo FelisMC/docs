@@ -49,7 +49,7 @@ description: 在 Linux 主机上安装 Felis，完成设置向导并创建首位
    curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap.sh | sudo FELIS_VERSION_BOOTSTRAP=dev bash
    ```
 
-3. 安装器询问安装类型时，选择 `[1] Felis`，即完整控制面。`[2] Felis-nano` 只安装登录控制，供自行管理服务器的 Velocity 网络使用，见 [Felis-nano](/guide/nano)。
+3. 安装器询问安装类型时，选择 `[1] Felis`，即完整控制面（全新标准安装在交互式终端上还会询问是否立即启用正式大厅，默认不启用，安装后可在面板中随时更改）。`[2] Felis-nano` 只安装登录控制，供自行管理服务器的 Velocity 网络使用，见 [Felis-nano](/guide/nano)。
 4. 等待安装完成。安装器输出摘要后，在交互式终端中自动启动设置向导，见[设置向导](#setup-wizard)。
 
 `sudo` 会重置环境变量。安装变量须写在 `sudo` 与 `bash` 之间，或先执行 `export` 再使用 `sudo -E bash`：
@@ -78,6 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 | `FELIS_WORLDS_HOST_PATH` | 空 | 世界卷所在的节点目录（k3s 为 `/var/lib/rancher/k3s/storage`）。设置后启用闲置世界回收，见[世界回收](/operations/backup#world-cleanup)。记录供之后的运行沿用；显式设为空值可再次关闭回收。 |
 | `FELIS_VELOCITY_XMX` | `1G`，小内存配置为 `256M` | 游戏代理的最大堆内存，至少 `256M`。 |
 | `FELIS_HOST_PROFILE` | `auto` | 主机配置：`auto`、`small` 或 `standard`，见[小内存主机](/guide/requirements#small-hosts)。 |
+| `FELIS_WITH_LOBBY` | `auto` | 是否在安装时启用正式大厅：`auto`（全新安装默认不启用，交互式标准安装会询问；重跑时沿用已记录的选择）、`0` 或 `1`。安装后可在[玩家进入策略](/guide/players#entry-policy)中更改。 |
 | `FELIS_DB_BACKUP_TIME` | `*-*-* 03:30:00` | 数据库每日备份时间，使用 systemd 日历表达式。 |
 | `FELIS_DB_BACKUP_KEEP` | `14` | 保留的每日数据库备份份数。 |
 | `FELIS_OFFSITE_BUCKET`、`FELIS_OFFSITE_ENDPOINT` | 空 | 异地副本的存储桶与服务地址，另需 `FELIS_OFFSITE_ACCESS_KEY` 与 `FELIS_OFFSITE_SECRET_KEY`。设置后启用异地副本，见[异地副本](/operations/backup#offsite)。 |
@@ -92,7 +93,7 @@ curl -fsSL https://raw.githubusercontent.com/FelisMC/Felis/main/deploy/bootstrap
 
 - k3s 单节点集群，以及运行在其中的 PostgreSQL（`felis-postgres`，数据位于 `/var/lib/felis/postgres`）、Felis API、operator 与集群内镜像仓库。
 - 游戏代理（Velocity），以 systemd 服务 `felis-velocity` 运行在主机上，使用安装器下载的 Temurin JRE，监听游戏端口 25565。
-- 登录空间（`login`）与正式大厅（`lobby`）两个系统服务器，由设置向导创建；[小内存配置](/guide/requirements#small-hosts)只创建登录空间。
+- 登录空间（`login`）与正式大厅（`lobby`）两个系统服务器，由设置向导创建（全新安装未启用正式大厅时，`lobby` 创建为停止状态；[小内存配置](/guide/requirements#small-hosts)只创建登录空间）。
 - 主机节点操作服务 `felis-node-control.service`，供面板执行主机运维任务。
 - systemd 定时任务：数据库每日备份（`felis-db-backup.timer`）、看门狗巡检（`felis-watchdog.timer`，每 2 分钟一次）、版本检查（`felis-update-check.timer`，每天一次），以及配置后启用的异地副本同步（`felis-offsite.timer`，每小时一次）。
 - 已启用的主机防火墙（firewalld 或 ufw）中放行所需端口的规则、NTP 时间同步，以及持久化的系统日志（默认上限 1G）。
@@ -118,7 +119,7 @@ sudo felis setup
 | Mail | 配置邮件中继（SMTP）。此步骤可以跳过，见[邮件服务](#wizard-mail)。 |
 | Panel login | 创建所有者账户并生成一次性设置链接，见[创建首位所有者](#first-owner)。 |
 
-向导结束时创建登录空间与正式大厅。登录空间或大厅创建失败不影响面板初始化，可在面板中排查。
+向导结束时创建登录空间与正式大厅（安装时未启用大厅则保持停止状态）。登录空间或大厅创建失败不影响面板初始化，可在面板中排查。
 
 ### 访问方式 {#access-method}
 

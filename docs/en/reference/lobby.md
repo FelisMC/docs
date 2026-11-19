@@ -9,7 +9,7 @@ This page describes the image the Felis lobby (the system server `lobby`) runs: 
 
 ## Overview {#overview}
 
-The lobby is the always-on hub server. Its image combines Paper 26.3, the Felis lobby plugin (`felis-paper`) and LuckPerms. When `[velocity] lobby_image` in `felis.toml` names the image, `felis setup` creates the lobby as a system server: it always stays running (`DesiredState=Running`) and is exempt from idle stop and world cleanup. The installer builds the image and configures it.
+The lobby is the optional hub server. Its image combines Paper 26.3, the Felis lobby plugin (`felis-paper`) and LuckPerms. When `[velocity] lobby_image` in `felis.toml` names the image, `felis setup` creates the lobby as a system server exempt from idle stop and world cleanup: running (`DesiredState=Running`) when enabled at install time, or stopped (`DesiredState=Stopped`) when left off (`[velocity] lobby_enabled = false`), after which it can be enabled or disabled at any time under [Player entry policy](/en/guide/players#entry-policy). The installer prepares the image and configures it.
 
 The lobby provides the `/menu` server menu; see [Lobby menu](/en/reference/plugins#lobby-menu) for its behaviour.
 

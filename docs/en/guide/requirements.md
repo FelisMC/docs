@@ -46,7 +46,7 @@ Approximate memory use of an idle platform:
 | PostgreSQL | about 40 MiB, plus page cache |
 | **Infrastructure total** | **about 1 GB** |
 
-The system servers come on top: the login space (Limbo, pod limit 512 MiB, about 0.16 GB in use) and the lobby (Paper, pod limit 1 GiB, about 0.7–0.85 GB in use). The [small-host profile](#small-hosts) has no lobby and limits the login space's pod to 320 MiB. Every game server adds the memory its owner assigned to it: the pod's limit equals its request, and the Java heap is derived from it. Quotas cap the memory per user ([Quotas](/en/guide/administration#quotas)).
+The system servers come on top: the login space (Limbo, pod limit 512 MiB, about 0.16 GB in use) and the optional lobby (Paper, pod limit 1 GiB, about 0.7–0.85 GB in use when enabled). A fresh installation leaves the lobby stopped by default (enable it at install time with `FELIS_WITH_LOBBY=1`, or at any time afterwards under [Player entry policy](/en/guide/players#entry-policy)); the [small-host profile](#small-hosts) has no lobby and limits the login space's pod to 320 MiB. Every game server adds the memory its owner assigned to it: the pod's limit equals its request, and the Java heap is derived from it. Quotas cap the memory per user ([Quotas](/en/guide/administration#quotas)).
 
 A release installation builds nothing on the host. When the installer does build images on the host, its peak is the image builds (Docker and a Gradle container); afterwards it stops Docker, so that memory returns to the servers. On a node without swap, the installer creates a `/swapfile` as large as physical memory (at least 2 GiB) to hold the memory of [hibernated](/en/guide/servers#hibernate) servers; it skips the file when the root filesystem would have less than 10% free after the installation. Existing swap is left as it is, and the installer warns when it is smaller than physical memory. Some cloud images set `vm.swappiness` to 0, which keeps the kernel from swapping until memory runs out, so the host stalls reclaiming its page cache; when swap is active and the value is 0, the installer restores the kernel default of 60, writes it to `/etc/sysctl.d/99-zz-felis-swappiness.conf` and reports the change.
 
@@ -59,7 +59,7 @@ A release installation builds nothing on the host. When the installer does build
 | up to 300 | 5–10 | 8 vCPU | 16–32 GB | 2G |
 | over 300 | more | 8+ vCPU | 32 GB or more | 3G–4G |
 
-The player counts are planning figures: a Minecraft server's cost depends mostly on what its players do (view distance, redstone, mods). Size RAM as follows: about 1 GB for the infrastructure, about 1 GB for the login space and lobby (about 0.2 GB for the login space alone on the small-host profile), plus the sum of the servers expected to run at the same time, then add a quarter for the page cache and PostgreSQL.
+The player counts are planning figures: a Minecraft server's cost depends mostly on what its players do (view distance, redstone, mods). Size RAM as follows: about 1 GB for the infrastructure, about 0.2 GB for the login space (about 1 GB together with the lobby when enabled), plus the sum of the servers expected to run at the same time, then add a quarter for the page cache and PostgreSQL.
 
 ### Small hosts {#small-hosts}
 

@@ -9,7 +9,7 @@ description: Felis 正式大厅镜像的作用、默认行为、在面板中的�
 
 ## 概览 {#overview}
 
-正式大厅是常驻的中转服务器，镜像由 Paper 26.3、Felis 大厅插件（`felis-paper`）和 LuckPerms 组成。`felis.toml` 的 `[velocity] lobby_image` 指定镜像后，`felis setup` 把它创建为系统服：始终保持运行（`DesiredState=Running`），不参与空闲停服和世界清理。安装器会构建该镜像并完成配置。
+正式大厅是可选的中转服务器，镜像由 Paper 26.3、Felis 大厅插件（`felis-paper`）和 LuckPerms 组成。`felis.toml` 的 `[velocity] lobby_image` 指定镜像后，`felis setup` 把它创建为系统服，不参与空闲停服和世界清理：安装时启用大厅则处于运行状态（`DesiredState=Running`），未启用（`[velocity] lobby_enabled = false`）则创建为停止状态（`DesiredState=Stopped`），之后可在面板[玩家进入策略](/guide/players#entry-policy)中随时启用或停用。安装器会准备该镜像并完成配置。
 
 大厅提供 `/menu` 服务器菜单，菜单的行为见[大厅菜单](/reference/plugins#lobby-menu)。
 
