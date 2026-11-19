@@ -66,7 +66,7 @@ Select **Details** in the user list to:
 - **Danger Zone**:
   - **Disable User** prevents sign-in and revokes every session at once; **Enable User** allows sign-in again.
   - **Unbind passkeys** removes every passkey of the account, for lost or compromised authenticators; other sign-in methods, including email codes and in-game approval, remain available.
-  - **Delete User** soft-deletes the account: its servers are released, every session is revoked, and the account is permanently disabled. This cannot be undone in the panel.
+  - **Delete User** soft-deletes the account: its servers stop and enter release retirement (their worlds are archived and removed before the servers are released), every session is revoked, and the account is permanently disabled. This cannot be undone in the panel.
 
 The signed-in account cannot change its own role, disable itself or delete itself.
 
